@@ -5,8 +5,8 @@ clickable, numbered 2D plan of the building. Every room, wall, door, window and 
 pins, tasks, status and (later) quotes and client updates hang off.
 
 This repo is Phase 1: contractor accounts and company setup, jobs and the all-jobs view, the plan reader,
-the game-style job map (whole site → outside → floor → room → wall, with things on each wall drawn from the front), pins and quick notes anywhere on it, and per-job stages
-from company templates.
+the game-style job map (whole site → outside → floor → room → wall, with things on each wall drawn from the front), pins and quick notes anywhere on it, the team (owner and admins, employees as editors) with staff
+tagging on pins, and per-job stages from company templates.
 
 ```
 agent/      Python plan reader: DWG/DXF/PDF/photo -> structured plan JSON, plus the test runner and worker
@@ -43,7 +43,8 @@ cd web && npm install && npm run dev      # http://localhost:3000, click "Open t
 ```
 
 The demo signs you in to "Demo Builders" with the house.dwg job already read. Signing up instead gives
-an empty company so onboarding can be tried.
+an empty company so onboarding can be tried. To see the employee view, sign in as
+`marco@demobuilders.test` after opening the demo once: he is on the demo team as an employee.
 
 Set `ANTHROPIC_API_KEY` to turn on the full plan reader. Without it, AutoCAD files are read from their
 geometry alone (rooms, walls, doors, windows and named blocks), answers are applied by rules, and PDFs
