@@ -1,0 +1,180 @@
+{
+ "name": "house",
+ "description": "Two-storey house, AutoCAD 2007 DWG. Ground truth from the reviewed House Explorer prototype (2026-10-25).",
+ "floors": [
+  {
+   "name": "Ground floor",
+   "rooms": [
+    {
+     "name": "Family room",
+     "type": "family",
+     "area_m2": 26.8,
+     "fixtures": [
+      "sofa",
+      "fireplace"
+     ]
+    },
+    {
+     "name": "Kitchen",
+     "type": "kitchen",
+     "area_m2": 8.8,
+     "fixtures": [
+      "base_cabinet",
+      "cooktop",
+      "kitchen_sink",
+      "dishwasher",
+      "tall_cabinet"
+     ]
+    },
+    {
+     "name": "Foyer",
+     "type": "foyer",
+     "area_m2": 26.0,
+     "fixtures": [
+      "wardrobe"
+     ]
+    },
+    {
+     "name": "Dining room",
+     "type": "dining",
+     "area_m2": 12.8,
+     "fixtures": [
+      "dining_table"
+     ]
+    },
+    {
+     "name": "Study",
+     "type": "study",
+     "area_m2": 9.7,
+     "fixtures": [
+      "desk"
+     ]
+    },
+    {
+     "name": "Garage",
+     "type": "garage",
+     "area_m2": 29.4,
+     "fixtures": [
+      "car"
+     ]
+    },
+    {
+     "name": "Lobby",
+     "type": "hallway",
+     "area_m2": 0.7,
+     "fixtures": []
+    },
+    {
+     "name": "Lavatory",
+     "type": "wc",
+     "area_m2": 2.8,
+     "fixtures": [
+      "washbasin",
+      "toilet",
+      "shower"
+     ]
+    },
+    {
+     "name": "Living room",
+     "type": "living",
+     "area_m2": 11.3,
+     "fixtures": [
+      "sofa",
+      "tv"
+     ]
+    },
+    {
+     "name": "Laundry",
+     "type": "laundry",
+     "area_m2": 1.2,
+     "fixtures": [
+      "washing_machine"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Level 1",
+   "rooms": [
+    {
+     "name": "Bathroom",
+     "type": "bathroom",
+     "area_m2": 3.8,
+     "fixtures": [
+      "washbasin",
+      "toilet"
+     ]
+    },
+    {
+     "name": "Stair hall",
+     "type": "stair_hall",
+     "area_m2": 22.8,
+     "fixtures": [
+      "sofa"
+     ]
+    },
+    {
+     "name": "Bathroom",
+     "type": "bathroom",
+     "area_m2": 4.4,
+     "fixtures": [
+      "washbasin",
+      "toilet",
+      "shower",
+      "bathtub"
+     ]
+    },
+    {
+     "name": "Master bedroom",
+     "type": "bedroom",
+     "area_m2": 26.8,
+     "fixtures": [
+      "bed",
+      "sofa",
+      "desk"
+     ]
+    },
+    {
+     "name": "Bedroom",
+     "type": "bedroom",
+     "area_m2": 12.8,
+     "fixtures": [
+      "bed",
+      "desk"
+     ]
+    },
+    {
+     "name": "Bedroom",
+     "type": "bedroom",
+     "area_m2": 12.7,
+     "fixtures": [
+      "wardrobe",
+      "bed",
+      "desk"
+     ]
+    },
+    {
+     "name": "Bedroom",
+     "type": "bedroom",
+     "area_m2": 13.6,
+     "fixtures": [
+      "bed"
+     ]
+    },
+    {
+     "name": "Walk-in closet",
+     "type": "closet",
+     "area_m2": 2.4,
+     "fixtures": []
+    },
+    {
+     "name": "Hallway",
+     "type": "hallway",
+     "area_m2": 2.3,
+     "fixtures": []
+    }
+   ]
+  }
+ ],
+ "notes": "Master bedroom is one room in the reviewed prototype (the drawing's '27' area covers both halves); a plan that keeps two rooms should ask about it."
+}

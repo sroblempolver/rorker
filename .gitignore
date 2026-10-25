@@ -1,0 +1,9 @@
+node_modules/
+.next/
+.env*
+!.env.example
+.data/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+agent/tests/results/
