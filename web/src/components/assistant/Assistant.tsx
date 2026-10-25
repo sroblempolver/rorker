@@ -95,7 +95,7 @@ export function Assistant({ send, context, onChanged, open, setOpen, wide }: { s
             {dict.listening && <p className="text-[13.5px] text-accent">Listening… {dict.interim && <span className="text-text">“{dict.interim}”</span>}</p>}
             {busy && <p className="text-[13px] text-muted inline-flex items-center gap-2"><span className="dot bg-accent animate-pulse" />Working on it… <button className="underline" onClick={() => ctl.current?.abort()}>Stop</button></p>}
             {(err || dict.error) && <p className="text-[12.5px] text-amber">{err ?? dict.error}</p>}
-            {blockedNote && !dict.error && <p className="text-[12.5px] text-amber">The mic is blocked here because this preview runs inside a frame on the page; the browser won&apos;t give it the microphone, whatever your settings say. It works in the full app. Type below for now.</p>}
+            {blockedNote && !dict.error && <p className="text-[12.5px] text-amber">The mic is blocked here because this preview runs inside a frame on the page; the browser won&apos;t give it the microphone, whatever your settings say. Open the preview at sroblempolver.github.io/rorker to talk, or type below.</p>}
           </div>
           {typing && (
             <form className="border-t border-line p-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); void ask(text); }}>

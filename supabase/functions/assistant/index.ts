@@ -1,11 +1,12 @@
 // The Rorker assistant for the hosted preview. The page runs the tools itself on its sample job and
 // sends each round here; this function adds the assistant's own instructions and tool list (the same
 // ones the app uses, from core.js) and asks the model what to do next. The API key is a Supabase
-// secret (ANTHROPIC_API_KEY) and never reaches the page. Only Rorker's own instructions and tools are
+// secret (ANTHROPIC_API_KEY, or ANTHROPIC_API_KEY_rorker) and never reaches the page. Only Rorker's own instructions and tools are
 // ever sent, so it can't be used as a general chatbot.
 import Anthropic from "npm:@anthropic-ai/sdk@1.3.0";
 import { instructions, TOOLS } from "./core.js";
 
+const API_KEY = () => Deno.env.get("ANTHROPIC_API_KEY") || Deno.env.get("ANTHROPIC_API_KEY_rorker");
 const MODEL = Deno.env.get("RORKER_ASSISTANT_MODEL") || "claude-opus-5-5";
 const MAX_BODY = 400_000;
 const MAX_MESSAGES = 40;
@@ -42,7 +43,7 @@ Deno.serve(async (req) => {
 
   const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
   if (limited(ip)) return json({ error: "Too many questions at once. Give it a minute." }, 429);
-  if (!Deno.env.get("ANTHROPIC_API_KEY")) return json({ error: "The assistant isn't switched on yet." }, 503);
+  if (!API_KEY()) return json({ error: "The assistant isn't switched on yet." }, 503);
 
   const raw = await req.text();
   if (raw.length > MAX_BODY) return json({ error: "That's too much at once. Start a new question." }, 413);
@@ -57,7 +58,7 @@ Deno.serve(async (req) => {
   const ctx = { jobId: str(c.jobId, 80), jobName: str(c.jobName, 120), where: str(c.where, 200), selected: str(c.selected, 200) };
 
   try {
-    const res = await new Anthropic().messages.create({
+    const res = await new Anthropic({ apiKey: API_KEY() }).messages.create({
       model: MODEL, max_tokens: 4000, thinking: { type: "adaptive" },
       system: instructions(me, ctx), tools: TOOLS as Anthropic.Tool[], messages,
     });
