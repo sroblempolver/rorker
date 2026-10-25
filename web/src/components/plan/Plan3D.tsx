@@ -23,7 +23,8 @@ import type { Controls, PinTarget, ScreenPoint } from "./target";
 
 const S = 0.001;
 
-export type WallMode = "full" | "low";
+/** how much of the walls to draw: all of them, waist height, or none (to see what's inside) */
+export type WallMode = "full" | "low" | "none";
 
 interface Props {
   plan: Plan;
@@ -40,6 +41,8 @@ interface Props {
   pinMode: boolean;
   draft: PinTarget | null;
   wallMode: WallMode;
+  /** leave out the objects and wall items: just the rooms, walls and floors */
+  empty?: boolean;
   controls: Controls;
   onSelect: (id: string | null) => void;
   onSelectPin: (id: string) => void;
@@ -149,7 +152,8 @@ function buildScene(p: Props, mt: Materials): Built {
     const fi = floorsAll.indexOf(fl);
     const base = p.mode === "building" ? fl.elevation_mm || fi * (p.plan.building.exterior.storey_height_mm || 3000) : 0;
     const H = fl.height_mm || 2700;
-    const wallH = p.mode === "floor" && p.wallMode === "low" ? 1100 : H;
+    const wallH = p.wallMode === "low" ? 1100 : H;
+    const walls = p.wallMode !== "none";
     floorsMeta.push({ id: fl.id, y0: base * S, y1: (base + H) * S });
     const g = new THREE.Group();
     g.position.y = base * S;
@@ -170,7 +174,7 @@ function buildScene(p: Props, mt: Materials): Built {
         const b = floorBBox(fl);
         fades.push({ mats: [m], centre: new THREE.Vector3(((b[0] + b[2]) / 2) * S, base * S, ((b[1] + b[3]) / 2) * S), floorIndex: fi, role: "slab" });
         // a flat roof over this floor wherever the floor above doesn't cover it (a garage, a porch)
-        if (fi < floorsAll.length - 1) {
+        if (fi < floorsAll.length - 1 && p.wallMode === "full") {
           const rm = wallMaterial("#4a4844");
           const roofSlab = new THREE.Mesh(extrude(ring, H, H + 160), rm);
           roofSlab.castShadow = true;
@@ -198,7 +202,7 @@ function buildScene(p: Props, mt: Materials): Built {
     }
 
     // walls
-    for (const w of fl.walls) {
+    for (const w of walls ? fl.walls : []) {
       const color = statusTint(w.id, w.exterior && p.mode === "building" ? "#d6ccb9" : "#efe8da");
       const m = wallMaterial(color);
       const mesh = new THREE.Mesh(extrude(w.polygon, 0, wallH), m);
@@ -210,7 +214,7 @@ function buildScene(p: Props, mt: Materials): Built {
     }
 
     // doors and windows: header above, sill below, glass in a window
-    for (const o of fl.openings) {
+    for (const o of walls ? fl.openings : []) {
       const og = new THREE.Group();
       const m = wallMaterial(statusTint(o.id, o.exterior && p.mode === "building" ? "#d6ccb9" : "#efe8da"));
       const top = openTop(o), bot = openBottom(o);
@@ -257,7 +261,7 @@ function buildScene(p: Props, mt: Materials): Built {
     // each storey gets its own materials in the building, so the floors above can fade on their own
     const fm = prog ? null : p.mode === "building" ? new Materials() : mt;
     if (fm && fm !== mt) g.userData.ownMaterials = fm;
-    for (const f of fl.fixtures) {
+    for (const f of p.empty ? [] : fl.fixtures) {
       if (HIDDEN_KINDS.has(f.kind)) continue;
       const tintMt = prog ? new Materials(p.states.get(f.id) ? STATUS_COLOR[p.states.get(f.id)!] : "#77736a") : fm!;
       const o = fixtureObject(f, tintMt, 0);
@@ -270,7 +274,7 @@ function buildScene(p: Props, mt: Materials): Built {
     // things on the walls: outlets, switches, lights
     const sides = new Map<string, WallSide>();
     for (const r of fl.rooms) for (const s of roomSides(fl, r)) sides.set(s.key, s);
-    for (const it of p.items) {
+    for (const it of p.empty ? [] : p.items) {
       const side = sides.get(it.side);
       if (!side) continue;
       const [w, h] = ITEM_SIZE[it.kind];
@@ -317,7 +321,7 @@ function buildScene(p: Props, mt: Materials): Built {
 
   // roof over the top floor, in the shape the reader guessed (gable, hip or flat). A top floor that
   // isn't close to a rectangle gets a flat roof that follows its outline instead of a box over the air.
-  if (p.mode === "building" && floorsAll.length) {
+  if (p.mode === "building" && floorsAll.length && p.wallMode === "full") {
     const top = floorsAll[floorsAll.length - 1];
     const ti = floorsAll.length - 1;
     const b = floorBBox(top);
@@ -557,7 +561,7 @@ export function Plan3D(p: Props) {
   }
 
   // (re)build the model when the job changes
-  const key = useMemo(() => ({}), [p.plan, p.mode, p.floor, p.room, p.items, p.pins, p.states, p.colorMode, p.wallMode, p.draft, p.selectedPin, p.selectedItem]); // eslint-disable-line react-hooks/exhaustive-deps
+  const key = useMemo(() => ({}), [p.plan, p.mode, p.floor, p.room, p.items, p.pins, p.states, p.colorMode, p.wallMode, p.empty, p.draft, p.selectedPin, p.selectedItem]); // eslint-disable-line react-hooks/exhaustive-deps
   const framed = useRef<string>("");
   useEffect(() => {
     const t = three.current;

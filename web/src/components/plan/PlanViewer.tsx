@@ -71,6 +71,7 @@ export function PlanViewer(p: Props) {
   const ctl = useRef<{ zoomBy: (f: number) => void; home: () => void } | null>(null);
   const [showItems, setShowItems] = useState(false);
   const [wallMode, setWallMode] = useState<WallMode>("full");
+  const [empty, setEmpty] = useState(false);
   const [gl, setGl] = useState(true);
   useEffect(() => setGl(webglAvailable()), []);
   // a room always opens as its own top view, where every wall and object is a click away
@@ -131,7 +132,7 @@ export function PlanViewer(p: Props) {
       )}
       {in3d && (
         <Plan3D plan={plan} mode={level.kind === "exterior" ? "building" : "floor"} floor={floor} room={room} selected={p.selected} selectedPin={p.selectedPin} selectedItem={p.selectedItem}
-          states={p.states} colorMode={p.colorMode} pins={p.pins} items={p.items} pinMode={p.pinMode} draft={p.draft} wallMode={wallMode} controls={controls}
+          states={p.states} colorMode={p.colorMode} pins={p.pins} items={p.items} pinMode={p.pinMode} draft={p.draft} wallMode={wallMode} empty={empty} controls={controls}
           onSelect={(id) => { const r = floor && id ? floor.rooms.find((x) => x.id === id) : null; if (r && floor) p.setLevel({ kind: "room", floorId: floor.id, roomId: r.id }); p.onSelect(id); }}
           onSelectPin={p.onSelectPin} onSelectItem={p.onSelectItem} onPlacePin={p.onPlacePin}
           onMoveFixture={(id, dx, dy) => p.onMoveFixture(id, dx, dy, 0)} onMoveItem={p.onMoveItem} onMovePin={p.onMovePin}
@@ -216,11 +217,16 @@ export function PlanViewer(p: Props) {
             ))}
           </div>
         </div>
-        {in3d && level.kind !== "exterior" && (
-          <div className={`flex rounded-[4px] overflow-hidden ${glass}`} role="group" aria-label="Wall height">
-            {(["full", "low"] as const).map((m) => (
-              <button key={m} onClick={() => setWallMode(m)} aria-pressed={wallMode === m} className={`h-7 px-2.5 text-[12px] font-display font-bold tracking-[0.08em] uppercase ${wallMode === m ? "bg-panel-3 text-text" : "text-muted hover:text-text"}`}>{m === "full" ? "Full walls" : "Low walls"}</button>
-            ))}
+        {in3d && (
+          <div className="flex gap-1.5">
+            <div className={`flex rounded-[4px] overflow-hidden ${glass}`} role="group" aria-label="Walls">
+              {(["full", "low", "none"] as const).map((m) => (
+                <button key={m} onClick={() => setWallMode(m)} aria-pressed={wallMode === m} title={m === "none" ? "Hide the walls to see everything inside" : undefined}
+                  className={`h-7 px-2.5 text-[12px] font-display font-bold tracking-[0.08em] uppercase ${wallMode === m ? "bg-panel-3 text-text" : "text-muted hover:text-text"}`}>{m === "full" ? "Walls" : m === "low" ? "Low walls" : "No walls"}</button>
+              ))}
+            </div>
+            <button onClick={() => setEmpty(!empty)} aria-pressed={empty} title="Hide the cabinets, appliances, furniture and wall items: just the rooms"
+              className={`h-7 px-2.5 rounded-[4px] text-[12px] font-display font-bold tracking-[0.08em] uppercase ${glass} ${empty ? "!border-accent text-text" : "text-muted hover:text-text"}`}>Empty rooms</button>
           </div>
         )}
         {!in3d && (level.kind === "floor" || level.kind === "room") && p.items.length > 0 && (
