@@ -1,5 +1,5 @@
 // Standalone, clickable preview of the Rorker app on the house.dwg sample. Same screens as the real app;
-// data lives in memory, so nothing is saved and plan uploads are switched off.
+// data lives in memory, so nothing is saved. New project reads a drawing with the Rorker assistant.
 import { StrictMode, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import housePlan from "@/demo/house-plan.json";
@@ -15,6 +15,7 @@ import type { Plan } from "@/lib/plan/types";
 import { previewAsk } from "./assistant";
 import { SharedJob } from "@/components/share/SharedJob";
 import { newToken, shareView } from "@/lib/share";
+import { NewProject, type NewProjectResult } from "@/components/newjob/NewProject";
 
 const now = () => new Date().toISOString();
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -96,7 +97,7 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
       d.stages = next;
       return renumber();
     },
-    async uploadPlan() { throw new Error("This preview runs on the sample house. Uploading a drawing works in the full app."); },
+    async uploadPlan() { throw new Error("In the preview, start a New project from your drawing instead."); },
     async answer(_id, answers) {
       const p = d.plan!;
       const data = structuredClone(p.data);
@@ -139,41 +140,80 @@ function teamApi(d: WorkspaceData): TeamApi {
 }
 
 function summary(d: WorkspaceData): JobSummary {
-  const g = d.plan!.data.floors.find((f) => f.level === 0)!;
+  const plan = d.plan?.data;
+  const g = plan ? plan.floors.find((f) => f.level === 0) ?? plan.floors[0] : null;
   return {
     ...d.job, open_pins: d.pins.filter((p) => p.status !== "done").length, stages_done: d.stages.filter((s) => s.status === "done").length,
     stages_total: d.stages.length, current_stage: d.stages.find((s) => s.status === "active")?.name ?? null,
-    footprint: g.footprint, floors: d.plan!.data.floors.length, size_mm: d.plan!.data.building.size_mm, run_status: "needs_answers",
+    footprint: g?.footprint ?? null, floors: plan?.floors.length ?? 0, size_mm: plan?.building.size_mm ?? null, run_status: d.runs[0]?.status ?? null,
   };
 }
 
+/** A job made by the New project assistant, on the same team as the sample job. */
+function fromAssistant(r: NewProjectResult, team: Member[]): WorkspaceData {
+  const jobId = uid();
+  const tpl = DEFAULT_TEMPLATES.find((t) => t.job_type === r.job.job_type) ?? DEFAULT_TEMPLATES[0];
+  const planRow: PlanRow | null = r.plan ? { id: uid(), job_id: jobId, version: 1, data: r.plan, created_at: now() } : null;
+  return {
+    job: { id: jobId, company_id: "demo", ...r.job, status: "active", current_plan_id: planRow?.id ?? null, created_at: now() },
+    plan: planRow, stages: tpl.stages.map((s, i) => ({ id: uid(), job_id: jobId, position: i + 1, name: s.name, description: null, status: "not_started", started_at: null, completed_at: null })),
+    pins: [], states: [], edits: {}, can3d: true, items: [],
+    runs: planRow ? [{ id: uid(), job_id: jobId, kind: "read", file_name: r.plan!.source.filename || "Your files", status: r.plan!.questions.length ? "needs_answers" : "done", error: null, plan_id: planRow.id, created_at: now(), finished_at: now(), metrics: {} }] : [],
+    members: team, me: "m0", aiAvailable: false, canShare: true,
+  };
+}
+
+type Page = "jobs" | "job" | "team" | "shared" | "new";
+
 function App() {
-  const [page, setPage] = useState<"jobs" | "job" | "team" | "shared">("job");
+  const [page, setPage] = useState<Page>("job");
   const [shareToken, setShareToken] = useState<string | null>(null);
-  const data = useMemo(seed, []);
+  const sample = useMemo(seed, []);
+  const [jobs, setJobs] = useState<WorkspaceData[]>(() => [sample]);
+  const [activeId, setActiveId] = useState(sample.job.id);
+  const active = jobs.find((j) => j.job.id === activeId) ?? jobs[0];
   // the assistant changes the job behind the screen's back: hand the workspace a fresh copy after
-  const [current, setCurrent] = useState(data);
-  const api = useMemo(() => { const a = memoryApi(data); return { ...a, ask: previewAsk(data, a), afterAssistant: () => setCurrent({ ...data }), openShare: (t: string) => { setShareToken(t); setPage("shared"); } }; }, [data]);
-  const team = useMemo(() => teamApi(data), [data]);
+  const [ver, setVer] = useState(0);
+  const current = useMemo(() => ({ ...active }), [active, ver]); // eslint-disable-line react-hooks/exhaustive-deps
+  const api = useMemo(() => {
+    const a = memoryApi(active);
+    return { ...a, ask: previewAsk(active, a), afterAssistant: () => setVer((n) => n + 1), openShare: (t: string) => { setShareToken(t); setPage("shared"); } };
+  }, [active]);
+  const team = useMemo(() => teamApi(sample), [sample]);
   const [, bump] = useState(0);
   useEffect(() => {
-    const go = (e: Event) => { const href = (e as CustomEvent<string>).detail; setPage(href.startsWith("/jobs/") && href !== "/jobs/new" ? "job" : "jobs"); bump((n) => n + 1); };
+    const go = (e: Event) => {
+      const href = (e as CustomEvent<string>).detail;
+      if (href === "/jobs/new") setPage("new");
+      else if (href.startsWith("/jobs/")) { setActiveId(href.split("/")[2]); setPage("job"); }
+      else setPage("jobs");
+      bump((n) => n + 1);
+    };
     window.addEventListener("preview-nav", go);
     return () => window.removeEventListener("preview-nav", go);
   }, []);
+  const created = (r: NewProjectResult) => {
+    const d = fromAssistant(r, sample.members);
+    setJobs((js) => [d, ...js]);
+    setActiveId(d.job.id);
+    setPage("job");
+  };
+  const tab = (p: Page, label: string) => (
+    <button onClick={() => setPage(p)} className={`px-3 h-9 rounded-[3px] font-display text-[15px] font-bold tracking-[0.1em] uppercase ${page === p ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</button>
+  );
   return (
     <div className="h-full flex flex-col">
       <header className="h-14 shrink-0 border-b border-line bg-panel flex items-center gap-4 px-4">
         <button onClick={() => setPage("jobs")} aria-label="All jobs"><Logo size={20} /></button>
-        <nav className="flex items-center gap-1 ml-2">
-          <button onClick={() => setPage("jobs")} className={`px-3 h-9 rounded-[3px] font-display text-[15px] font-bold tracking-[0.1em] uppercase ${page === "jobs" ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>Jobs</button>
-          <button onClick={() => setPage("team")} className={`px-3 h-9 rounded-[3px] font-display text-[15px] font-bold tracking-[0.1em] uppercase ${page === "team" ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>Team</button>
-        </nav>
-        <span className="chip ml-auto"><span className="sm:hidden">Preview</span><span className="hidden sm:inline">Preview · sample data, nothing is saved</span></span>
+        <nav className="flex items-center gap-1 ml-2">{tab("jobs", "Jobs")}{tab("team", "Team")}</nav>
+        <button onClick={() => setPage("new")} className={`btn btn-sm ${page === "new" ? "btn-ghost" : "btn-primary"} ml-auto`}>+ New project</button>
+        <span className="chip hidden md:inline-flex"><span>Preview · sample data, nothing is saved</span></span>
       </header>
-      {page === "shared" && shareToken ? (
+      {page === "new" ? (
+        <NewProject onCreate={created} onCancel={() => setPage("jobs")} />
+      ) : page === "shared" && shareToken ? (
         <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">
-          {(() => { const v = sharedView(data, shareToken); return v ? <SharedJob view={v} onBack={() => setPage("job")} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
+          {(() => { const v = sharedView(active, shareToken); return v ? <SharedJob view={v} onBack={() => setPage("job")} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
         </div>
       ) : page === "team" ? (
         <div className="flex-1 overflow-y-auto">
@@ -181,21 +221,24 @@ function App() {
             <p className="eyebrow">Demo Builders</p>
             <h1 className="font-display text-[34px] font-extrabold uppercase leading-none tracking-[0.01em] mb-1">Team</h1>
             <p className="text-muted mb-6">Everyone who works your jobs. Tag them on any pin so they know where to go and what to do.</p>
-            <TeamManager initial={data.members} canManage meId="m0" api={team} />
+            <TeamManager initial={sample.members} canManage meId="m0" api={team} />
           </div>
         </div>
       ) : page === "jobs" ? (
         <div className="flex-1 overflow-y-auto">
-          <div className="px-4 sm:px-6 pt-6 pb-4">
-            <p className="eyebrow">All jobs</p>
-            <h1 className="font-display text-[34px] font-extrabold uppercase leading-none tracking-[0.01em]">1 active job</h1>
-            <p className="text-muted text-sm">Click the building to go inside. In the full app every job you run shows up here.</p>
+          <div className="px-4 sm:px-6 pt-6 pb-4 flex flex-wrap items-end gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="eyebrow">All jobs</p>
+              <h1 className="font-display text-[34px] font-extrabold uppercase leading-none tracking-[0.01em]">{jobs.length} active job{jobs.length === 1 ? "" : "s"}</h1>
+              <p className="text-muted text-sm">Click a building to go inside. Start a new one from your drawings with New project.</p>
+            </div>
+            <button className="btn btn-primary" onClick={() => setPage("new")}>+ New project</button>
           </div>
-          <div className="px-4 sm:px-6 pb-8"><AllJobsMap jobs={[summary(data)]} /></div>
+          <div className="px-4 sm:px-6 pb-8"><AllJobsMap jobs={jobs.map(summary)} /></div>
         </div>
       ) : (
         <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">
-          <JobWorkspace data={current} api={api} onAllJobs={() => setPage("jobs")} />
+          <JobWorkspace key={active.job.id} data={current} api={api} onAllJobs={() => setPage("jobs")} />
         </div>
       )}
     </div>
