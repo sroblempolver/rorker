@@ -103,7 +103,7 @@ async function resolveJob(b: AssistantBackend, ctx: AssistantContext, ref: unkno
 function where(plan: Plan | null, p: Pin): string {
   if (!plan) return "";
   if (p.anchor?.view === "site") return "on the site";
-  if (p.anchor?.view === "exterior") return "outside the building";
+  if (p.anchor?.view === "exterior" || p.anchor?.view === "point") return "outside the building";
   if (p.anchor?.view === "wall" && p.anchor.side) {
     const room = findElement(plan, p.anchor.side.split(":")[0]);
     return room ? `on a wall of ${elementLabel(room)}` : "on a wall";

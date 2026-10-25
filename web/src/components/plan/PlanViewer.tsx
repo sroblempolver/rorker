@@ -73,7 +73,8 @@ export function PlanViewer(p: Props) {
   const [wallMode, setWallMode] = useState<WallMode>("full");
   const [gl, setGl] = useState(true);
   useEffect(() => setGl(webglAvailable()), []);
-  const in3d = p.view3d && p.can3d && gl && (level.kind === "exterior" || level.kind === "floor" || level.kind === "room");
+  // a room always opens as its own top view, where every wall and object is a click away
+  const in3d = p.view3d && p.can3d && gl && (level.kind === "exterior" || level.kind === "floor");
   // the wall view slides objects along its own wall: turn that into a move on the plan
   const moveOnWall = useCallback((id: string, along: number, up: number) => {
     if (!side) return;
@@ -109,9 +110,9 @@ export function PlanViewer(p: Props) {
   };
 
   const hint = p.pinMode ? "Click anywhere to drop the pin · Esc to cancel" :
-    in3d && level.kind === "exterior" ? "Drag to look around · zoom in to open the building · keep zooming to step into the floor under the cursor" :
+    in3d && level.kind === "exterior" ? "Drag to look around · zoom in to open the building, keep zooming to step into a floor · right-click or Pin to flag the roof or a wall" :
     in3d && p.readOnly ? "Drag to look around · right-drag to slide · click a flag to see the task" :
-    in3d ? "Drag to look around · right-drag to slide · click to select, drag a selected item to move it · right-click to pin" :
+    in3d ? "Drag to look around · click a room to see it from above · click an object to select, drag it to move · right-click to pin" :
     level.kind === "site" ? "The whole job · click the building or zoom in to go inside" :
     level.kind === "exterior" ? "Click a floor to go inside · zoom out for the whole site" :
     level.kind === "floor" ? "Click a room to step in · zoom out for the outside" :
@@ -131,7 +132,8 @@ export function PlanViewer(p: Props) {
       {in3d && (
         <Plan3D plan={plan} mode={level.kind === "exterior" ? "building" : "floor"} floor={floor} room={room} selected={p.selected} selectedPin={p.selectedPin} selectedItem={p.selectedItem}
           states={p.states} colorMode={p.colorMode} pins={p.pins} items={p.items} pinMode={p.pinMode} draft={p.draft} wallMode={wallMode} controls={controls}
-          onSelect={p.onSelect} onSelectPin={p.onSelectPin} onSelectItem={p.onSelectItem} onPlacePin={p.onPlacePin}
+          onSelect={(id) => { const r = floor && id ? floor.rooms.find((x) => x.id === id) : null; if (r && floor) p.setLevel({ kind: "room", floorId: floor.id, roomId: r.id }); p.onSelect(id); }}
+          onSelectPin={p.onSelectPin} onSelectItem={p.onSelectItem} onPlacePin={p.onPlacePin}
           onMoveFixture={(id, dx, dy) => p.onMoveFixture(id, dx, dy, 0)} onMoveItem={p.onMoveItem} onMovePin={p.onMovePin}
           onOpenFloor={(id) => p.setLevel({ kind: "floor", floorId: id })} onLimitOut={up} />
       )}

@@ -48,8 +48,9 @@ export interface JobItem { id: string; job_id: string; kind: ItemKind; label: st
 export interface ItemInput { kind: ItemKind; label?: string | null; floor_id: string; side: string; x: number; y: number; note?: string | null }
 
 export type PinKind = "task" | "issue" | "note" | "material";
-/** A pin placed in an upright view: on the outside of the building, or on one wall seen from inside. */
-export interface PinAnchor { view: "site" | "exterior" | "wall"; side?: string; x: number; y: number }
+/** A pin placed outside the floor plans: on the site, the front elevation, one wall seen from inside, or
+ *  a point on the 3D building (roof, outside walls): `point` has x, y on the plan and z mm above the ground. */
+export interface PinAnchor { view: "site" | "exterior" | "wall" | "point"; side?: string; x: number; y: number; z?: number }
 export type PinStatus = "open" | "in_progress" | "done";
 export interface Pin {
   id: string; job_id: string; number: number; element_id: string | null; floor_id: string | null;

@@ -19,6 +19,17 @@ function recognizer(): (new () => Rec) | null {
 }
 
 export const canListen = () => !!recognizer();
+/** False when the page sits inside a frame that isn't given the microphone (an embedded preview):
+ *  the browser blocks it there whatever the site permission says. */
+export function micAllowed(): boolean {
+  if (typeof document === "undefined") return true;
+  const d = document as unknown as { permissionsPolicy?: { allowsFeature(f: string): boolean }; featurePolicy?: { allowsFeature(f: string): boolean } };
+  const pol = d.permissionsPolicy ?? d.featurePolicy;
+  try { return pol?.allowsFeature ? pol.allowsFeature("microphone") : true; } catch { return true; }
+}
+const framed = () => typeof window !== "undefined" && window.self !== window.top;
+const FRAMED = "This preview window isn't allowed to use the microphone, whatever the browser setting says. Voice works in the full app; type for now.";
+
 export const canSpeak = () => typeof window !== "undefined" && "speechSynthesis" in window;
 
 const ERRORS: Record<string, string> = {
@@ -32,6 +43,7 @@ const ERRORS: Record<string, string> = {
 /** Tap to talk: listens until you stop speaking, then hands over what you said. */
 export function useDictation(onText: (text: string) => void, lang?: string) {
   const [supported, setSupported] = useState(false);
+  const [blocked, setBlocked] = useState(false);
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +51,7 @@ export function useDictation(onText: (text: string) => void, lang?: string) {
   const got = useRef("");
   const cb = useRef(onText);
   cb.current = onText;
-  useEffect(() => setSupported(canListen()), []);
+  useEffect(() => { setSupported(canListen()); setBlocked(!micAllowed()); }, []);
   useEffect(() => () => rec.current?.abort(), []);
 
   const start = useCallback(() => {
@@ -62,7 +74,11 @@ export function useDictation(onText: (text: string) => void, lang?: string) {
       got.current = fin || got.current;
       setInterim((fin + " " + mid).trim());
     };
-    r.onerror = (e) => { if (e.error !== "aborted") setError(ERRORS[e.error] ?? "Voice stopped. Tap to try again."); };
+    r.onerror = (e) => {
+      if (e.error === "aborted") return;
+      if ((e.error === "not-allowed" || e.error === "service-not-allowed") && framed()) { setBlocked(true); setError(FRAMED); return; }
+      setError(ERRORS[e.error] ?? "Voice stopped. Tap to try again.");
+    };
     r.onend = () => {
       setListening(false);
       const text = got.current.trim();
@@ -76,7 +92,7 @@ export function useDictation(onText: (text: string) => void, lang?: string) {
   }, [lang]);
 
   const stop = useCallback(() => rec.current?.stop(), []);
-  return { supported, listening, interim, error, start, stop };
+  return { supported, blocked, listening, interim, error, start, stop };
 }
 
 let voice: SpeechSynthesisVoice | null = null;
@@ -109,9 +125,9 @@ export function stopSpeaking() {
 
 /** The round talk button. `size` "lg" for the assistant, "sm" inside a form. */
 export function MicButton({ dictation, size = "sm", label = "Talk" }: { dictation: ReturnType<typeof useDictation>; size?: "sm" | "lg"; label?: string }) {
-  const { supported, listening, start, stop } = dictation;
+  const { supported, blocked, listening, start, stop } = dictation;
   const lg = size === "lg";
-  if (!supported) return null;
+  if (!supported || blocked) return null;
   return (
     <button type="button" onClick={() => (listening ? stop() : start())} aria-pressed={listening} aria-label={listening ? "Stop listening" : label}
       title={listening ? "Listening… tap to stop" : `${label}: tap and speak`}
@@ -127,6 +143,7 @@ export function VoiceNote({ dictation }: { dictation: ReturnType<typeof useDicta
   useEffect(() => setShown(true), []);
   if (!shown) return null;
   if (!dictation.supported) return <p className="text-[12px] text-muted">Voice works in Chrome, Edge and Safari. In this browser, type instead.</p>;
+  if (dictation.blocked) return <p className="text-[12px] text-muted">{FRAMED}</p>;
   if (dictation.error) return <p className="text-[12px] text-amber">{dictation.error}</p>;
   if (dictation.listening) return <p className="text-[12px] text-accent">Listening… {dictation.interim && <span className="text-text">“{dictation.interim}”</span>}</p>;
   return null;

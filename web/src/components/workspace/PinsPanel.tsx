@@ -30,6 +30,7 @@ export function where(plan: Plan | null, t: { element_id?: string | null; elemen
   if (t.anchor?.view === "site") return "On the site";
   if (t.anchor?.view === "exterior") return "Outside, on the front";
   const e = plan && id ? findElement(plan, id) : null;
+  if (t.anchor?.view === "point") return e ? `Outside · ${elementLabel(e)}` : "On the roof or outside";
   if (t.anchor?.view === "wall" && plan && t.anchor.side) return `${sideName(plan, t.anchor.side)}${e && e.kind === "fixture" ? ` · ${e.el.name}` : ""}`;
   if (!plan || !id) return "On the plan";
   return e ? `${elementLabel(e)} · ${e.floor.name}` : id;

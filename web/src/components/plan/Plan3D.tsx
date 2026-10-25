@@ -52,7 +52,7 @@ interface Props {
   onLimitOut: () => void;
 }
 
-type Pick = { type: "fixture" | "wall" | "opening" | "room" | "stair" | "item" | "pin"; id: string; floorId: string };
+type Pick = { type: "fixture" | "wall" | "opening" | "room" | "stair" | "item" | "pin" | "roof"; id: string; floorId: string };
 type Fade = { mats: THREE.Material[]; centre: THREE.Vector3; floorIndex: number; role: "wall" | "roof" | "slab" | "thing" };
 
 // --------------------------------------------------------------------------- geometry helpers
@@ -124,6 +124,8 @@ interface Built {
   /** for camera framing, metres */
   centre: THREE.Vector3;
   radius: number;
+  /** pin labels, resized every frame: nearer pins read bigger, farther ones smaller */
+  pinLabels: THREE.Sprite[];
 }
 
 function wallMaterial(color: string) {
@@ -167,6 +169,14 @@ function buildScene(p: Props, mt: Materials): Built {
         g.add(slab);
         const b = floorBBox(fl);
         fades.push({ mats: [m], centre: new THREE.Vector3(((b[0] + b[2]) / 2) * S, base * S, ((b[1] + b[3]) / 2) * S), floorIndex: fi, role: "slab" });
+        // a flat roof over this floor wherever the floor above doesn't cover it (a garage, a porch)
+        if (fi < floorsAll.length - 1) {
+          const rm = wallMaterial("#4a4844");
+          const roofSlab = new THREE.Mesh(extrude(ring, H, H + 160), rm);
+          roofSlab.castShadow = true;
+          g.add(roofSlab);
+          fades.push({ mats: [rm], centre: new THREE.Vector3(((b[0] + b[2]) / 2) * S, (base + H) * S, ((b[1] + b[3]) / 2) * S), floorIndex: fi, role: "roof" });
+        }
       }
     }
 
@@ -293,26 +303,63 @@ function buildScene(p: Props, mt: Materials): Built {
     }
   });
 
-  // roof over the top floor
+  // pins on the outside of the building (roof, outside walls), placed in this view
+  if (p.mode === "building" && floorsAll.length) {
+    const pts = p.pins.filter((q) => q.anchor?.view === "point").map((q) => ({ pin: q as Pin | null, a: q.anchor! }));
+    if (p.draft?.anchor?.view === "point") pts.push({ pin: null, a: p.draft.anchor });
+    for (const { pin, a } of pts) {
+      const flag = pin ? pinFlag(String(pin.number), PIN_COLOR[pin.kind], pin.status === "done", pin.id === p.selectedPin) : pinFlag("+", "#ff6a1f", false, true);
+      flag.position.set(a.x * S, (a.z ?? 0) * S, a.y * S);
+      root.add(flag);
+      if (pin) pick(flag, { type: "pin", id: pin.id, floorId: pin.floor_id ?? floorsAll[0].id });
+    }
+  }
+
+  // roof over the top floor, in the shape the reader guessed (gable, hip or flat). A top floor that
+  // isn't close to a rectangle gets a flat roof that follows its outline instead of a box over the air.
   if (p.mode === "building" && floorsAll.length) {
     const top = floorsAll[floorsAll.length - 1];
     const ti = floorsAll.length - 1;
     const b = floorBBox(top);
-    const base = (top.elevation_mm || ti * (p.plan.building.exterior.storey_height_mm || 3000)) + (top.height_mm || 3000);
-    const w = (b[2] - b[0] + 900) * S, d = (b[3] - b[1] + 900) * S;
-    const peak = Math.min(3.2, Math.min(w, d) * 0.35);
-    const alongX = w >= d;
-    const span = alongX ? d : w, len = alongX ? w : d;
-    const tri = new THREE.Shape([new THREE.Vector2(-span / 2, 0), new THREE.Vector2(span / 2, 0), new THREE.Vector2(0, peak)]);
-    const geo = new THREE.ExtrudeGeometry(tri, { depth: len, bevelEnabled: false });
-    geo.translate(0, 0, -len / 2);
+    const base = (top.elevation_mm || ti * (p.plan.building.exterior.storey_height_mm || 3000)) + (top.height_mm || 2700);
+    const rings = top.footprint.length ? top.footprint : [[[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]] as Pt[]];
+    const area = rings.reduce((a, r) => a + Math.abs(r.reduce((q, pt, i) => { const n = r[(i + 1) % r.length]; return q + pt[0] * n[1] - n[0] * pt[1]; }, 0)) / 2, 0);
+    const boxy = area / Math.max(1, (b[2] - b[0]) * (b[3] - b[1])) > 0.85;
+    const kind = p.plan.building.exterior.roof;
     const m = new THREE.MeshStandardMaterial({ color: "#3a3a3c", roughness: 0.8, transparent: true, side: THREE.DoubleSide });
-    const roof = new THREE.Mesh(geo, m);
-    roof.castShadow = true;
-    if (alongX) roof.rotation.y = Math.PI / 2;
-    roof.position.set(((b[0] + b[2]) / 2) * S, base * S, ((b[1] + b[3]) / 2) * S);
+    const roof = new THREE.Group();
+    if (kind === "flat" || !boxy) {
+      for (const ring of rings) { const slab = new THREE.Mesh(extrude(ring, 0, 220), m); slab.castShadow = true; roof.add(slab); }
+      roof.position.set(0, base * S, 0);
+    } else {
+      const w = (b[2] - b[0] + 900) * S, d = (b[3] - b[1] + 900) * S;
+      const alongX = w >= d;
+      const span = alongX ? d : w, len = alongX ? w : d;
+      const peak = Math.min(3.2, span * 0.35);
+      let geo: THREE.BufferGeometry;
+      if (kind === "hip") {
+        const L = len / 2, H2 = span / 2, r = Math.max(0, len - span) / 2;
+        const A = [-L, 0, -H2], B = [L, 0, -H2], C = [L, 0, H2], D = [-L, 0, H2], R1 = [-r, peak, 0], R2 = [r, peak, 0];
+        const tris = [D, C, R2, D, R2, R1, B, A, R1, B, R1, R2, A, D, R1, C, B, R2];
+        geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(tris.flat(), 3));
+        geo.computeVertexNormals();
+      } else {
+        const tri = new THREE.Shape([new THREE.Vector2(-span / 2, 0), new THREE.Vector2(span / 2, 0), new THREE.Vector2(0, peak)]);
+        geo = new THREE.ExtrudeGeometry(tri, { depth: len, bevelEnabled: false });
+        geo.translate(0, 0, -len / 2);
+        geo.rotateY(Math.PI / 2);
+      }
+      const mesh = new THREE.Mesh(geo, m);
+      mesh.castShadow = true;
+      // hip geometry runs along x already; the gable was turned to run along x above
+      if (!alongX) mesh.rotation.y = Math.PI / 2;
+      roof.add(mesh);
+      roof.position.set(((b[0] + b[2]) / 2) * S, base * S, ((b[1] + b[3]) / 2) * S);
+    }
     root.add(roof);
-    fades.push({ mats: [m], centre: roof.position.clone(), floorIndex: floorsAll.length, role: "roof" });
+    fades.push({ mats: [m], centre: new THREE.Vector3(((b[0] + b[2]) / 2) * S, base * S, ((b[1] + b[3]) / 2) * S), floorIndex: floorsAll.length, role: "roof" });
+    roof.traverse((o) => { if ((o as THREE.Mesh).isMesh) pick(o, { type: "roof", id: o === roof.children[0] ? "roof" : `roof-${o.id}`, floorId: top.id }); });
   }
 
   // framing
@@ -321,7 +368,9 @@ function buildScene(p: Props, mt: Materials): Built {
   const totalH = p.mode === "building" ? floorsMeta.length ? floorsMeta[floorsMeta.length - 1].y1 : 3 : 0;
   const centre = new THREE.Vector3(((bb[0] + bb[2]) / 2) * S, p.mode === "building" ? totalH * 0.3 : 0, ((bb[1] + bb[3]) / 2) * S);
   const radius = Math.max(2, (Math.max(bb[2] - bb[0], bb[3] - bb[1]) / 2) * S, totalH / 2);
-  return { root, picks, byId, fades, floors: floorsMeta, centre, radius };
+  const pinLabels: THREE.Sprite[] = [];
+  root.traverse((o) => { if (o.userData.pinLabel) pinLabels.push(o as THREE.Sprite); });
+  return { root, picks, byId, fades, floors: floorsMeta, centre, radius, pinLabels };
 }
 
 function pinPosition(plan: Plan, fl: Floor, sides: Map<string, WallSide>, pin: Pin): { x: number; y: number; z: number; side?: WallSide } | null {
@@ -364,6 +413,8 @@ function pinFlag(text: string, color: string, done: boolean, selected: boolean):
   const sp = label(`${text}`, { color: "#141310", bg: done ? "#9c978d" : color, size: selected ? 0.034 : 0.028 });
   sp.position.y = 0.82;
   sp.center.set(0, 0.5);
+  sp.userData.pinLabel = true;
+  sp.userData.base = sp.scale.clone();
   g.add(sp);
   // generous invisible hit target
   const hit = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.95, 0.22), new THREE.MeshBasicMaterial({ visible: false }));
@@ -438,9 +489,19 @@ export function Plan3D(p: Props) {
     ro.observe(el);
 
     let raf = 0;
+    const tmp = new THREE.Vector3();
     const tick = () => {
       controls.update();
       cutaway();
+      // pins scale with distance, within limits: the ones nearer you (higher up, further out) read bigger
+      const b = three.current?.built;
+      if (b) {
+        const ref = b.radius * 2.3;
+        for (const sp of b.pinLabels) {
+          const d = camera.position.distanceTo(sp.getWorldPosition(tmp)) || 1;
+          sp.scale.copy(sp.userData.base as THREE.Vector3).multiplyScalar(Math.min(1.9, Math.max(0.5, ref / d)));
+        }
+      }
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);
     };
@@ -476,10 +537,11 @@ export function Plan3D(p: Props) {
       let o = 1;
       const toward = (f.centre.x - target.x) * dir.x + (f.centre.z - target.z) * dir.z;
       if (building) {
+        // a doll's house: the roof lifts off and the walls facing you fall away on every floor at once,
+        // so all the floors show stacked; the floor under the cursor opens a little more
         if (f.role === "roof") o = 1 - open;
-        else if (f.floorIndex > focus) o = 1 - open;
-        else if (f.role === "wall" && f.floorIndex === focus && toward > R * 0.05) o = 1 - open * 0.9;
-        else if (f.role === "wall" && f.floorIndex < focus && toward > R * 0.05) o = 1 - open * 0.5;
+        else if (f.role === "wall" && toward > R * 0.05) o = 1 - open * (f.floorIndex === focus ? 0.95 : 0.88);
+        else if (f.role === "slab" && f.floorIndex > focus) o = 1 - open * 0.3;
       } else if (f.role === "wall" && toward > R * 0.25) o = 1 - open * 0.85;
       for (const m of f.mats) {
         const base = (m.userData.baseOpacity as number | undefined) ?? (m.userData.baseOpacity = m.opacity);
@@ -645,6 +707,11 @@ export function Plan3D(p: Props) {
       if (!fl) return null;
       const base = floorBase(fl.id);
       const x = Math.round(h.point.x / S), y = Math.round(h.point.z / S), up = Math.round((h.point.y - base) / S);
+      // the whole building: the pin stays on the exact spot you clicked, roof and outside walls included
+      if (P.mode === "building") {
+        const onIt = h.pick.type === "wall" || h.pick.type === "opening" ? h.pick.id : null;
+        return { floorId: h.pick.type === "roof" ? null : fl.id, x: null, y: null, elementId: onIt, anchor: { view: "point", x, y, z: Math.max(0, Math.round(h.point.y / S)) } };
+      }
       // a wall face, or something on it, high up: keep the exact spot on that wall
       if ((h.pick.type === "wall" || h.pick.type === "opening" || h.pick.type === "item") && P.mode === "floor") {
         let best: { side: WallSide; along: number; d: number } | null = null;
@@ -747,6 +814,7 @@ export function Plan3D(p: Props) {
       }
       const h = cast(e);
       if (P.mode === "building") {
+        if (h?.pick.type === "pin") return P.onSelectPin(h.pick.id);
         if (h) P.onOpenFloor(h.pick.floorId);
         return;
       }

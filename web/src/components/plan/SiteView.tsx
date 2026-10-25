@@ -58,8 +58,8 @@ export function SiteView(p: Props) {
     p.onPlacePin({ floorId: null, x: null, y: null, elementId: null, anchor: { view: "site", x: Math.round(w.x), y: Math.round(w.y) } }, { x: e.clientX, y: e.clientY });
   };
   const handlers = useHoldToPin(pz.handlers, place);
-  const sitePins = p.pins.filter((x) => x.anchor?.view === "site");
-  const inside = p.pins.filter((x) => x.status !== "done" && x.anchor?.view !== "site").length;
+  const sitePins = p.pins.filter((x) => x.anchor?.view === "site" || x.anchor?.view === "point");
+  const inside = p.pins.filter((x) => x.status !== "done" && x.anchor?.view !== "site" && x.anchor?.view !== "point").length;
   const draft = p.draft?.anchor?.view === "site" ? p.draft.anchor : null;
   const fs = 13 * lw;
   const lotW = (lot[2] - lot[0]) / 1000, lotD = (lot[3] - lot[1]) / 1000;
@@ -126,7 +126,7 @@ export function SiteView(p: Props) {
 
       {/* where the pins inside the building are, as faint dots, so the whole job reads at a glance */}
       <g pointerEvents="none">
-        {p.pins.filter((x) => x.status !== "done" && x.anchor?.view !== "site").map((pin) => {
+        {p.pins.filter((x) => x.status !== "done" && x.anchor?.view !== "site" && x.anchor?.view !== "point").map((pin) => {
           const e = pin.element_id ? findElement(plan, pin.element_id) : null;
           const pt = pin.x != null && pin.y != null ? [pin.x, pin.y] : e ? (e.kind === "fixture" ? e.el.center : (() => { const b = bboxOf(e.el.polygon); return [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]; })()) : null;
           if (!pt) return null;
