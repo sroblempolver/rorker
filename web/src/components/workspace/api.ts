@@ -10,6 +10,8 @@ export interface WorkspaceData {
   states: ElementState[];
   runs: PlanRun[];
   members: Member[];
+  /** the signed-in person's team row, for "tagged to me" */
+  me: string | null;
   aiAvailable: boolean;
 }
 

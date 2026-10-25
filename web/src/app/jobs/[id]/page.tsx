@@ -15,7 +15,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
   const aiAvailable = !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
   return (
     <AppShell session={session} demo={isDemo()} active="jobs" fill>
-      <JobClient data={{ job, plan, stages, pins, states, runs, members, aiAvailable }} />
+      <JobClient data={{ job, plan, stages, pins, states, runs, members, me: session.memberId, aiAvailable }} />
     </AppShell>
   );
 }

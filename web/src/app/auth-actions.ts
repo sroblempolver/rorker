@@ -12,7 +12,7 @@ async function demoSignIn(email: string, name: string | null, sample: boolean) {
   const store = await cookies();
   // stable id per email so a returning demo user finds their data
   const id = "demo-" + (Buffer.from(email.toLowerCase()).toString("hex").slice(0, 24) || randomUUID());
-  if (sample) await seedDemo(id, name);
+  if (sample) await seedDemo(id, name, email);
   store.set(DEMO_COOKIE, encodeURIComponent(JSON.stringify({ id, email, name })), { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 30 });
 }
 

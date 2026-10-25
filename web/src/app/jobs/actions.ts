@@ -4,6 +4,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getRepo, requireCompany, requireJob } from "@/lib/data";
+import { attempt } from "@/lib/result";
 import type { ElementState, JobStage, Pin, PinComment, PinInput, PinStatus, PlanRow, PlanRun, StageStatus } from "@/lib/data/types";
 
 const str = (f: FormData, k: string) => {
@@ -58,17 +59,19 @@ export async function createPin(jobId: string, input: PinInput): Promise<Pin> {
 }
 
 export async function updatePin(jobId: string, pinId: string, input: Partial<PinInput> & { status?: PinStatus }) {
-  await requireJob(jobId);
-  const repo = getRepo();
-  if (input.status === "done") {
-    const pin = (await repo.listPins(jobId)).find((p) => p.id === pinId);
-    if (pin?.close_requirement === "photo") {
-      const comments = await repo.listComments(pinId);
-      if (!comments.some((c) => c.photos.length)) throw new Error("This one needs a photo before it can be closed.");
+  return attempt(async () => {
+    await requireJob(jobId);
+    const repo = getRepo();
+    if (input.status === "done") {
+      const pin = (await repo.listPins(jobId)).find((p) => p.id === pinId);
+      if (pin?.close_requirement === "photo") {
+        const comments = await repo.listComments(pinId);
+        if (!comments.some((c) => c.photos.length)) throw new Error("This one needs a photo before it can be closed.");
+      }
     }
-  }
-  await repo.updatePin(pinId, input);
-  revalidatePath("/jobs");
+    await repo.updatePin(pinId, input);
+    revalidatePath("/jobs");
+  });
 }
 
 export async function deletePin(jobId: string, pinId: string) {

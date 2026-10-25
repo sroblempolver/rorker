@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CompanyForm } from "@/components/CompanyForm";
+import { AvatarStack } from "@/components/team/Avatar";
 import { AppShell } from "@/components/ui/AppShell";
 import { getRepo, isDemo, requireCompany } from "@/lib/data";
 import { updateCompany } from "./actions";
@@ -19,20 +20,15 @@ export default async function SettingsPage() {
           </div>
           <Link href="/settings/stages" className="btn ml-auto">Stage templates</Link>
         </div>
-        <div className="card p-5"><CompanyForm action={updateCompany} company={s.company} submitLabel="Save" /></div>
-        <div className="card p-5">
-          <p className="eyebrow mb-3">Team</p>
-          <div className="space-y-2">
-            {members.map((m) => (
-              <div key={m.user_id} className="flex items-center gap-3 text-[14px]">
-                <span className="w-8 h-8 rounded-full bg-panel-3 grid place-items-center text-[12px] font-bold">{(m.full_name ?? "?").slice(0, 1)}</span>
-                <span>{m.full_name ?? "Team member"}{m.user_id === s.userId && <span className="text-muted"> (you)</span>}</span>
-                <span className="chip ml-auto capitalize">{m.role}</span>
-              </div>
-            ))}
+        {s.role !== "admin" && <p className="text-[13px] text-amber">You&apos;re an employee, so company details are read-only. An admin can change them.</p>}
+        <div className={s.role === "admin" ? "card p-5" : "card p-5 pointer-events-none opacity-70"}><CompanyForm action={updateCompany} company={s.company} submitLabel="Save" /></div>
+        <Link href="/settings/team" className="card p-5 flex items-center gap-4 hover:border-chalk">
+          <div className="min-w-0 flex-1">
+            <p className="eyebrow mb-2">Team</p>
+            <AvatarStack members={members} size={28} />
           </div>
-          <p className="text-[12.5px] text-muted mt-4">Inviting crew and subcontractors comes in the next phase.</p>
-        </div>
+          <span className="text-[14px] text-muted">{members.length} {members.length === 1 ? "person" : "people"} · {members.filter((m) => m.role === "admin").length} admin ›</span>
+        </Link>
       </div>
     </AppShell>
   );

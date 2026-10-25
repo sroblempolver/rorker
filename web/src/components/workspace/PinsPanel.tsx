@@ -7,6 +7,8 @@ import { elementLabel, findElement, roomSides } from "@/lib/plan/geometry";
 import type { Plan } from "@/lib/plan/types";
 import { PIN_COLOR, PIN_LABEL, PIN_STATUS_LABEL } from "@/components/plan/style";
 import type { PinTarget } from "@/components/plan/target";
+import { AvatarStack, StaffPicker } from "@/components/team/Avatar";
+import { useTeam } from "@/components/team/context";
 
 const KINDS: PinKind[] = ["task", "issue", "note", "material"];
 
@@ -44,6 +46,8 @@ export function PinBadge({ pin, size = 26 }: { pin: Pin; size?: number }) {
 }
 
 export function PinRow({ pin, plan, onClick }: { pin: Pin; plan: Plan | null; onClick: () => void }) {
+  const { members } = useTeam();
+  const tagged = members.filter((m) => pin.tagged.includes(m.id));
   return (
     <button onClick={onClick} className="w-full text-left card !rounded-[3px] px-3 py-2 flex items-center gap-3 hover:border-chalk">
       <PinBadge pin={pin} />
@@ -53,14 +57,16 @@ export function PinRow({ pin, plan, onClick }: { pin: Pin; plan: Plan | null; on
       </span>
       {pin.status === "in_progress" && <span className="chip text-amber shrink-0">In progress</span>}
       {(pin.comment_count ?? 0) > 0 && <span className="font-mono text-[11.5px] text-muted shrink-0">{pin.comment_count} upd</span>}
+      <AvatarStack members={tagged} />
     </button>
   );
 }
 
 export function PinsList({ pins, plan, onSelect, onNew }: { pins: Pin[]; plan: Plan | null; onSelect: (id: string) => void; onNew: () => void }) {
-  const [filter, setFilter] = useState<"open" | "all" | PinKind>("open");
+  const { me } = useTeam();
+  const [filter, setFilter] = useState<"open" | "mine" | "all" | PinKind>("open");
   const shown = pins
-    .filter((p) => (filter === "open" ? p.status !== "done" : filter === "all" ? true : p.kind === filter))
+    .filter((p) => (filter === "open" ? p.status !== "done" : filter === "mine" ? p.status !== "done" && !!me && p.tagged.includes(me) : filter === "all" ? true : p.kind === filter))
     .sort((a, b) => (a.status === "done" ? 1 : 0) - (b.status === "done" ? 1 : 0) || b.priority - a.priority || b.number - a.number);
   return (
     <div className="p-4 space-y-3">
@@ -70,9 +76,9 @@ export function PinsList({ pins, plan, onSelect, onNew }: { pins: Pin[]; plan: P
         <button className="btn btn-primary btn-sm ml-auto" onClick={onNew} disabled={!plan}>Drop a pin</button>
       </div>
       <div className="flex flex-wrap gap-1.5">
-        {(["open", "all", ...KINDS] as const).map((f) => (
+        {(["open", ...(me ? ["mine" as const] : []), "all", ...KINDS] as const).map((f) => (
           <button key={f} onClick={() => setFilter(f)} className={`chip ${filter === f ? "!text-accent-ink !bg-accent !border-accent" : "hover:text-text"}`}>
-            {f === "open" ? "Open" : f === "all" ? "All" : PIN_LABEL[f] + "s"}
+            {f === "open" ? "Open" : f === "mine" ? "Tagged to me" : f === "all" ? "All" : PIN_LABEL[f] + "s"}
           </button>
         ))}
       </div>
@@ -83,13 +89,15 @@ export function PinsList({ pins, plan, onSelect, onNew }: { pins: Pin[]; plan: P
 }
 
 export function PinForm({ plan, draft, preset, stages, onCancel, onCreate }: {
-  plan: Plan | null; draft: PinTarget; preset?: { kind: PinKind; title: string; body?: string }; stages: JobStage[];
+  plan: Plan | null; draft: PinTarget; preset?: { kind: PinKind; title: string; body?: string; tagged?: string[] }; stages: JobStage[];
   onCancel: () => void; onCreate: (input: PinInput) => Promise<void>;
 }) {
   const [kind, setKind] = useState<PinKind>(preset?.kind ?? "task");
   const [title, setTitle] = useState(preset?.title ?? "");
   const [body, setBody] = useState(preset?.body ?? "");
   const [due, setDue] = useState("");
+  const { members } = useTeam();
+  const [tagged, setTagged] = useState<string[]>(preset?.tagged ?? []);
   const [photo, setPhoto] = useState(false);
   const [stage, setStage] = useState(stages.find((s) => s.status === "active")?.id ?? "");
   const [busy, setBusy] = useState(false);
@@ -104,7 +112,7 @@ export function PinForm({ plan, draft, preset, stages, onCancel, onCreate }: {
     setBusy(true);
     try {
       await onCreate({
-        kind, title, body: body || null, due_date: due || null, close_requirement: photo ? "photo" : "confirm", stage_id: stage || null,
+        kind, title, body: body || null, due_date: due || null, close_requirement: photo ? "photo" : "confirm", stage_id: stage || null, tagged,
         element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, anchor: draft.anchor, priority: kind === "issue" ? 2 : 1,
       });
     } catch (x) {
@@ -148,6 +156,10 @@ export function PinForm({ plan, draft, preset, stages, onCancel, onCreate }: {
           </select>
         </div>
       </div>
+      <div>
+        <p className="label">Tag staff</p>
+        <StaffPicker members={members} value={tagged} onChange={setTagged} />
+      </div>
       <label className="flex items-center gap-2.5 text-[14px] cursor-pointer">
         <input type="checkbox" checked={photo} onChange={(x) => setPhoto(x.target.checked)} className="w-4 h-4 accent-[var(--accent)]" />
         Needs a photo before it can be closed
@@ -174,6 +186,9 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
   const [linkTitle, setLinkTitle] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const { members } = useTeam();
+  const [tagging, setTagging] = useState(false);
+  const tagged = members.filter((m) => pin.tagged.includes(m.id));
 
   useEffect(() => {
     let live = true;
@@ -217,6 +232,16 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
         {pin.due_date && <span className="chip">Due {new Date(pin.due_date + "T00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>}
         {stage && <span className="chip">{stage.name}</span>}
         {pin.priority > 1 && <span className="chip text-red">High priority</span>}
+      </div>
+
+      <div>
+        <div className="flex items-center mb-2">
+          <p className="eyebrow">Tagged</p>
+          <button className="ml-auto text-[13px] text-chalk hover:underline" onClick={() => setTagging(!tagging)}>{tagging ? "Done" : tagged.length ? "Change" : "Tag staff"}</button>
+        </div>
+        {tagging ? <StaffPicker members={members} value={pin.tagged} onChange={(ids) => run(() => onUpdate({ tagged: ids }))} />
+          : tagged.length ? <div className="flex flex-wrap gap-1.5">{tagged.map((m) => <span key={m.id} className="chip !pl-0.5 !h-7"><AvatarStack members={[m]} size={22} /><span className="text-text">{m.full_name}</span>{m.title && <span>· {m.title}</span>}</span>)}</div>
+          : <p className="text-muted text-sm">Nobody tagged.</p>}
       </div>
 
       <div>
@@ -278,8 +303,10 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
  *  moves to the full form in the side panel with what you typed. */
 export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel }: {
   plan: Plan | null; target: PinTarget; left: number; top: number;
-  onSave: (kind: PinKind, title: string) => Promise<void>; onMore: (kind: PinKind, title: string) => void; onCancel: () => void;
+  onSave: (kind: PinKind, title: string, tagged: string[]) => Promise<void>; onMore: (kind: PinKind, title: string, tagged: string[]) => void; onCancel: () => void;
 }) {
+  const { members } = useTeam();
+  const [tagged, setTagged] = useState<string[]>([]);
   const [kind, setKind] = useState<PinKind>("note");
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -287,9 +314,9 @@ export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel }: 
   useEffect(() => ref.current?.focus(), []);
   const save = async (ev: React.FormEvent) => {
     ev.preventDefault();
-    if (!title.trim()) return onMore(kind, "");
+    if (!title.trim()) return onMore(kind, "", tagged);
     setBusy(true);
-    try { await onSave(kind, title.trim()); } finally { setBusy(false); }
+    try { await onSave(kind, title.trim(), tagged); } finally { setBusy(false); }
   };
   return (
     <form onSubmit={save} onKeyDown={(e) => e.key === "Escape" && onCancel()} style={{ left, top }}
@@ -308,9 +335,15 @@ export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel }: 
       </div>
       <input ref={ref} className="input !h-9" value={title} onChange={(e) => setTitle(e.target.value)}
         placeholder={kind === "note" ? "Note for this spot" : kind === "issue" ? "What is wrong here?" : kind === "material" ? "What goes here?" : "What needs doing here?"} />
+      {members.length > 0 && (
+        <div>
+          <p className="text-[11.5px] text-muted mb-1">Tag staff</p>
+          <div className="max-h-[96px] overflow-y-auto scroll-thin"><StaffPicker compact members={members} value={tagged} onChange={setTagged} /></div>
+        </div>
+      )}
       <div className="flex gap-1.5">
         <button className="btn btn-primary btn-sm flex-1" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
-        <button type="button" className="btn btn-sm" onClick={() => onMore(kind, title)}>More…</button>
+        <button type="button" className="btn btn-sm" onClick={() => onMore(kind, title, tagged)}>More…</button>
       </div>
     </form>
   );

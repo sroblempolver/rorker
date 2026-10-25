@@ -42,22 +42,29 @@ export type PinStatus = "open" | "in_progress" | "done";
 export interface Pin {
   id: string; job_id: string; number: number; element_id: string | null; floor_id: string | null;
   x: number | null; y: number | null; anchor?: PinAnchor | null; kind: PinKind; title: string; body: string | null; status: PinStatus;
-  priority: number; due_date: string | null; assignee_id: string | null; close_requirement: "confirm" | "photo";
+  priority: number; due_date: string | null; tagged: string[]; close_requirement: "confirm" | "photo";
   stage_id: string | null; links: { title: string; url: string }[]; created_by: string | null; created_at: string;
   closed_at: string | null; comment_count?: number;
 }
 export interface PinInput {
   element_id?: string | null; floor_id?: string | null; x?: number | null; y?: number | null; anchor?: PinAnchor | null; kind: PinKind;
   title: string; body?: string | null; priority?: number; due_date?: string | null; close_requirement?: "confirm" | "photo";
-  stage_id?: string | null; links?: { title: string; url: string }[];
+  stage_id?: string | null; links?: { title: string; url: string }[]; tagged?: string[];
 }
 export interface PinComment { id: string; pin_id: string; author_id: string | null; author_name?: string | null; body: string | null; photos: string[]; created_at: string }
 
 export interface ElementState { element_id: string; status: ElementStatus }
 
-export interface Member { user_id: string; full_name: string | null; role: string }
+/** Admin: everything, including the company, the team and stage templates. Employee: jobs, pins and
+ *  stages only ("editor"). The owner is an admin who can't be removed or demoted. */
+export type MemberRole = "admin" | "employee";
+export interface Member {
+  id: string; user_id: string | null; full_name: string; email: string | null; phone: string | null;
+  title: string | null; role: MemberRole; is_owner: boolean;
+}
+export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole }
 
-export interface Session { userId: string; email: string | null; name: string | null; company: Company | null; role: string | null }
+export interface Session { userId: string; email: string | null; name: string | null; company: Company | null; role: MemberRole | null; memberId: string | null }
 
 export interface Repo {
   mode: "supabase" | "demo";
@@ -66,6 +73,9 @@ export interface Repo {
   updateCompany(companyId: string, input: CompanyInput): Promise<void>;
   uploadLogo(companyId: string, file: File): Promise<void>;
   listMembers(companyId: string): Promise<Member[]>;
+  addMember(companyId: string, input: MemberInput): Promise<string>;
+  updateMember(memberId: string, input: Partial<MemberInput>): Promise<void>;
+  removeMember(memberId: string): Promise<void>;
   // jobs
   listJobs(companyId: string): Promise<JobSummary[]>;
   getJob(jobId: string): Promise<Job | null>;

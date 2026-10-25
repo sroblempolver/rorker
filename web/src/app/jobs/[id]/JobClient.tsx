@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import * as A from "@/app/jobs/actions";
 import type { WorkspaceApi, WorkspaceData } from "@/components/workspace/api";
 import { JobWorkspace } from "@/components/workspace/JobWorkspace";
+import { unwrap } from "@/lib/result";
 
 export function JobClient({ data }: { data: WorkspaceData }) {
   const router = useRouter();
@@ -12,7 +13,7 @@ export function JobClient({ data }: { data: WorkspaceData }) {
     backHref: "/jobs",
     setElementState: (el, s) => A.setElementState(id, el, s),
     createPin: (input) => A.createPin(id, input),
-    updatePin: (pin, input) => A.updatePin(id, pin, input),
+    updatePin: (pin, input) => unwrap(A.updatePin(id, pin, input)),
     deletePin: (pin) => A.deletePin(id, pin),
     listComments: (pin) => A.listComments(id, pin),
     addComment: (pin, body, photos) => {

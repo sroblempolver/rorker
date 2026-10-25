@@ -23,20 +23,36 @@ create table public.profiles (
   created_at timestamptz not null default now()
 );
 
-create type public.member_role as enum ('owner', 'admin', 'member');
+-- The team. The owner is staff too, with the admin role. Everyone else starts as an employee, who can
+-- work on jobs, pins and stages but not change the company, the team or the stage templates. A member
+-- can be added before they have an account (user_id null): they are tagged on pins straight away and
+-- linked to their login the first time they sign in with that email (claim_invites).
+create type public.member_role as enum ('admin', 'employee');
 
 create table public.company_members (
+  id uuid primary key default gen_random_uuid(),
   company_id uuid not null references public.companies on delete cascade,
-  user_id uuid not null references auth.users on delete cascade,
-  role public.member_role not null default 'member',
+  user_id uuid references auth.users on delete set null,
+  full_name text not null,
+  email text,
+  phone text,
+  title text,                      -- job title or trade: "Site lead", "Electrician"
+  role public.member_role not null default 'employee',
+  is_owner boolean not null default false,
   created_at timestamptz not null default now(),
-  primary key (company_id, user_id)
+  unique (company_id, user_id)
 );
 create index on public.company_members (user_id);
+create unique index on public.company_members (company_id, lower(email)) where email is not null;
 
 create or replace function public.is_member(cid uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from company_members where company_id = cid and user_id = auth.uid());
+$$;
+
+create or replace function public.is_admin(cid uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from company_members where company_id = cid and user_id = auth.uid() and role = 'admin');
 $$;
 
 -- ---------------------------------------------------------------- stage templates
@@ -160,7 +176,7 @@ create table public.pins (
   status public.pin_status not null default 'open',
   priority int not null default 2 check (priority between 1 and 3),
   due_date date,
-  assignee_id uuid references auth.users,
+  tagged uuid[] not null default '{}',   -- company_members.id of the staff tagged on this pin
   close_requirement text not null default 'confirm' check (close_requirement in ('confirm', 'photo')),
   stage_id uuid references public.job_stages on delete set null,
   links jsonb not null default '[]',   -- [{"title": "...", "url": "..."}] (shopping list, specs)
@@ -207,8 +223,7 @@ alter table public.pins enable row level security;
 alter table public.pin_comments enable row level security;
 
 create policy "members read company" on public.companies for select using (public.is_member(id));
-create policy "admins update company" on public.companies for update using (
-  exists (select 1 from public.company_members m where m.company_id = id and m.user_id = auth.uid() and m.role in ('owner', 'admin')));
+create policy "admins update company" on public.companies for update using (public.is_admin(id));
 
 create policy "own profile" on public.profiles for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "teammates read profiles" on public.profiles for select using (
@@ -216,11 +231,17 @@ create policy "teammates read profiles" on public.profiles for select using (
           where a.user_id = auth.uid() and b.user_id = profiles.user_id));
 
 create policy "members read members" on public.company_members for select using (public.is_member(company_id));
+create policy "admins add members" on public.company_members for insert with check (public.is_admin(company_id) and not is_owner);
+create policy "admins change members" on public.company_members for update using (public.is_admin(company_id)) with check (public.is_admin(company_id));
+create policy "admins remove members" on public.company_members for delete using (public.is_admin(company_id) and not is_owner);
+-- stage templates: everyone reads, admins change
+create policy "members read templates" on public.stage_templates for select using (public.is_member(company_id));
+create policy "admins change templates" on public.stage_templates for all using (public.is_admin(company_id)) with check (public.is_admin(company_id));
 
 do $$
 declare t text;
 begin
-  foreach t in array array['stage_templates', 'jobs', 'job_stages', 'plan_runs', 'plans', 'element_states', 'pins', 'pin_comments']
+  foreach t in array array['jobs', 'job_stages', 'plan_runs', 'plans', 'element_states', 'pins', 'pin_comments']
   loop
     execute format('create policy "members all" on public.%I for all using (public.is_member(company_id)) with check (public.is_member(company_id))', t);
   end loop;
@@ -238,7 +259,8 @@ begin
   if auth.uid() is null then raise exception 'not signed in'; end if;
   insert into companies (name, phone, email, license_no, website, brand_color)
     values (p_name, p_phone, p_email, p_license, p_website, coalesce(p_color, '#ff6a1f')) returning id into cid;
-  insert into company_members (company_id, user_id, role) values (cid, auth.uid(), 'owner');
+  insert into company_members (company_id, user_id, full_name, email, role, is_owner)
+    values (cid, auth.uid(), coalesce(p_full_name, auth.jwt() ->> 'email', 'Owner'), auth.jwt() ->> 'email', 'admin', true);
   insert into profiles (user_id, full_name) values (auth.uid(), p_full_name)
     on conflict (user_id) do update set full_name = coalesce(excluded.full_name, profiles.full_name);
   insert into stage_templates (company_id, name, job_type, is_default, stages)
@@ -304,3 +326,15 @@ create policy "public logos" on storage.objects for select using (bucket_id = 'c
 
 -- live updates for the plan screen
 alter publication supabase_realtime add table public.plan_runs, public.pins, public.element_states, public.pin_comments;
+
+-- First sign-in of someone the company already added: link their login to that team row.
+create or replace function public.claim_invites() returns integer
+language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  if auth.uid() is null then return 0; end if;
+  update company_members set user_id = auth.uid()
+    where user_id is null and email is not null and lower(email) = lower(auth.jwt() ->> 'email');
+  get diagnostics n = row_count;
+  return n;
+end $$;

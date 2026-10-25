@@ -2,7 +2,7 @@ import "server-only";
 import { supabaseServer, SUPABASE_URL } from "@/lib/supabase/server";
 import type { Plan } from "@/lib/plan/types";
 import type {
-  Company, CompanyInput, ElementState, Job, JobInput, JobStage, JobSummary, Member, Pin, PinComment, PinInput,
+  Company, CompanyInput, ElementState, Job, JobInput, JobStage, JobSummary, Member, MemberInput, Pin, PinComment, PinInput,
   PlanRow, PlanRun, Repo, StageStatus, StageTemplate,
 } from "./types";
 
@@ -47,9 +47,25 @@ export class SupabaseRepo implements Repo {
   }
   async listMembers(companyId: string): Promise<Member[]> {
     const sb = await this.db();
-    const rows = check(await sb.from("company_members").select("user_id, role").eq("company_id", companyId)) as Row[];
-    const profiles = check(await sb.from("profiles").select("user_id, full_name").in("user_id", rows.map((r) => r.user_id as string))) as Row[];
-    return rows.map((r) => ({ user_id: r.user_id as string, role: r.role as string, full_name: (profiles.find((p) => p.user_id === r.user_id)?.full_name as string) ?? null }));
+    const rows = check(await sb.from("company_members").select("id, user_id, full_name, email, phone, title, role, is_owner").eq("company_id", companyId)
+      .order("is_owner", { ascending: false }).order("full_name")) as Row[];
+    return rows as unknown as Member[];
+  }
+  async addMember(companyId: string, input: MemberInput) {
+    const sb = await this.db();
+    const r = await sb.from("company_members").insert({ ...input, email: input.email?.trim() || null, company_id: companyId }).select("id").single();
+    if (r.error?.code === "23505") throw new Error("Someone on the team already has that email.");
+    return (check(r) as Row).id as string;
+  }
+  async updateMember(memberId: string, input: Partial<MemberInput>) {
+    const sb = await this.db();
+    check(await sb.from("company_members").update(input).eq("id", memberId));
+  }
+  async removeMember(memberId: string) {
+    const sb = await this.db();
+    const tagged = check(await sb.from("pins").select("id, tagged").contains("tagged", [memberId])) as Row[];
+    for (const p of tagged) check(await sb.from("pins").update({ tagged: (p.tagged as string[]).filter((t) => t !== memberId) }).eq("id", p.id));
+    check(await sb.from("company_members").delete().eq("id", memberId));
   }
 
   async listJobs(companyId: string): Promise<JobSummary[]> {
@@ -217,7 +233,7 @@ export class SupabaseRepo implements Repo {
     const sb = await this.db();
     const rows = check(await sb.from("pin_comments").select("*").eq("pin_id", pinId).order("created_at")) as PinComment[];
     const ids = [...new Set(rows.map((r) => r.author_id).filter(Boolean))] as string[];
-    const profiles = ids.length ? (check(await sb.from("profiles").select("user_id, full_name").in("user_id", ids)) as Row[]) : [];
+    const profiles = ids.length ? (check(await sb.from("company_members").select("user_id, full_name").in("user_id", ids)) as Row[]) : [];
     return rows.map((r) => ({ ...r, author_name: (profiles.find((p) => p.user_id === r.author_id)?.full_name as string) ?? null }));
   }
   async addComment(pinId: string, userId: string, body: string, photos: File[]) {

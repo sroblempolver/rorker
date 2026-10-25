@@ -9,6 +9,7 @@ import { findElement, roomOf } from "@/lib/plan/geometry";
 import { PlanViewer, type Level } from "@/components/plan/PlanViewer";
 import type { ColorMode } from "@/components/plan/FloorCanvas";
 import type { PinTarget, ScreenPoint } from "@/components/plan/target";
+import { TeamContext } from "@/components/team/context";
 import type { WorkspaceApi, WorkspaceData } from "./api";
 import { Inspector, ProjectSummary, type AddPin } from "./Inspector";
 import { PinDetail, PinForm, PinsList, QuickPin } from "./PinsPanel";
@@ -29,7 +30,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const [colorMode, setColorMode] = useState<ColorMode>("type");
   const [pinMode, setPinMode] = useState(false);
   // a pin being made: `at` set means the quick card at that screen point, otherwise the full form
-  const [draft, setDraft] = useState<(PinTarget & { at?: ScreenPoint; preset?: { kind: PinKind; title: string } }) | null>(null);
+  const [draft, setDraft] = useState<(PinTarget & { at?: ScreenPoint; preset?: { kind: PinKind; title: string; tagged?: string[] } }) | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab>(data.plan ? "details" : "plan");
   const [flyTo, setFlyTo] = useState<{ ids: string[]; n: number } | null>(null);
@@ -212,7 +213,10 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     </button>
   );
 
+  const team = useMemo(() => ({ members: data.members, me: data.me }), [data.members, data.me]);
+
   return (
+    <TeamContext.Provider value={team}>
     <div className="flex-1 min-h-0 flex flex-col">
       <div className="shrink-0 border-b border-line bg-panel px-4 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-2">
         <div className="min-w-0">
@@ -252,8 +256,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
           )}
           {quick && draft?.at && (
             <QuickPin key={`${draft.at.x},${draft.at.y}`} plan={plan?.data ?? null} target={draft} left={quick.left} top={quick.top} onCancel={() => setDraft(null)}
-              onSave={async (kind, title) => { await guard(() => createPin({ kind, title, element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, anchor: draft.anchor, priority: kind === "issue" ? 2 : 1 })); }}
-              onMore={(kind, title) => { setDraft({ ...draft, at: undefined, preset: { kind, title } }); setTab("pins"); }} />
+              onSave={async (kind, title, tagged) => { await guard(() => createPin({ kind, title, tagged, element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, anchor: draft.anchor, priority: kind === "issue" ? 2 : 1 })); }}
+              onMore={(kind, title, tagged) => { setDraft({ ...draft, at: undefined, preset: { kind, title, tagged } }); setTab("pins"); }} />
           )}
           {toast && <div role="status" className="absolute left-1/2 -translate-x-1/2 top-14 z-10 px-4 py-2 rounded-[3px] bg-panel-2 border border-line border-l-[3px] border-l-accent shadow-lg text-[14px]">{toast}</div>}
           {plan && questions > 0 && tab !== "plan" && (
@@ -273,6 +277,6 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         </aside>
       </div>
     </div>
+    </TeamContext.Provider>
   );
 }
-

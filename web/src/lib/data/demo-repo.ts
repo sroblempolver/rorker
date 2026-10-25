@@ -8,11 +8,11 @@ import path from "node:path";
 import housePlan from "@/demo/house-plan.json";
 import type { Plan } from "@/lib/plan/types";
 import type {
-  Company, CompanyInput, ElementState, Job, JobInput, JobStage, JobSummary, Member, Pin, PinComment, PinInput,
+  Company, CompanyInput, ElementState, Job, JobInput, JobStage, JobSummary, Member, MemberInput, MemberRole, Pin, PinComment, PinInput,
   PlanRow, PlanRun, Repo, StageStatus, StageTemplate,
 } from "./types";
 import { DEFAULT_TEMPLATES } from "./templates";
-import { samplePins, sampleStates } from "@/demo/sample";
+import { DEMO_CREW, samplePins, sampleStates } from "@/demo/sample";
 
 const DIR = path.join(process.cwd(), ".data");
 const FILE = path.join(DIR, "demo.json");
@@ -22,7 +22,7 @@ const PYTHON = process.env.RORKER_PYTHON || "python3";
 
 interface Db {
   companies: (Company & { owner: string })[];
-  members: { company_id: string; user_id: string; role: string; full_name: string | null }[];
+  members: (Member & { company_id: string })[];
   templates: (StageTemplate & { company_id: string })[];
   jobs: Job[];
   stages: JobStage[];
@@ -61,22 +61,37 @@ function tx<T>(fn: (db: Db) => T): T {
 
 const now = () => new Date().toISOString();
 
-export function demoCompanyFor(userId: string): { company: Company; role: string } | null {
-  const db = load();
+export function demoCompanyFor(userId: string, email?: string | null): { company: Company; role: MemberRole; memberId: string } | null {
+  let db = load();
+  // someone the company added signs in with that email for the first time: link them (claim_invites)
+  if (email && !db.members.some((x) => x.user_id === userId)) {
+    db = tx((d) => {
+      const m = d.members.find((x) => !x.user_id && x.email?.toLowerCase() === email.toLowerCase());
+      if (m) m.user_id = userId;
+      return d;
+    });
+  }
   const m = db.members.find((x) => x.user_id === userId);
   if (!m) return null;
   const c = db.companies.find((x) => x.id === m.company_id);
-  return c ? { company: c, role: m.role } : null;
+  return c ? { company: c, role: m.role, memberId: m.id } : null;
 }
 
+
+const member = (company_id: string, i: MemberInput & { user_id?: string | null; is_owner?: boolean }): Member & { company_id: string } => ({
+  id: randomUUID(), company_id, user_id: i.user_id ?? null, full_name: i.full_name, email: i.email ?? null, phone: i.phone ?? null,
+  title: i.title ?? null, role: i.role, is_owner: i.is_owner ?? false,
+});
+
 /** First visit in demo mode: a sample company with the house.dwg job already read. */
-export async function seedDemo(userId: string, name: string | null) {
-  if (demoCompanyFor(userId)) return;
+export async function seedDemo(userId: string, name: string | null, email?: string | null) {
+  if (demoCompanyFor(userId, email)) return;
   const repo = new DemoRepo();
   tx((db) => {
     const id = randomUUID();
     db.companies.push({ id, owner: userId, name: "Demo Builders", logo_url: null, brand_color: "#ff6a1f", phone: "(555) 010-2030", email: "office@demobuilders.test", license_no: "GC-104882", website: null, address: null });
-    db.members.push({ company_id: id, user_id: userId, role: "owner", full_name: name });
+    db.members.push(member(id, { user_id: userId, full_name: name || "Company owner", email: email ?? null, title: "Owner", role: "admin", is_owner: true }));
+    for (const c of DEMO_CREW) db.members.push(member(id, c));
     for (const t of DEFAULT_TEMPLATES) db.templates.push({ id: randomUUID(), company_id: id, is_default: true, ...t });
   });
   const company = demoCompanyFor(userId)!.company;
@@ -94,8 +109,9 @@ export async function seedDemo(userId: string, name: string | null) {
       if (st[2]) st[2].status = "active";
       const plan = housePlan as unknown as Plan;
       for (const st of sampleStates(plan)) db.states.push({ job_id: jobId, ...st });
-      const pins = samplePins(plan);
-      pins.forEach((p, i) => db.pins.push({ id: randomUUID(), job_id: jobId, number: i + 1, element_id: null, floor_id: null, x: null, y: null, kind: "task", title: "", body: null, status: "open", priority: 2, due_date: null, assignee_id: null, close_requirement: "confirm", stage_id: null, links: [], created_by: userId, created_at: now(), closed_at: null, ...p } as Pin));
+      const crew = db.members.filter((m) => m.company_id === company.id && !m.is_owner);
+      const pins = samplePins(plan, crew);
+      pins.forEach((p, i) => db.pins.push({ id: randomUUID(), job_id: jobId, number: i + 1, element_id: null, floor_id: null, x: null, y: null, kind: "task", title: "", body: null, status: "open", priority: 2, due_date: null, tagged: [], close_requirement: "confirm", stage_id: null, links: [], created_by: userId, created_at: now(), closed_at: null, ...p } as Pin));
     });
   });
 }
@@ -107,7 +123,7 @@ export class DemoRepo implements Repo {
     return tx((db) => {
       const id = randomUUID();
       db.companies.push({ id, owner: userId, name: input.name, logo_url: null, brand_color: input.brand_color || "#ff6a1f", phone: input.phone ?? null, email: input.email ?? null, license_no: input.license_no ?? null, website: input.website ?? null, address: input.address ?? null });
-      db.members.push({ company_id: id, user_id: userId, role: "owner", full_name: fullName ?? null });
+      db.members.push(member(id, { user_id: userId, full_name: fullName || "Owner", title: "Owner", role: "admin", is_owner: true }));
       for (const t of DEFAULT_TEMPLATES) db.templates.push({ id: randomUUID(), company_id: id, is_default: true, ...t });
       return id;
     });
@@ -120,7 +136,26 @@ export class DemoRepo implements Repo {
     tx((db) => (db.companies.find((c) => c.id === companyId)!.logo_url = `/api/demo-files/${p}`));
   }
   async listMembers(companyId: string): Promise<Member[]> {
-    return load().members.filter((m) => m.company_id === companyId).map((m) => ({ user_id: m.user_id, full_name: m.full_name, role: m.role }));
+    return load().members.filter((m) => m.company_id === companyId)
+      .sort((a, b) => Number(b.is_owner) - Number(a.is_owner) || a.full_name.localeCompare(b.full_name))
+      .map(({ company_id: _c, ...m }) => m); // eslint-disable-line @typescript-eslint/no-unused-vars
+  }
+  async addMember(companyId: string, input: MemberInput) {
+    return tx((db) => {
+      if (input.email && db.members.some((m) => m.company_id === companyId && m.email?.toLowerCase() === input.email!.toLowerCase())) throw new Error("Someone on the team already has that email.");
+      const m = member(companyId, input);
+      db.members.push(m);
+      return m.id;
+    });
+  }
+  async updateMember(memberId: string, input: Partial<MemberInput>) {
+    tx((db) => Object.assign(db.members.find((m) => m.id === memberId)!, input));
+  }
+  async removeMember(memberId: string) {
+    tx((db) => {
+      db.members = db.members.filter((m) => m.id !== memberId);
+      for (const p of db.pins) p.tagged = (p.tagged ?? []).filter((t) => t !== memberId);
+    });
   }
 
   async listJobs(companyId: string): Promise<JobSummary[]> {
@@ -279,13 +314,13 @@ export class DemoRepo implements Repo {
 
   async listPins(jobId: string) {
     const db = load();
-    return db.pins.filter((p) => p.job_id === jobId).map((p) => ({ ...p, comment_count: db.comments.filter((c) => c.pin_id === p.id).length })).sort((a, b) => b.number - a.number);
+    return db.pins.filter((p) => p.job_id === jobId).map((p) => ({ ...p, tagged: p.tagged ?? [], comment_count: db.comments.filter((c) => c.pin_id === p.id).length })).sort((a, b) => b.number - a.number);
   }
   async createPin(jobId: string, userId: string, input: PinInput) {
     return tx((db) => {
       const id = randomUUID();
       const number = Math.max(0, ...db.pins.filter((p) => p.job_id === jobId).map((p) => p.number)) + 1;
-      db.pins.push({ id, job_id: jobId, number, element_id: input.element_id ?? null, floor_id: input.floor_id ?? null, x: input.x ?? null, y: input.y ?? null, anchor: input.anchor ?? null, kind: input.kind, title: input.title, body: input.body ?? null, status: "open", priority: input.priority ?? 2, due_date: input.due_date ?? null, assignee_id: null, close_requirement: input.close_requirement ?? "confirm", stage_id: input.stage_id ?? null, links: input.links ?? [], created_by: userId, created_at: now(), closed_at: null });
+      db.pins.push({ id, job_id: jobId, number, element_id: input.element_id ?? null, floor_id: input.floor_id ?? null, x: input.x ?? null, y: input.y ?? null, anchor: input.anchor ?? null, kind: input.kind, title: input.title, body: input.body ?? null, status: "open", priority: input.priority ?? 2, due_date: input.due_date ?? null, tagged: input.tagged ?? [], close_requirement: input.close_requirement ?? "confirm", stage_id: input.stage_id ?? null, links: input.links ?? [], created_by: userId, created_at: now(), closed_at: null });
       return id;
     });
   }
