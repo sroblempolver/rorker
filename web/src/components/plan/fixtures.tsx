@@ -12,7 +12,7 @@ const FABRIC = "#6f7486";
 export function fixtureHeight(kind: string): number {
   const h: Record<string, number> = {
     toilet: 800, washbasin: 900, vanity: 900, bathtub: 580, shower: 2050, base_cabinet: 900, kitchen_sink: 900, cooktop: 900,
-    range: 900, dishwasher: 900, oven: 900, island: 900, wall_cabinet: 2250, tall_cabinet: 2200, fridge: 1850, wardrobe: 2200,
+    range: 900, dishwasher: 900, oven: 900, island: 900, wall_cabinet: 700, range_hood: 600, filler: 900, tall_cabinet: 2200, fridge: 1850, wardrobe: 2200,
     bookshelf: 2000, washing_machine: 850, dryer: 850, water_heater: 1500, bed: 1050, sofa: 850, armchair: 850, chair: 900,
     desk: 750, table: 750, dining_table: 750, nightstand: 550, lamp: 1600, plant: 1200, tv: 1700, fireplace: 1150,
     towel_radiator: 1500, other: 850,
@@ -20,12 +20,112 @@ export function fixtureHeight(kind: string): number {
   return h[kind] ?? 850;
 }
 
+/** Kinds that are linework of something else: never drawn as objects. */
+export const HIDDEN_KINDS = new Set(["door_leaf", "part"]);
+
+export const fixtureBottom = (f: Fixture) => f.elevation_mm || (f.kind === "wall_cabinet" ? 1450 : f.kind === "range_hood" ? 1600 : 0);
+export const fixtureTop = (f: Fixture) => fixtureBottom(f) + (f.height_mm ?? fixtureHeight(f.kind));
+/** Mounted up on the wall (wall cabinets, hoods): dashed in the top view, under-counter clear. */
+export const isWallMounted = (f: Fixture) => fixtureBottom(f) >= 1000;
+
+const CARCASS = "#e4dccb";
+const WORKTOP = "#4a4844";
+
+/** A kitchen cabinet or appliance from the front, from its real height, mount height and front. */
+function Cabinet({ f, x0, x1, lw, tint }: { f: Fixture; x0: number; x1: number; lw: number; tint?: string | null }) {
+  const w = x1 - x0, cx = x0 + w / 2;
+  const b = -fixtureBottom(f), t = -fixtureTop(f);
+  const s = 1.2 * lw;
+  const line = { stroke: INK, strokeWidth: s, strokeLinejoin: "round" as const };
+  const floor = b === 0;
+  const kick = floor && f.kind !== "fridge" ? 100 : 0;
+  const top = floor && ["base_cabinet", "kitchen_sink", "dishwasher", "filler"].includes(f.kind) ? 38 : 0;
+  const body = tint ?? (["dishwasher", "range", "fridge", "range_hood"].includes(f.kind) ? STEEL : CARCASS);
+  const fy0 = t + top, fy1 = b - kick; // the front face
+  const handle = (x: number, y0: number, y1: number) => <path d={`M${x} ${y0}V${y1}`} stroke="#6d6a63" strokeWidth={Math.max(18, 2 * lw)} strokeLinecap="round" />;
+  const hbar = (y: number, xa: number, xb: number) => <path d={`M${xa} ${y}H${xb}`} stroke="#6d6a63" strokeWidth={Math.max(18, 2 * lw)} strokeLinecap="round" />;
+  let front: React.ReactNode = null;
+  switch (f.kind === "base_cabinet" || f.kind === "wall_cabinet" || f.kind === "kitchen_sink" ? f.front ?? "doors" : f.kind) {
+    case "doors": case "sink": {
+      const n = w > 460 ? 2 : 1;
+      front = (
+        <>
+          {f.front === "sink" && <rect x={x0 + 20} y={fy0 + 20} width={w - 40} height={120} fill="none" {...line} strokeOpacity={0.6} />}
+          {Array.from({ length: n }, (_, i) => {
+            const dx0 = x0 + (w / n) * i + 12, dw = w / n - 24, dy0 = fy0 + (f.front === "sink" ? 160 : 14), dh = fy1 - dy0 - 14;
+            const hx = n === 2 ? (i === 0 ? dx0 + dw - 50 : dx0 + 50) : dx0 + dw - 50;
+            return <g key={i}><rect x={dx0} y={dy0} width={dw} height={dh} fill="none" {...line} strokeOpacity={0.7} />{handle(hx, floor ? dy0 + 60 : dy0 + dh - 200, floor ? dy0 + 200 : dy0 + dh - 60)}</g>;
+          })}
+        </>
+      );
+      break;
+    }
+    case "door": {
+      const dx0 = x0 + 12, dw = w - 24, dy0 = fy0 + 14, dh = fy1 - dy0 - 14;
+      front = <><rect x={dx0} y={dy0} width={dw} height={dh} fill="none" {...line} strokeOpacity={0.7} />{handle(dx0 + dw - 45, floor ? dy0 + 60 : dy0 + dh - 200, floor ? dy0 + 200 : dy0 + dh - 60)}</>;
+      break;
+    }
+    case "drawers": {
+      const hs = [0.22, 0.36, 0.42];
+      let y = fy0 + 10;
+      front = hs.map((k, i) => {
+        const h = (fy1 - fy0 - 20) * k;
+        const el = <g key={i}><rect x={x0 + 12} y={y} width={w - 24} height={h - 10} fill="none" {...line} strokeOpacity={0.7} />{hbar(y + Math.min(80, h / 3), cx - Math.min(150, w * 0.25), cx + Math.min(150, w * 0.25))}</g>;
+        y += h;
+        return el;
+      });
+      break;
+    }
+    case "blind_corner": case "lazy_susan":
+      front = <><rect x={x0 + 12} y={fy0 + 14} width={w * 0.45} height={fy1 - fy0 - 28} fill="#d3cab8" {...line} strokeOpacity={0.5} /><rect x={x0 + w * 0.48} y={fy0 + 14} width={w * 0.5} height={fy1 - fy0 - 28} fill="none" {...line} strokeOpacity={0.7} /></>;
+      break;
+    case "panel": case "filler":
+      front = null;
+      break;
+    case "dishwasher":
+      front = <><rect x={x0 + 12} y={fy0 + 10} width={w - 24} height={110} fill="#2a2b2e" />{hbar(fy0 + 170, x0 + 80, x1 - 80)}</>;
+      break;
+    case "range":
+      front = (
+        <>
+          <rect x={x0 - 10} y={t - 20} width={w + 20} height={60} fill="#1f2022" />
+          {Array.from({ length: 4 }, (_, i) => <circle key={i} cx={x0 + (w / 5) * (i + 1)} cy={t + 90} r={22} fill={INK} />)}
+          <rect x={x0 + 50} y={t + 180} width={w - 100} height={(fy1 - t) * 0.62} rx={20} fill="#2a2a2c" />
+          {hbar(t + 150, x0 + 70, x1 - 70)}
+        </>
+      );
+      break;
+    case "fridge":
+      front = <><path d={`M${x0} ${t + (b - t) * 0.36}H${x1}`} {...line} />{handle(x1 - 70, t + 120, t + (b - t) * 0.3)}{handle(x1 - 70, t + (b - t) * 0.42, t + (b - t) * 0.7)}</>;
+      break;
+    case "range_hood":
+      return (
+        <g {...line}>
+          <rect x={cx - w * 0.14} y={t} width={w * 0.28} height={(b - t) * 0.6} fill={body} />
+          <path d={`M${x0} ${b}H${x1}L${x1 - w * 0.12} ${t + (b - t) * 0.55}H${x0 + w * 0.12}Z`} fill={body} />
+        </g>
+      );
+  }
+  return (
+    <g {...line}>
+      <rect x={x0} y={t + top} width={w} height={b - t - top - kick} fill={body} />
+      {kick > 0 && <rect x={x0 + 50} y={b - kick} width={w - 100} height={kick} fill="#3b3a37" />}
+      {top > 0 && <rect x={x0 - 15} y={t} width={w + 30} height={top} fill={WORKTOP} />}
+      {front}
+    </g>
+  );
+}
+
+const CABINET_KINDS = new Set(["base_cabinet", "wall_cabinet", "kitchen_sink", "dishwasher", "range", "fridge", "range_hood", "filler"]);
+
 export function FixtureElevation({ f, x0, x1, lw, tint }: { f: Fixture; x0: number; x1: number; lw: number; tint?: string | null }) {
   const w = Math.max(x1 - x0, 200);
   const cx = x0 + w / 2;
   const s = 1.2 * lw;
   const body = tint ?? BODY;
   const line = { stroke: INK, strokeWidth: s, strokeLinejoin: "round" as const };
+  if (HIDDEN_KINDS.has(f.kind)) return null;
+  if (CABINET_KINDS.has(f.kind) && (f.height_mm || f.front)) return <Cabinet f={f} x0={x0} x1={x1} lw={lw} tint={tint} />;
   switch (f.kind) {
     case "toilet": {
       const pw = Math.min(w, 420);

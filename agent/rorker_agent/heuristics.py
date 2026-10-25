@@ -3,6 +3,8 @@ baseline the AI is measured against). Names rooms from their contents and turns 
 questions."""
 from __future__ import annotations
 
+import re
+
 from .build import room_from_text
 from .schema import Plan, Question
 
@@ -87,7 +89,9 @@ def apply_answers_rules(plan: Plan, answered: list[Question]) -> Plan:
     idx = plan.element_index()
     for q in answered:
         a = (q.answer or "").strip()
-        if q.kind == "room_split" and a.lower().startswith("one"):
+        low = a.lower()
+        # free text works too: "it's all one open-plan room" merges, "two rooms" doesn't
+        if q.kind == "room_split" and re.search(r"\b(one|single|same|open[- ]plan|merge)\b", low) and not re.search(r"\b(two|2|separate|split)\b", low):
             merge_rooms(plan, q.element_ids)
         elif q.kind == "room_name" and a and a.lower() != "something else":
             r = idx.get(q.element_ids[0])

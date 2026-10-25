@@ -3,11 +3,13 @@
 // inside a room, walls get their own markers so you can step up to the wall view. Everything that has
 // an ID can be clicked, carries a status colour, and can hold pins.
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Pin } from "@/lib/data/types";
-import { bboxOf, centroid, unionBBox, edgeDistance, elementCenter, findElement, floorBBox, labelPoint, lineD, pathD, pointInPoly, roomOf, roomSides, type WallSide } from "@/lib/plan/geometry";
-import type { BBox, ElementStatus, Floor, Opening, Plan, Pt, Room } from "@/lib/plan/types";
+import type { JobItem, Pin, PinInput } from "@/lib/data/types";
+import { bboxOf, centroid, unionBBox, edgeDistance, elementCenter, findElement, floorBBox, footprint, labelPoint, lineD, pathD, pointInPoly, roomOf, roomSides, sidePoint, type WallSide } from "@/lib/plan/geometry";
+import type { BBox, ElementStatus, Fixture, Floor, Opening, Plan, Pt, Room } from "@/lib/plan/types";
 import { CHALK, FIXTURE_STROKE, GLASS, GROUND, ROOM_MATERIAL, STATUS_COLOR, WALL_EXT_TOP, WALL_SIDE, WALL_TOP } from "./style";
-import { DraftFlag, PinFlag, PlanDefs, useHoldToPin } from "./svg";
+import { DraftFlag, PinFlag, PlanDefs, useHoldToPin, useWorldDrag } from "./svg";
+import { HIDDEN_KINDS, fixtureTop, isWallMounted } from "./fixtures";
+import { ITEM_ICON } from "./items";
 import type { Controls, PinTarget, ScreenPoint } from "./target";
 import { usePanZoom } from "./usePanZoom";
 
@@ -33,13 +35,38 @@ interface Props {
   onPlacePin: (t: PinTarget, at: ScreenPoint) => void;
   draft?: PinTarget | null;
   controls: Controls;
+  items: JobItem[];
+  /** small wall items (outlets ...) are hidden from the top view unless asked for */
+  showItems: boolean;
+  selectedItem: string | null;
+  onSelectItem: (id: string) => void;
+  onMovePin: (id: string, input: Partial<PinInput>) => void;
+  onMoveFixture: (id: string, dx: number, dy: number) => void;
 }
+
+/** Top-view fill per kind: the object's real colour, so the plan reads like a model from above. */
+const TOP_FILL: Record<string, string> = {
+  base_cabinet: "#5b5750", kitchen_sink: "#5b5750", dishwasher: "#5b5750", filler: "#5b5750", range: "#232426", fridge: "#b9bec4", oven: "#232426", cooktop: "#232426",
+  island: "#5b5750", tall_cabinet: "#d9d2c4", toilet: "#f4efe6", washbasin: "#f4efe6", bathtub: "#f4efe6", shower: "#cfe6ee", vanity: "#a07850",
+  washing_machine: "#f4efe6", dryer: "#f4efe6", water_heater: "#e6e1d6", bed: "#e9e3d6", nightstand: "#8a6a48", wardrobe: "#8a6a48", sofa: "#6f7486",
+  armchair: "#6f7486", chair: "#a07850", dining_table: "#a07850", table: "#a07850", desk: "#a07850", bookshelf: "#8a6a48", sideboard: "#8a6a48",
+  tv: "#151618", lamp: "#f3c56b", plant: "#3f7a4a", car: "#55606b", fireplace: "#8d8a83",
+};
+/** Fixtures that can't be picked or moved in the top view: linework of something else, and things up
+ *  on the wall (wall cabinets, hoods) that sit over the counter. */
+const inert = (f: Fixture) => HIDDEN_KINDS.has(f.kind) || isWallMounted(f);
 
 const box = (b: BBox) => ({ x: b[0], y: b[1], w: Math.max(1, b[2] - b[0]), h: Math.max(1, b[3] - b[1]) });
 
 /** The element under a point: small things first, rooms last. */
 export function hitTest(floor: Floor, p: Pt): string | null {
-  for (const f of floor.fixtures) if (p[0] >= f.bbox[0] && p[0] <= f.bbox[2] && p[1] >= f.bbox[1] && p[1] <= f.bbox[3]) return f.id;
+  // the smallest object under the point wins, so a vanity beats the bath it stands next to
+  let best: Fixture | null = null;
+  for (const f of floor.fixtures) {
+    if (inert(f) || p[0] < f.bbox[0] || p[0] > f.bbox[2] || p[1] < f.bbox[1] || p[1] > f.bbox[3]) continue;
+    if (!best || (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]) < (best.bbox[2] - best.bbox[0]) * (best.bbox[3] - best.bbox[1])) best = f;
+  }
+  if (best) return best.id;
   for (const o of floor.openings) if (pointInPoly(p, o.polygon)) return o.id;
   for (const w of floor.walls) if (pointInPoly(p, w.polygon)) return w.id;
   for (const s of floor.stairs) if (pointInPoly(p, s.polygon)) return s.id;
@@ -128,6 +155,8 @@ export function FloorCanvas(props: Props) {
   }, [zoomBy, setHome, homeBox, room]);
 
   const [hover, setHover] = useState<string | null>(null);
+  const { drag, start } = useWorldDrag(pz.toWorld);
+  const shapes = useMemo(() => new Map(floor.fixtures.map((f) => [f.id, footprint(f)])), [floor.fixtures]);
   const sides = useMemo(() => (room ? roomSides(floor, room) : []), [floor, room]);
   const floorPins = useMemo(
     () => pins.map((p) => {
@@ -242,25 +271,38 @@ export function FloorCanvas(props: Props) {
         ))}
       </g>
 
-      {/* fixtures: the drawing's own linework, in white like a pencil overlay */}
+      {/* fixtures, seen from above: a shadow from their real height, their colour, then the drawing's
+          own linework on top. Wall cabinets and hoods are dashed (they hang over the counter). */}
       <g>
-        {floor.fixtures.map((f) => {
+        {floor.fixtures.filter((f) => !HIDDEN_KINDS.has(f.kind) && isWallMounted(f)).map((f) => (
+          <path key={f.id} d={pathD(shapes.get(f.id)!)} fill="none" stroke="#f4efe6" strokeOpacity={inRoom(f.room_id) ? 0.55 : 0.2} strokeWidth={lw} strokeDasharray={`${5 * lw} ${4 * lw}`} pointerEvents="none" />
+        ))}
+        {floor.fixtures.filter((f) => !inert(f) || f.kind === "part").map((f) => {
           const b = f.bbox, sel = selected === f.id, hot = hover === f.id;
+          if (f.kind === "part") return <path key={f.id} d={lineD(f.outline)} fill="none" stroke={FIXTURE_STROKE} strokeOpacity={inRoom(f.room_id) ? 0.7 : 0.25} strokeWidth={lw} pointerEvents="none" />;
           const faint = f.kind === "other";
           const st = status(f.id);
-          const ink = colorMode === "progress" && st ? STATUS_COLOR[st] : FIXTURE_STROKE;
+          const fill = colorMode === "progress" && st ? STATUS_COLOR[st] : TOP_FILL[f.kind];
+          const shape = shapes.get(f.id)!;
+          const h = fixtureTop(f);
+          const live = drag?.id === `f:${f.id}` ? { dx: drag.x - f.center[0], dy: drag.y - f.center[1] } : null;
           return (
-            <g key={f.id} onClick={(e) => click(f.id, e)} onPointerEnter={hov(f.id)} onPointerLeave={hov(null)} className="cursor-pointer" opacity={inRoom(f.room_id) ? 1 : 0.3}>
+            <g key={f.id} onClick={(e) => click(f.id, e)} onPointerEnter={hov(f.id)} onPointerLeave={hov(null)} className={pinMode ? "cursor-crosshair" : live ? "cursor-grabbing" : sel ? "cursor-grab" : "cursor-pointer"} opacity={inRoom(f.room_id) ? 1 : 0.3}
+              transform={live ? `translate(${live.dx} ${live.dy})` : undefined}
+              onPointerDown={sel && !pinMode ? (e) => start(`f:${f.id}`, e, { x: f.center[0], y: f.center[1] }, (nx, ny) => props.onMoveFixture(f.id, Math.round(nx - f.center[0]), Math.round(ny - f.center[1])), (q, free) => (free ? q : { x: Math.round(q.x / 10) * 10, y: Math.round(q.y / 10) * 10 })) : undefined}>
+              {fill && <path d={pathD(shape)} fill="#000" fillOpacity={0.35} transform={`translate(${Math.min(h, 2200) * 0.08} ${Math.min(h, 2200) * 0.14})`} pointerEvents="none" />}
+              {fill && <path d={pathD(shape)} fill={fill} fillOpacity={colorMode === "progress" && st ? 0.85 : 1} />}
               <rect x={b[0]} y={b[1]} width={b[2] - b[0]} height={b[3] - b[1]} rx={40} fill={sel ? CHALK : hot ? "#fff" : "transparent"} fillOpacity={sel ? 0.16 : 0.1}
                 stroke={sel ? CHALK : hot ? "#fff" : "transparent"} strokeWidth={1.5 * lw} strokeDasharray={sel ? undefined : `${4 * lw} ${3 * lw}`} />
               {f.outline.length ? (
-                <path d={lineD(f.outline)} fill="none" stroke={ink} strokeOpacity={faint ? 0.55 : 0.92} strokeWidth={1.2 * lw} strokeLinejoin="round" strokeLinecap="round" />
+                <path d={lineD(f.outline)} fill="none" stroke={fill ? "#1b1a17" : FIXTURE_STROKE} strokeOpacity={fill ? 0.55 : faint ? 0.55 : 0.92} strokeWidth={1.2 * lw} strokeLinejoin="round" strokeLinecap="round" pointerEvents="none" />
               ) : (
                 <>
-                  <rect x={b[0]} y={b[1]} width={b[2] - b[0]} height={b[3] - b[1]} rx={60} fill="none" stroke={ink} strokeWidth={lw} />
-                  <text x={f.center[0]} y={f.center[1] + fs * 0.35} textAnchor="middle" fontSize={fs * 0.8} fill={ink}>{f.name}</text>
+                  <rect x={b[0]} y={b[1]} width={b[2] - b[0]} height={b[3] - b[1]} rx={60} fill="none" stroke={FIXTURE_STROKE} strokeWidth={lw} />
+                  <text x={f.center[0]} y={f.center[1] + fs * 0.35} textAnchor="middle" fontSize={fs * 0.8} fill={FIXTURE_STROKE}>{f.name}</text>
                 </>
               )}
+              {live && <text x={f.center[0]} y={b[1] - 10 * lw} textAnchor="middle" fontSize={11 * lw} fontFamily="var(--font-mono)" fill="#55b2ff" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>moved {Math.round(Math.hypot(live.dx, live.dy))} mm</text>}
             </g>
           );
         })}
@@ -369,12 +411,34 @@ export function FloorCanvas(props: Props) {
         </g>
       )}
 
+      {/* wall items, only when asked for: small markers along the wall */}
+      {props.showItems && room && (
+        <g>
+          {props.items.filter((it) => it.side.startsWith(room.id + ":")).map((it) => {
+            const sd = sides.find((x) => x.key === it.side);
+            if (!sd) return null;
+            const [x, y] = sidePoint(sd, it.x, 9 * lw);
+            const sel = props.selectedItem === it.id;
+            return (
+              <g key={it.id} transform={`translate(${x} ${y})`} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); props.onSelectItem(it.id); }}>
+                <circle r={8 * lw} fill={sel ? CHALK : "#fbf8f1"} stroke="#1b1a17" strokeWidth={1.2 * lw} />
+                <text y={3.6 * lw} textAnchor="middle" fontSize={10 * lw} fill="#1b1a17">{ITEM_ICON[it.kind]}</text>
+              </g>
+            );
+          })}
+        </g>
+      )}
+
       {/* pins */}
       <g>
         {floorPins.map(({ pin, pt }) => {
           const e = pin.element_id ? findElement(plan, pin.element_id) : null;
           if (room && e && roomOf(e) !== room.id && !pointInPoly(pt, room.polygon)) return null;
-          return <PinFlag key={pin.id} pin={pin} x={pt[0]} y={pt[1]} px={lw} selected={selectedPin === pin.id} onClick={(ev) => { ev.stopPropagation(); props.onSelectPin(pin.id); }} />;
+          const live = drag?.id === `p:${pin.id}` ? drag : null;
+          const movable = !pin.anchor && !pinMode;
+          return <PinFlag key={pin.id} pin={pin} x={live ? live.x : pt[0]} y={live ? live.y : pt[1]} px={lw} selected={selectedPin === pin.id} lifted={!!live}
+            onClick={(ev) => { ev.stopPropagation(); props.onSelectPin(pin.id); }}
+            onPointerDown={movable ? (ev) => start(`p:${pin.id}`, ev, { x: pt[0], y: pt[1] }, (nx, ny) => props.onMovePin(pin.id, { floor_id: floor.id, x: Math.round(nx), y: Math.round(ny), element_id: hitTest(floor, [nx, ny]) ?? pin.element_id })) : undefined} />;
         })}
         {draftPt && <DraftFlag x={draftPt[0]} y={draftPt[1]} px={lw} />}
       </g>

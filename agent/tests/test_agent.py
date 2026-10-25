@@ -47,8 +47,7 @@ def test_ai_result_is_applied(rules_plan, monkeypatch):
     up = plan.floors[1]
     split = next(f for f in plan.flags if f.code == "room_split" and f.element_ids[0].startswith("1-"))
     a, b = split.element_ids
-    kitchen = next(r for r in plan.floors[0].rooms if r.type == "kitchen")
-    unknown = next(x for x in plan.floors[0].fixtures if x.room_id == kitchen.id and x.kind == "other")
+    unknown = next(x for x in plan.floors[0].fixtures if x.kind == "other")
     canned = dict(building_name="House", roof="hip", notes="", openings=[],
                   rooms=[dict(id=a, name="Master bedroom", type="bedroom", confidence=0.9, reason="bed")],
                   fixtures=[dict(id=unknown.id, kind="base_cabinet", name="Base cabinet", confidence=0.9)],
@@ -96,3 +95,43 @@ def test_request_shape(monkeypatch):
     assert b["output_config"]["format"]["type"] == "json_schema"
     assert b["fallbacks"] == "default"
     assert "server-side-fallback-2026-07-01" in seen["beta"]
+
+
+def test_kitchen_gets_cabinets(rules_plan):
+    g = rules_plan.floors[0]
+    kitchen = next(r for r in g.rooms if r.type == "kitchen")
+    inside = [x for x in g.fixtures if x.room_id == kitchen.id]
+    kinds = [x.kind for x in inside]
+    # the drawn counter becomes cabinets at the drawing's own sizes, with the appliances placed
+    assert {"kitchen_sink", "dishwasher", "range", "fridge", "range_hood"} <= set(kinds)
+    assert kinds.count("base_cabinet") >= 3 and kinds.count("wall_cabinet") >= 4
+    assert not any(x.kind == "other" and (x.bbox[2] - x.bbox[0]) > 3000 for x in inside)
+    base = [x for x in inside if x.kind == "base_cabinet"]
+    assert all(abs((x.height_mm or 0) - 900) < 20 for x in base)
+    assert all(x.elevation_mm >= 1372 for x in inside if x.kind == "wall_cabinet")
+
+
+def test_generated_kitchen_fits_stock_sizes():
+    from rorker_agent.furnish import _fill
+    pieces = _fill(2000, [914, 838, 762, 686, 610, 533, 457, 381, 305, 229])
+    assert 2000 - 160 <= sum(pieces) <= 2000
+
+
+def test_unknown_block_splits_into_movable_pieces():
+    from rorker_agent.furnish import split_unknowns
+    from rorker_agent.schema import Fixture, Floor
+    sq = lambda x, y, w, h: [(x, y), (x + w, y), (x + w, y + h), (x, y + h), (x, y)]
+    # two boxes side by side with a gap, plus a basin drawn inside the first one
+    f = Fixture(id="G-F01", kind="other", name="Unidentified item", center=(700, 300), bbox=(0, 0, 1400, 600),
+                outline=[sq(0, 0, 600, 600), sq(150, 150, 300, 300), sq(800, 0, 600, 600)])
+    floor = Floor(id="G", name="Ground", level=0, bounds=(0, 0, 5000, 5000), fixtures=[f])
+    n = [1]
+
+    def next_id():
+        n[0] += 1
+        return f"G-F{n[0]:02d}"
+
+    split_unknowns(floor, next_id)
+    assert [x.id for x in floor.fixtures] == ["G-F01", "G-F02"]
+    assert len(floor.fixtures[0].outline) == 2  # the basin stays with its box
+    assert floor.fixtures[1].bbox[0] == 800

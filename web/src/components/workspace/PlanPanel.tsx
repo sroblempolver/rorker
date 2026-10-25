@@ -1,6 +1,7 @@
 "use client";
 // Where the plan comes from: upload a drawing, watch the reader work, answer its few questions.
 import { useState } from "react";
+import { MicButton, useDictation, VoiceNote } from "@/components/voice/speech";
 import type { PlanRow, PlanRun } from "@/lib/data/types";
 
 const RUN_LABEL: Record<PlanRun["status"], string> = { queued: "Waiting", running: "Reading…", needs_answers: "Has questions", done: "Done", failed: "Failed" };
@@ -37,31 +38,47 @@ export function UploadBox({ onUpload, compact }: { onUpload: (f: File) => Promis
 
 const OTHER = "Something else";
 
+/** One question: tap an option, or type or say the answer in your own words. Your words win. */
+function QuestionField({ q, value, text, onPick, onText, onShow }: {
+  q: PlanRow["data"]["questions"][number]; value: string; text: string; onPick: (o: string) => void; onText: (t: string) => void; onShow: () => void;
+}) {
+  const dict = useDictation((said) => onText(text ? `${text} ${said}` : said));
+  return (
+    <fieldset>
+      <legend className="text-[14px] mb-2">{q.text} <button type="button" onClick={onShow} className="text-chalk text-[13px] hover:underline whitespace-nowrap">Show on plan</button></legend>
+      <div className="flex flex-wrap gap-1.5">
+        {q.options.filter((o) => o !== OTHER).map((o) => (
+          <button type="button" key={o} onClick={() => { onPick(o); onText(""); }} aria-pressed={!text && value === o}
+            className={`chip !h-8 !text-[13px] ${!text && value === o ? "!bg-accent !text-accent-ink !border-accent" : "hover:text-text"}`}>{o}</button>
+        ))}
+      </div>
+      <div className="flex items-center gap-2 mt-2">
+        <input className={`input ${text ? "!border-accent" : ""}`} placeholder={q.options.length ? "Or say it in your own words…" : "Your answer…"} value={text} aria-label={`Your own answer: ${q.text}`}
+          onChange={(e) => onText(e.target.value)} />
+        <MicButton dictation={dict} label="Answer by voice" />
+      </div>
+      <div className="mt-1"><VoiceNote dictation={dict} /></div>
+    </fieldset>
+  );
+}
+
 export function QuestionsCard({ plan, onAnswer, onShow }: { plan: PlanRow; onAnswer: (answers: Record<string, string>) => Promise<void>; onShow: (ids: string[]) => void }) {
   const open = plan.data.questions.filter((q) => !q.answer);
   const [answers, setAnswers] = useState<Record<string, string>>(() => Object.fromEntries(open.map((q) => [q.id, q.default ?? q.options[0] ?? ""])));
-  const [other, setOther] = useState<Record<string, string>>({});
+  const [own, setOwn] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   if (!open.length) return null;
-  const final = () => Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, v === OTHER ? (other[k]?.trim() || OTHER) : v]));
+  // free text (typed or spoken) goes to the plan reader as is; it works out what to change
+  const final = () => Object.fromEntries(open.map((q) => [q.id, own[q.id]?.trim() || (answers[q.id] === OTHER ? "" : answers[q.id])]).filter(([, v]) => v));
   return (
     <div className="card !rounded-[4px] overflow-hidden"><div className="hazard h-2" /><div className="p-4 space-y-4">
       <div>
         <p className="eyebrow text-accent">{open.length} quick question{open.length > 1 ? "s" : ""}</p>
-        <p className="text-[13px] text-muted">The plan reader wasn&apos;t sure about these. Your answers fix the plan.</p>
+        <p className="text-[13px] text-muted">The plan reader wasn&apos;t sure about these. Tap an answer or just tell it, and it fixes the plan.</p>
       </div>
       {open.map((q) => (
-        <fieldset key={q.id}>
-          <legend className="text-[14px] mb-2">{q.text} <button type="button" onClick={() => onShow(q.element_ids)} className="text-chalk text-[13px] hover:underline whitespace-nowrap">Show on plan</button></legend>
-          <div className="flex flex-wrap gap-1.5">
-            {q.options.map((o) => (
-              <button type="button" key={o} onClick={() => setAnswers({ ...answers, [q.id]: o })} aria-pressed={answers[q.id] === o}
-                className={`chip !h-8 !text-[13px] ${answers[q.id] === o ? "!bg-accent !text-accent-ink !border-accent" : "hover:text-text"}`}>{o}</button>
-            ))}
-          </div>
-          {answers[q.id] === OTHER && <input className="input mt-2" autoFocus placeholder="What is it?" value={other[q.id] ?? ""} onChange={(e) => setOther({ ...other, [q.id]: e.target.value })} />}
-          {!q.options.length && <input className="input" value={answers[q.id] ?? ""} onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })} />}
-        </fieldset>
+        <QuestionField key={q.id} q={q} value={answers[q.id] ?? ""} text={own[q.id] ?? ""} onShow={() => onShow(q.element_ids)}
+          onPick={(o) => setAnswers((a) => ({ ...a, [q.id]: o }))} onText={(t) => setOwn((x) => ({ ...x, [q.id]: t }))} />
       ))}
       <button className="btn btn-primary w-full" disabled={busy} onClick={async () => { setBusy(true); try { await onAnswer(final()); } finally { setBusy(false); } }}>
         {busy ? "Sending…" : "Send answers"}

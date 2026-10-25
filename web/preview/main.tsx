@@ -3,15 +3,18 @@
 import { StrictMode, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import housePlan from "@/demo/house-plan.json";
-import { DEMO_CREW, samplePins, sampleStates } from "@/demo/sample";
+import { DEMO_CREW, sampleItems, samplePins, sampleStates } from "@/demo/sample";
 import { AllJobsMap } from "@/components/AllJobsMap";
 import { Logo } from "@/components/ui/AuthShell";
 import { JobWorkspace } from "@/components/workspace/JobWorkspace";
 import { TeamManager, type TeamApi } from "@/components/team/TeamManager";
 import type { WorkspaceApi, WorkspaceData } from "@/components/workspace/api";
 import { DEFAULT_TEMPLATES } from "@/lib/data/templates";
-import type { JobStage, JobSummary, Member, MemberInput, Pin, PinComment, PlanRow } from "@/lib/data/types";
+import type { Company, JobItem, JobStage, JobSummary, Member, MemberInput, Pin, PinComment, PlanRow, ShareLink } from "@/lib/data/types";
 import type { Plan } from "@/lib/plan/types";
+import { previewAsk } from "./assistant";
+import { SharedJob } from "@/components/share/SharedJob";
+import { newToken, shareView } from "@/lib/share";
 
 const now = () => new Date().toISOString();
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -39,19 +42,30 @@ function seed(): WorkspaceData {
   const planRow: PlanRow = { id: "plan1", job_id: jobId, version: 1, data: plan, created_at: now() };
   return {
     job: { id: jobId, company_id: "demo", name: "Hadley Road house", address: "14 Hadley Road", client_name: "Sam and Priya Okafor", client_email: null, client_phone: null, job_type: "renovation", status: "active", start_date: null, current_plan_id: "plan1", created_at: now() },
-    plan: planRow, stages, pins, states: sampleStates(plan),
+    plan: planRow, stages, pins, states: sampleStates(plan), edits: {}, can3d: true,
+    items: sampleItems(plan).map((it, i) => ({ id: `i${i + 1}`, job_id: jobId, label: null, note: null, created_at: now(), ...it }) as JobItem),
     runs: [{ id: "r1", job_id: jobId, kind: "read", file_name: "house.dwg", status: "needs_answers", error: null, plan_id: "plan1", created_at: now(), finished_at: now(), metrics: {} }],
-    members, me: "m0", aiAvailable: false,
+    members, me: "m0", aiAvailable: false, canShare: true,
   };
+}
+
+const COMPANY: Company = { id: "demo", name: "Demo Builders", logo_url: null, brand_color: "#ff6a1f", phone: "(555) 010-2030", email: null, license_no: null, website: null, address: null };
+const shares: ShareLink[] = [];
+function sharedView(d: WorkspaceData, token: string) {
+  const l = shares.find((x) => x.token === token);
+  return l ? shareView(l, { company: COMPANY, job: d.job, plan: d.plan?.data ?? null, edits: d.edits, items: d.items, pins: d.pins, stages: d.stages, members: d.members }) : null;
 }
 
 function memoryApi(d: WorkspaceData): WorkspaceApi {
   const comments = new Map<string, PinComment[]>();
-  let stages = d.stages;
-  const renumber = () => { stages = stages.map((s, i) => ({ ...s, position: i + 1 })); return stages; };
+  const renumber = () => { d.stages = d.stages.map((s, i) => ({ ...s, position: i + 1 })); return d.stages; };
   return {
     backHref: "/jobs",
-    async setElementState() {},
+    async setElementState(id, status) { d.states = [...d.states.filter((x) => x.element_id !== id), ...(status ? [{ element_id: id, status }] : [])]; },
+    async saveElementEdit(id, data) { if (data) d.edits = { ...d.edits, [id]: data }; else { const { [id]: _, ...rest } = d.edits; void _; d.edits = rest; } },
+    async createItem(input) { const it: JobItem = { id: uid(), job_id: d.job.id, label: null, note: null, created_at: now(), ...input }; d.items = [...d.items, it]; return it; },
+    async updateItem(id, input) { d.items = d.items.map((i) => (i.id === id ? { ...i, ...input } as JobItem : i)); },
+    async deleteItem(id) { d.items = d.items.filter((i) => i.id !== id); },
     async createPin(input) {
       const n = Math.max(0, ...d.pins.map((p) => p.number)) + 1;
       const pin = { id: uid(), job_id: d.job.id, number: n, status: "open", priority: 1, due_date: null, tagged: [], close_requirement: "confirm", stage_id: null, links: [], created_by: null, created_at: now(), closed_at: null, body: null, element_id: null, floor_id: null, x: null, y: null, comment_count: 0, ...input } as Pin;
@@ -70,16 +84,16 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
       comments.set(id, list);
       return list;
     },
-    async setStageStatus(id, status) { stages = stages.map((s) => (s.id === id ? { ...s, status } : s)); return stages; },
-    async addStage(name) { stages = [...stages, { id: uid(), job_id: d.job.id, position: stages.length + 1, name: name.trim() || "New stage", description: null, status: "not_started", started_at: null, completed_at: null }]; return stages; },
-    async renameStage(id, name) { stages = stages.map((s) => (s.id === id ? { ...s, name: name.trim() || s.name } : s)); return stages; },
-    async deleteStage(id) { stages = stages.filter((s) => s.id !== id); return renumber(); },
+    async setStageStatus(id, status) { d.stages = d.stages.map((s) => (s.id === id ? { ...s, status } : s)); return d.stages; },
+    async addStage(name) { d.stages = [...d.stages, { id: uid(), job_id: d.job.id, position: d.stages.length + 1, name: name.trim() || "New stage", description: null, status: "not_started", started_at: null, completed_at: null }]; return d.stages; },
+    async renameStage(id, name) { d.stages = d.stages.map((s) => (s.id === id ? { ...s, name: name.trim() || s.name } : s)); return d.stages; },
+    async deleteStage(id) { d.stages = d.stages.filter((s) => s.id !== id); return renumber(); },
     async moveStage(id, dir) {
-      const i = stages.findIndex((s) => s.id === id), j = i + dir;
-      if (i < 0 || j < 0 || j >= stages.length) return stages;
-      const next = [...stages];
+      const i = d.stages.findIndex((s) => s.id === id), j = i + dir;
+      if (i < 0 || j < 0 || j >= d.stages.length) return d.stages;
+      const next = [...d.stages];
       [next[i], next[j]] = [next[j], next[i]];
-      stages = next;
+      d.stages = next;
       return renumber();
     },
     async uploadPlan() { throw new Error("This preview runs on the sample house. Uploading a drawing works in the full app."); },
@@ -90,6 +104,15 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
       d.plan = { ...p, data };
     },
     async refreshPlan() { return { runs: d.runs, plan: d.plan }; },
+    async listShareLinks() { return [...shares]; },
+    async createShareLink(input) {
+      const l: ShareLink = { id: uid(), job_id: d.job.id, token: newToken(), label: input.label, member_id: input.member_id ?? null, pin_ids: input.pin_ids ?? [], expires_at: input.expires_at ?? null, revoked_at: null, created_at: now() };
+      if (!l.member_id && !l.pin_ids.length) throw new Error("Pick the tasks they should see.");
+      shares.unshift(l);
+      return l;
+    },
+    async revokeShareLink(id) { const l = shares.find((x) => x.id === id); if (l) l.revoked_at = now(); },
+    shareUrl: (token) => `https://app.rorker.com/s/${token}`,
   };
 }
 
@@ -125,9 +148,12 @@ function summary(d: WorkspaceData): JobSummary {
 }
 
 function App() {
-  const [page, setPage] = useState<"jobs" | "job" | "team">("job");
+  const [page, setPage] = useState<"jobs" | "job" | "team" | "shared">("job");
+  const [shareToken, setShareToken] = useState<string | null>(null);
   const data = useMemo(seed, []);
-  const api = useMemo(() => memoryApi(data), [data]);
+  // the assistant changes the job behind the screen's back: hand the workspace a fresh copy after
+  const [current, setCurrent] = useState(data);
+  const api = useMemo(() => { const a = memoryApi(data); return { ...a, ask: previewAsk(data, a), afterAssistant: () => setCurrent({ ...data }), openShare: (t: string) => { setShareToken(t); setPage("shared"); } }; }, [data]);
   const team = useMemo(() => teamApi(data), [data]);
   const [, bump] = useState(0);
   useEffect(() => {
@@ -145,7 +171,11 @@ function App() {
         </nav>
         <span className="chip ml-auto"><span className="sm:hidden">Preview</span><span className="hidden sm:inline">Preview · sample data, nothing is saved</span></span>
       </header>
-      {page === "team" ? (
+      {page === "shared" && shareToken ? (
+        <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">
+          {(() => { const v = sharedView(data, shareToken); return v ? <SharedJob view={v} onBack={() => setPage("job")} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
+        </div>
+      ) : page === "team" ? (
         <div className="flex-1 overflow-y-auto">
           <div className="px-4 sm:px-6 py-8 max-w-3xl w-full mx-auto">
             <p className="eyebrow">Demo Builders</p>
@@ -165,7 +195,7 @@ function App() {
         </div>
       ) : (
         <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">
-          <JobWorkspace data={data} api={api} onAllJobs={() => setPage("jobs")} />
+          <JobWorkspace data={current} api={api} onAllJobs={() => setPage("jobs")} />
         </div>
       )}
     </div>

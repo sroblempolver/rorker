@@ -2,6 +2,7 @@
 // Pins: tasks, issues, notes and materials stuck to any element of the plan. A pin can need a photo
 // before it closes, carry links (spec sheets, product pages) and a comment thread with photos.
 import { useEffect, useRef, useState } from "react";
+import { today } from "@/lib/dates";
 import type { JobStage, Pin, PinComment, PinInput, PinKind, PinStatus } from "@/lib/data/types";
 import { elementLabel, findElement, roomSides } from "@/lib/plan/geometry";
 import type { Plan } from "@/lib/plan/types";
@@ -62,9 +63,9 @@ export function PinRow({ pin, plan, onClick }: { pin: Pin; plan: Plan | null; on
   );
 }
 
-export function PinsList({ pins, plan, onSelect, onNew }: { pins: Pin[]; plan: Plan | null; onSelect: (id: string) => void; onNew: () => void }) {
+export function PinsList({ pins, plan, onSelect, onNew, initialFilter = "open" }: { pins: Pin[]; plan: Plan | null; onSelect: (id: string) => void; onNew: () => void; initialFilter?: "open" | PinKind }) {
   const { me } = useTeam();
-  const [filter, setFilter] = useState<"open" | "mine" | "all" | PinKind>("open");
+  const [filter, setFilter] = useState<"open" | "mine" | "all" | PinKind>(initialFilter);
   const shown = pins
     .filter((p) => (filter === "open" ? p.status !== "done" : filter === "mine" ? p.status !== "done" && !!me && p.tagged.includes(me) : filter === "all" ? true : p.kind === filter))
     .sort((a, b) => (a.status === "done" ? 1 : 0) - (b.status === "done" ? 1 : 0) || b.priority - a.priority || b.number - a.number);
@@ -95,7 +96,7 @@ export function PinForm({ plan, draft, preset, stages, onCancel, onCreate }: {
   const [kind, setKind] = useState<PinKind>(preset?.kind ?? "task");
   const [title, setTitle] = useState(preset?.title ?? "");
   const [body, setBody] = useState(preset?.body ?? "");
-  const [due, setDue] = useState("");
+  const [due, setDue] = useState(today); // one date it has to be done by, today unless changed
   const { members } = useTeam();
   const [tagged, setTagged] = useState<string[]>(preset?.tagged ?? []);
   const [photo, setPhoto] = useState(false);
@@ -229,7 +230,10 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
       {err && <p className="text-red text-sm">{err}</p>}
       {pin.body && <p className="text-[14px] whitespace-pre-wrap leading-relaxed">{pin.body}</p>}
       <div className="flex flex-wrap gap-1.5">
-        {pin.due_date && <span className="chip">Due {new Date(pin.due_date + "T00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>}
+        <label className="chip !pr-1 cursor-pointer" title="The date it has to be done by">Due
+          <input type="date" aria-label="Due date" className="bg-transparent text-text text-[12.5px] outline-none [color-scheme:dark]" value={pin.due_date ?? ""}
+            onChange={(ev) => run(() => onUpdate({ due_date: ev.target.value || null }))} />
+        </label>
         {stage && <span className="chip">{stage.name}</span>}
         {pin.priority > 1 && <span className="chip text-red">High priority</span>}
       </div>

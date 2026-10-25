@@ -4,9 +4,13 @@
 // actions or on the in-memory preview.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementStatus } from "@/lib/plan/types";
-import type { Pin, PinInput, PinKind } from "@/lib/data/types";
-import { findElement, roomOf } from "@/lib/plan/geometry";
+import type { ElementEdit, ItemInput, JobItem, Pin, PinInput, PinKind } from "@/lib/data/types";
+import { today } from "@/lib/dates";
+import { applyEdits } from "@/lib/plan/edits";
+import { findElement } from "@/lib/plan/geometry";
+import { pinLevel } from "@/components/plan/pinLevel";
 import { PlanViewer, type Level } from "@/components/plan/PlanViewer";
+import { Assistant } from "@/components/assistant/Assistant";
 import type { ColorMode } from "@/components/plan/FloorCanvas";
 import type { PinTarget, ScreenPoint } from "@/components/plan/target";
 import { TeamContext } from "@/components/team/context";
@@ -14,6 +18,7 @@ import type { WorkspaceApi, WorkspaceData } from "./api";
 import { Inspector, ProjectSummary, type AddPin } from "./Inspector";
 import { PinDetail, PinForm, PinsList, QuickPin } from "./PinsPanel";
 import { PlanPanel, UploadBox } from "./PlanPanel";
+import { ShareDialog } from "./ShareDialog";
 import { StagesPanel, StageStrip } from "./StagesPanel";
 
 type Tab = "details" | "pins" | "stages" | "plan";
@@ -23,6 +28,11 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const [runs, setRuns] = useState(data.runs);
   const [stages, setStages] = useState(data.stages);
   const [pins, setPins] = useState(data.pins);
+  const [items, setItems] = useState<JobItem[]>(data.items);
+  const [edits, setEdits] = useState<Record<string, ElementEdit>>(data.edits);
+  const [selectedItem, setSelectedItem] = useState<string | null>(null);
+  const [view3d, setView3d] = useState(data.can3d !== false);
+  const [pinFilter, setPinFilter] = useState<{ kind: PinKind | "open"; n: number }>({ kind: "open", n: 0 });
   const [states, setStates] = useState(() => new Map(data.states.map((s) => [s.element_id, s.status] as [string, ElementStatus])));
   const [level, setLevelRaw] = useState<Level>({ kind: "site" });
   const [selected, setSelected] = useState<string | null>(null);
@@ -61,8 +71,31 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     return () => clearInterval(t);
   }, [working, api, plan?.id, say]);
 
+  // fresh data from outside (the assistant changed something): take it, keep where the person is
+  const firstData = useRef(data);
+  useEffect(() => {
+    if (firstData.current === data) return;
+    firstData.current = data;
+    setPlan(data.plan); setRuns(data.runs); setStages(data.stages); setPins(data.pins); setItems(data.items); setEdits(data.edits);
+    setStates(new Map(data.states.map((s) => [s.element_id, s.status] as [string, ElementStatus])));
+  }, [data]);
+  const [askOpen, setAskOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
+
+  // Esc puts the pin back
+  useEffect(() => {
+    if (!pinMode) return;
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") setPinMode(false); };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [pinMode]);
+
+  // the plan as it is now: what the reader found, plus everything moved or changed in the app
+  const view = useMemo(() => (plan ? applyEdits(plan.data, edits) : null), [plan, edits]);
+
   const setLevel = useCallback((l: Level) => {
     setLevelRaw(l);
+    setSelectedItem(null);
     setPinMode(false);
     setSelectedPin(null);
     setDraft((d) => (d?.at ? null : d));
@@ -73,6 +106,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const select = useCallback((id: string | null, fly = false) => {
     setSelected(id);
     setSelectedPin(null);
+    setSelectedItem(null);
     setDraft(null);
     if (id) {
       setTab("details");
@@ -84,22 +118,16 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const showPin = useCallback((id: string) => {
     const pin = pins.find((p) => p.id === id);
     setSelectedPin(id);
+    setSelectedItem(null);
     setSelected(null);
     setDraft(null);
     setTab("pins");
     if (!pin || !plan) return;
-    if (pin.anchor?.view === "site" || pin.anchor?.view === "exterior") return setLevelRaw({ kind: pin.anchor.view });
-    if (pin.anchor?.view === "wall" && pin.anchor.side) {
-      const roomId = pin.anchor.side.split(":")[0];
-      const f = plan.data.floors.find((x) => x.rooms.some((r) => r.id === roomId));
-      if (f) return setLevelRaw({ kind: "wall", floorId: f.id, roomId, sideKey: pin.anchor.side });
-    }
+    const to = pinLevel(plan.data, pin);
+    if (!to) return;
     const e = pin.element_id ? findElement(plan.data, pin.element_id) : null;
-    const floorId = e?.floor.id ?? pin.floor_id;
-    if (!floorId) return;
-    const rid = e ? roomOf(e) : null;
-    if (level.kind === "wall" && e && (e.kind === "wall" || e.kind === "opening")) return; // already facing it
-    setLevelRaw(rid ? { kind: "room", floorId, roomId: rid } : { kind: "floor", floorId });
+    if (!pin.anchor && level.kind === "wall" && e && (e.kind === "wall" || e.kind === "opening")) return; // already facing it
+    setLevelRaw(to);
   }, [pins, plan, level]);
 
   /** Point at elements from a question without leaving the current panel. */
@@ -147,6 +175,61 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     setPins((list) => list.map((p) => (p.id === id ? { ...p, ...input, closed_at: input.status === "done" ? new Date().toISOString() : input.status ? null : p.closed_at } as Pin : p)));
   }, [api]);
 
+  /** Save a change to one plan element: merged into what was saved before, null puts it back as drawn. */
+  const saveEdit = useCallback(async (id: string, patch: ElementEdit | null) => {
+    let next: ElementEdit | null = null;
+    setEdits((all) => {
+      const merged = patch ? Object.fromEntries(Object.entries({ ...all[id], ...patch }).filter(([, v]) => v !== undefined && v !== null && v !== "")) as ElementEdit : null;
+      next = merged && Object.keys(merged).length ? merged : null;
+      const out = { ...all };
+      if (next) out[id] = next; else delete out[id];
+      return out;
+    });
+    await guard(() => api.saveElementEdit(id, next));
+  }, [api, guard]);
+
+  const moveFixture = useCallback((id: string, dx: number, dy: number, dz: number) => {
+    const e = edits[id] ?? {};
+    void saveEdit(id, { dx: (e.dx ?? 0) + dx || undefined, dy: (e.dy ?? 0) + dy || undefined, dz: (e.dz ?? 0) + dz || undefined });
+  }, [edits, saveEdit]);
+
+  const selectItem = useCallback((id: string) => {
+    setSelectedItem(id);
+    setSelected(null);
+    setSelectedPin(null);
+    setDraft(null);
+    setTab("details");
+  }, []);
+
+  const addItem = useCallback(async (input: ItemInput) => {
+    const it = await guard(() => api.createItem(input));
+    if (!it) return;
+    setItems((l) => [...l, it]);
+    selectItem(it.id);
+    say("Placed. Drag it to where it goes");
+  }, [api, guard, say, selectItem]);
+
+  const updateItem = useCallback(async (id: string, input: Partial<ItemInput>) => {
+    setItems((l) => l.map((i) => (i.id === id ? { ...i, ...input } as JobItem : i)));
+    await guard(() => api.updateItem(id, input));
+  }, [api, guard]);
+
+  const deleteItem = useCallback(async (id: string) => {
+    setItems((l) => l.filter((i) => i.id !== id));
+    setSelectedItem(null);
+    await guard(() => api.deleteItem(id));
+  }, [api, guard]);
+
+  const movePin = useCallback((id: string, input: Partial<PinInput>) => { void guard(() => updatePin(id, input)); }, [guard, updatePin]);
+
+  /** A count chip (3 tasks, 1 issue): the pins list, showing just those. */
+  const showPinKind = useCallback((kind: PinKind) => {
+    setPinFilter({ kind, n: Date.now() });
+    setSelectedPin(null);
+    setDraft(null);
+    setTab("pins");
+  }, []);
+
   const stageOp = useCallback(async (fn: () => Promise<typeof stages>) => {
     const next = await guard(fn);
     if (next) setStages(next);
@@ -160,8 +243,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
 
   const panel = useMemo(() => {
     if (tab === "pins") {
-      if (draft && !draft.at) return <PinForm key={`${draft.elementId}${draft.anchor?.x}${draft.preset?.title}`} plan={plan?.data ?? null} draft={draft} preset={draft.preset} stages={stages} onCancel={() => setDraft(null)} onCreate={async (input) => { await createPin(input); }} />;
-      if (pin) return <PinDetail pin={pin} plan={plan?.data ?? null} stages={stages} onBack={() => setSelectedPin(null)} onShow={() => showPin(pin.id)}
+      if (draft && !draft.at) return <PinForm key={`${draft.elementId}${draft.anchor?.x}${draft.preset?.title}`} plan={view} draft={draft} preset={draft.preset} stages={stages} onCancel={() => setDraft(null)} onCreate={async (input) => { await createPin(input); }} />;
+      if (pin) return <PinDetail pin={pin} plan={view} stages={stages} onBack={() => setSelectedPin(null)} onShow={() => showPin(pin.id)}
         onUpdate={(input) => updatePin(pin.id, input)}
         onDelete={async () => { await api.deletePin(pin.id); setPins((l) => l.filter((x) => x.id !== pin.id)); setSelectedPin(null); }}
         loadComments={() => api.listComments(pin.id)}
@@ -170,7 +253,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
           setPins((l) => l.map((x) => (x.id === pin.id ? { ...x, comment_count: c.length } : x)));
           return c;
         }} />;
-      return <PinsList pins={pins} plan={plan?.data ?? null} onSelect={showPin} onNew={() => { setPinMode(true); say("Click the map where the pin goes"); }} />;
+      return <PinsList key={pinFilter.n} initialFilter={pinFilter.kind} pins={pins} plan={view} onSelect={showPin} onNew={() => { setPinMode(true); say("Click the map where the pin goes"); }} />;
     }
     if (tab === "stages") return (
       <StagesPanel stages={stages}
@@ -192,10 +275,13 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
           say("Thanks, the plan is being updated");
         }} />
     );
-    if (!plan) return null;
-    return <Inspector plan={plan.data} level={level} selected={selected} states={states} pins={pins} stages={stages} setLevel={setLevel}
-      onSetStatus={setStatus} onSelect={select} onSelectPin={showPin} onAddPin={addPin} />;
-  }, [tab, draft, pin, plan, stages, pins, runs, level, selected, states, api, data.aiAvailable, say, showPin, updatePin, stageOp, setLevel, setStatus, select, addPin, createPin, showElements]);
+    if (!plan || !view) return null;
+    return <Inspector plan={view} level={level} selected={selected} states={states} pins={pins} stages={stages} setLevel={setLevel}
+      onSetStatus={setStatus} onSelect={select} onSelectPin={showPin} onAddPin={addPin}
+      edits={edits} onSaveEdit={saveEdit} items={items} selectedItem={selectedItem} onSelectItem={selectItem}
+      onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind} />;
+  }, [tab, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, say, showPin, updatePin, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
+    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter]);
 
   // where the quick card sits inside the map, kept on screen
   const quick = (() => {
@@ -205,6 +291,17 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     const top = Math.max(8, Math.min(r.height - 190, draft.at.y - r.top - 40));
     return { left, top };
   })();
+
+  // what the assistant knows about the screen: which job, where in it, what's picked
+  const askContext = useMemo(() => {
+    const fl = view && "floorId" in level ? view.floors.find((f) => f.id === level.floorId) : null;
+    const rm = fl && "roomId" in level ? fl.rooms.find((r) => r.id === level.roomId) : null;
+    const where = level.kind === "site" ? "the job overview" : level.kind === "exterior" ? "the outside of the building"
+      : [fl?.name, rm?.name, level.kind === "wall" ? `wall ${level.sideKey}` : null].filter(Boolean).join(", ");
+    const el = view && selected ? findElement(view, selected) : null;
+    const sel = el ? `${selected} (${("name" in el.el && el.el.name) || el.kind})` : selectedPin ? `pin ${pins.find((p) => p.id === selectedPin)?.number ?? ""}`.trim() : null;
+    return { jobId: job.id, jobName: job.name, where, selected: sel };
+  }, [view, level, selected, selectedPin, pins, job.id, job.name]);
 
   const tabBtn = (t: Tab, label: string, badge?: number) => (
     <button key={t} onClick={() => { setTab(t); if (t !== "pins") setDraft(null); }} aria-selected={tab === t} role="tab"
@@ -235,16 +332,24 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
           {working && <span className="chip"><span className="dot bg-accent animate-pulse" />Reading plan…</span>}
           {lastRun?.status === "failed" && !working && <span className="chip text-red">Last read failed</span>}
           <span className="chip font-mono !text-text"><span className="w-2 h-2 bg-accent" />{openPins} open pin{openPins === 1 ? "" : "s"}</span>
+          {data.canShare && api.createShareLink && (
+            <button onClick={() => setSharing(true)} className="btn btn-ghost btn-sm" title="Send a sub or a crew member a link to their part of this job">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></svg>
+              Share
+            </button>
+          )}
         </div>
       </div>
 
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
         <div ref={mapRef} className="relative h-[62vh] shrink-0 lg:shrink lg:h-auto lg:flex-1 min-w-0 border-b lg:border-b-0 lg:border-r border-line">
-          {plan ? (
-            <PlanViewer plan={plan.data} level={level} setLevel={setLevel} selected={selected} onSelect={(id) => select(id)} selectedPin={selectedPin} onSelectPin={showPin}
+          {plan && view ? (
+            <PlanViewer plan={view} level={level} setLevel={setLevel} selected={selected} onSelect={(id) => select(id)} selectedPin={selectedPin} onSelectPin={showPin}
               states={states} pins={pins} colorMode={colorMode} setColorMode={setColorMode} pinMode={pinMode} setPinMode={setPinMode} onPlacePin={placePin} draft={draft}
               flyTo={flyTo} onAllJobs={onAllJobs} jobName={job.name}
-              hud={<div className="w-[300px] bg-[#17181b]/92 backdrop-blur-sm border border-line border-l-[3px] border-l-accent rounded-[4px] p-3"><ProjectSummary compact plan={plan.data} pins={pins} states={states} stages={stages} setLevel={setLevel} /></div>} />
+              items={items} selectedItem={selectedItem} onSelectItem={selectItem} onMoveItem={(id, x, y) => updateItem(id, { x, y })} onMovePin={movePin} onMoveFixture={moveFixture}
+              view3d={view3d} setView3d={setView3d} can3d={data.can3d !== false}
+              hud={<div className="w-[300px] bg-[#17181b]/92 backdrop-blur-sm border border-line border-l-[3px] border-l-accent rounded-[4px] p-3"><ProjectSummary compact plan={view} pins={pins} states={states} stages={stages} setLevel={setLevel} onPinKind={showPinKind} /></div>} />
           ) : (
             <div className="h-full grid place-items-center p-6 bg-ink">
               <div className="max-w-md w-full text-center">
@@ -255,8 +360,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
             </div>
           )}
           {quick && draft?.at && (
-            <QuickPin key={`${draft.at.x},${draft.at.y}`} plan={plan?.data ?? null} target={draft} left={quick.left} top={quick.top} onCancel={() => setDraft(null)}
-              onSave={async (kind, title, tagged) => { await guard(() => createPin({ kind, title, tagged, element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, anchor: draft.anchor, priority: kind === "issue" ? 2 : 1 })); }}
+            <QuickPin key={`${draft.at.x},${draft.at.y}`} plan={view} target={draft} left={quick.left} top={quick.top} onCancel={() => setDraft(null)}
+              onSave={async (kind, title, tagged) => { await guard(() => createPin({ kind, title, tagged, due_date: today(), element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, anchor: draft.anchor, priority: kind === "issue" ? 2 : 1 })); }}
               onMore={(kind, title, tagged) => { setDraft({ ...draft, at: undefined, preset: { kind, title, tagged } }); setTab("pins"); }} />
           )}
           {toast && <div role="status" className="absolute left-1/2 -translate-x-1/2 top-14 z-10 px-4 py-2 rounded-[3px] bg-panel-2 border border-line border-l-[3px] border-l-accent shadow-lg text-[14px]">{toast}</div>}
@@ -276,6 +381,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
           <div className="flex-1 min-h-0 overflow-y-auto scroll-thin">{panel}</div>
         </aside>
       </div>
+      {sharing && <ShareDialog api={api} members={data.members} pins={pins} plan={view} onClose={() => setSharing(false)} />}
+      {api.ask && <Assistant send={api.ask} context={askContext} onChanged={api.afterAssistant} open={askOpen} setOpen={setAskOpen} />}
     </div>
     </TeamContext.Provider>
   );

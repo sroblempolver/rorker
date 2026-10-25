@@ -2,12 +2,13 @@
 // Two upright views: the outside of the building (estimated front elevation, one band per storey) and
 // a single wall of a room seen from inside, with its doors, windows and the things standing against it.
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Pin } from "@/lib/data/types";
+import type { JobItem, Pin, PinInput } from "@/lib/data/types";
 import { attachedToSide, frontView, type WallSide } from "@/lib/plan/geometry";
 import type { ElementStatus, Floor, Opening, Plan, Room } from "@/lib/plan/types";
 import { CHALK, ROOM_MATERIAL, STATUS_COLOR, WALL_TOP } from "./style";
-import { DraftFlag, PinFlag, PlanDefs, useHoldToPin } from "./svg";
-import { FixtureElevation, fixtureHeight } from "./fixtures";
+import { DraftFlag, PinFlag, PlanDefs, useHoldToPin, useWorldDrag } from "./svg";
+import { FixtureElevation, fixtureBottom, fixtureTop } from "./fixtures";
+import { ItemGlyph, mmIn } from "./items";
 import { usePanZoom } from "./usePanZoom";
 import type { ColorMode } from "./FloorCanvas";
 import type { Controls, PinTarget, ScreenPoint } from "./target";
@@ -78,7 +79,6 @@ interface ExteriorProps {
   onSelectPin: (id: string) => void;
   onPlacePin: (t: PinTarget, at: ScreenPoint) => void;
   controls: Controls;
-  onLimitIn: () => void;
   onLimitOut: () => void;
 }
 
@@ -87,16 +87,21 @@ export function ExteriorView(p: ExteriorProps) {
   const ref = useRef<SVGSVGElement>(null);
   const fv = useMemo(() => frontView(plan), [plan]);
   const top = -(fv.height + fv.roofPeak);
+  const roofY = -fv.height;
   // leave room on the right for the floor tags
   const home = useMemo(() => ({ x: fv.minX - 1200, y: top - 600, w: fv.width + 7800, h: -top + 1800 }), [fv, top]);
   const cb = useRef(p);
   cb.current = p;
-  const pz = usePanZoom(ref, home, { minScale: 0.7, maxScale: 5, padding: 0.12, onLimit: (dir) => (dir === "in" ? cb.current.onLimitIn() : cb.current.onLimitOut()) });
+  const pz = usePanZoom(ref, home, { minScale: 0.7, maxScale: 5, padding: 0.12, onLimit: (dir, at) => {
+    if (dir === "out") return cb.current.onLimitOut();
+    // zooming in opens the floor under the cursor; off the building, the ground floor
+    const st = fv.storeys.find((s) => at.y >= s.y0 && at.y <= s.y1) ?? (at.y < roofY ? fv.storeys[fv.storeys.length - 1] : fv.storeys[0]);
+    if (st) cb.current.onOpenFloor(st.floor.id);
+  } });
   const { view, px: lw } = pz;
   const homeFn = useMemo(() => () => pz.setHome(home, true, 0.12), [pz.setHome, home]); // eslint-disable-line react-hooks/exhaustive-deps
   useControls(p.controls, pz.zoomBy, homeFn);
   const [hover, setHover] = useState<string | null>(null);
-  const roofY = -fv.height;
   const x1 = Math.max(...fv.storeys.map((s) => s.x1));
   const x0 = Math.min(...fv.storeys.map((s) => s.x0));
   const topStorey = fv.storeys[fv.storeys.length - 1];
@@ -178,6 +183,13 @@ interface WallProps {
   onPlacePin: (t: PinTarget, at: ScreenPoint) => void;
   onUp: () => void;
   controls: Controls;
+  items: JobItem[];
+  selectedItem: string | null;
+  onSelectItem: (id: string) => void;
+  onMoveItem: (id: string, x: number, y: number) => void;
+  onMovePin: (id: string, input: Partial<PinInput>) => void;
+  /** slide an object along the wall (mm) and, for wall-mounted ones, up or down */
+  onMoveFixture: (id: string, along: number, up: number) => void;
 }
 
 const openTop = (o: Opening) => (o.kind === "window" ? 2100 : o.kind === "garage_door" ? 2300 : o.kind === "opening" ? 2400 : 2100);
@@ -197,6 +209,9 @@ export function WallView(p: WallProps) {
   useControls(p.controls, pz.zoomBy, homeFn);
   useEffect(() => { pz.setHome(home, false); }, [home]); // eslint-disable-line react-hooks/exhaustive-deps
   const [hover, setHover] = useState<string | null>(null);
+  const { drag, start } = useWorldDrag(pz.toWorld);
+  const snap = (v: number, free: boolean) => (free ? v : Math.round(v / 10) * 10);
+  const onWall = (q: { x: number; y: number }, free: boolean) => ({ x: snap(Math.max(0, Math.min(L, q.x)), free), y: snap(Math.max(-H, Math.min(0, q.y)), free) });
   const tint = (id: string) => (colorMode === "progress" ? (states.get(id) ? STATUS_COLOR[states.get(id)!] : null) : null);
 
   const walls = side.segments.filter((s) => s.kind === "wall");
@@ -211,13 +226,13 @@ export function WallView(p: WallProps) {
     const seg = side.segments.find((s) => s.id === pin.element_id);
     if (seg) return [{ pin, x: (seg.from + seg.to) / 2, y: seg.kind === "opening" ? -openTop(seg.el as Opening) - 150 : -H * 0.6 }];
     const a = attached.find((x) => x.f.id === pin.element_id)!;
-    return [{ pin, x: (a.from + a.to) / 2, y: -fixtureHeight(a.f.kind) - 120 }];
+    return [{ pin, x: (a.from + a.to) / 2, y: -fixtureTop(a.f) - 120 }];
   });
 
   const place = (e: { clientX: number; clientY: number }) => {
     const w = pz.toWorld(e.clientX, e.clientY);
     const x = Math.max(0, Math.min(L, w.x)), y = Math.max(-H, Math.min(0, w.y));
-    const fix = attached.find((a) => x >= a.from && x <= a.to && -y <= fixtureHeight(a.f.kind));
+    const fix = attached.find((a) => x >= a.from && x <= a.to && -y <= fixtureTop(a.f) && -y >= fixtureBottom(a.f));
     const op = openings.find((s) => x >= s.from && x <= s.to && -y >= openBottom(s.el as Opening) && -y <= openTop(s.el as Opening));
     const wall = walls.find((s) => x >= s.from && x <= s.to) ?? [...walls].sort((a, b) => b.to - b.from - (a.to - a.from))[0];
     const elementId = fix?.f.id ?? op?.id ?? wall?.id ?? null;
@@ -268,11 +283,18 @@ export function WallView(p: WallProps) {
       {attached.map((a, i) => {
         const sel = selected === a.f.id, hot = hover === a.f.id;
         const row = i > 0 && a.from - attached[i - 1].to < 900 && i % 2 === 1 ? 1 : 0; // stagger labels that would collide
-        const h = fixtureHeight(a.f.kind);
+        const top = fixtureTop(a.f), bot = fixtureBottom(a.f);
+        const mounted = bot > 0;
+        const origin = { x: (a.from + a.to) / 2, y: -bot };
+        const live = drag?.id === `f:${a.f.id}` ? { dx: drag.x - origin.x, dy: drag.y - origin.y } : null;
         return (
-          <g key={a.f.id} className="cursor-pointer" onClick={click(a.f.id)} onPointerEnter={() => setHover(a.f.id)} onPointerLeave={() => setHover(null)}>
+          <g key={a.f.id} className={p.pinMode ? "cursor-crosshair" : live ? "cursor-grabbing" : sel ? "cursor-grab" : "cursor-pointer"} onClick={click(a.f.id)} onPointerEnter={() => setHover(a.f.id)} onPointerLeave={() => setHover(null)}
+            transform={live ? `translate(${live.dx} ${live.dy})` : undefined}
+            onPointerDown={p.pinMode || !sel ? undefined : (e) => start(`f:${a.f.id}`, e, origin, (nx, ny) => p.onMoveFixture(a.f.id, Math.round(nx - origin.x), mounted ? Math.round(origin.y - ny) : 0),
+              (q, free) => ({ x: snap(q.x, free), y: mounted ? snap(Math.max(-H + (top - bot), Math.min(-300, q.y)), free) : origin.y }))}>
             <FixtureElevation f={a.f} x0={a.from} x1={a.to} lw={lw} tint={tint(a.f.id)} />
-            <rect x={a.from - 30} y={-h - 30} width={a.to - a.from + 60} height={h + 30} fill={sel ? CHALK : "#fff"} fillOpacity={sel ? 0.14 : hot ? 0.1 : 0} stroke={sel ? CHALK : hot ? "#fff" : "transparent"} strokeWidth={2 * lw} strokeDasharray={sel ? `${8 * lw} ${4 * lw}` : undefined} />
+            <rect x={a.from - 30} y={-top - 30} width={a.to - a.from + 60} height={top - bot + 60} fill={sel ? CHALK : "#fff"} fillOpacity={sel ? 0.14 : hot ? 0.1 : 0} stroke={sel ? CHALK : hot ? "#fff" : "transparent"} strokeWidth={2 * lw} strokeDasharray={sel ? `${8 * lw} ${4 * lw}` : undefined} />
+            {live && <text x={(a.from + a.to) / 2} y={-top - 60} textAnchor="middle" fontSize={12 * lw} fontFamily="var(--font-mono)" fill="#55b2ff" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>{live.dx >= 0 ? "→" : "←"} {Math.abs(Math.round(live.dx))} mm{mounted && Math.round(live.dy) ? ` · ${live.dy < 0 ? "↑" : "↓"} ${Math.abs(Math.round(live.dy))} mm` : ""}</text>}
             <text x={(a.from + a.to) / 2} y={160 + 11 * lw + row * 16 * lw} textAnchor="middle" fontSize={10.5 * lw} fontFamily="var(--font-mono)" fill="#f0ece3" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>{a.f.kind === "other" ? a.f.id : `${a.f.name.toUpperCase()} · ${a.f.id}`}</text>
           </g>
         );
@@ -284,7 +306,34 @@ export function WallView(p: WallProps) {
       </g>
       <text x={L / 2} y={620 - 8 * lw} textAnchor="middle" fontSize={12 * lw} fontFamily="var(--font-mono)" fill="#cfc8ba" pointerEvents="none">{(L / 1000).toFixed(2)} m</text>
       <text x={-240 - 4 * lw} y={-H / 2} textAnchor="end" fontSize={12 * lw} fontFamily="var(--font-mono)" fill="#cfc8ba" pointerEvents="none">{(H / 1000).toFixed(1)} m</text>
-      {pins.map(({ pin, x, y }) => <PinFlag key={pin.id} pin={pin} x={x} y={y} px={lw} selected={p.selectedPin === pin.id} onClick={(e) => { e.stopPropagation(); p.onSelectPin(pin.id); }} />)}
+      {/* wall items: drag them anywhere on the wall; the guides give the distance from the left end and the height off the floor */}
+      {p.items.filter((it) => it.side === side.key).map((it) => {
+        const live = drag?.id === `i:${it.id}` ? drag : null;
+        const x = live ? live.x : it.x, y = live ? live.y : -it.y;
+        const sel = p.selectedItem === it.id;
+        return (
+          <g key={it.id}>
+            {(sel || live) && (
+              <g pointerEvents="none" fontFamily="var(--font-mono)" fontSize={11 * lw} fill="#55b2ff" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>
+                <path d={`M0 ${y}H${x}M${x} ${y}V0`} stroke="#55b2ff" strokeWidth={1.4 * lw} strokeDasharray={`${6 * lw} ${4 * lw}`} fill="none" />
+                <text x={x / 2} y={y - 6 * lw} textAnchor="middle">{mmIn(x)} from left</text>
+                <text x={x + 8 * lw} y={y / 2}>{mmIn(-y)} up</text>
+              </g>
+            )}
+            <g transform={`translate(${x} ${y})`} className={live ? "cursor-grabbing" : "cursor-grab"}
+              onPointerDown={(e) => start(`i:${it.id}`, e, { x: it.x, y: -it.y }, (nx, ny) => p.onMoveItem(it.id, Math.round(nx), Math.round(-ny)), onWall)}
+              onClick={(e) => { e.stopPropagation(); p.onSelectItem(it.id); }} onPointerEnter={() => setHover(it.id)} onPointerLeave={() => setHover(null)}>
+              <ItemGlyph kind={it.kind} min={22 * lw} selected={sel} hot={hover === it.id} />
+            </g>
+          </g>
+        );
+      })}
+      {pins.map(({ pin, x, y }) => {
+        const live = drag?.id === `p:${pin.id}` ? drag : null;
+        return <PinFlag key={pin.id} pin={pin} x={live ? live.x : x} y={live ? live.y : y} px={lw} selected={p.selectedPin === pin.id} lifted={!!live}
+          onClick={(e) => { e.stopPropagation(); p.onSelectPin(pin.id); }}
+          onPointerDown={(e) => start(`p:${pin.id}`, e, { x, y }, (nx, ny) => p.onMovePin(pin.id, { anchor: { view: "wall", side: side.key, x: Math.round(nx), y: Math.round(ny) } }), onWall)} />;
+      })}
       {draft && <DraftFlag x={draft.x} y={draft.y} px={lw} />}
       {!side.segments.length && <text x={L / 2} y={-H / 2} textAnchor="middle" fontSize={13 * lw} fill="#77736a">No walls or openings matched to this side yet</text>}
     </svg>

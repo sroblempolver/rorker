@@ -48,7 +48,13 @@ an empty company so onboarding can be tried. To see the employee view, sign in a
 
 Set `ANTHROPIC_API_KEY` to turn on the full plan reader. Without it, AutoCAD files are read from their
 geometry alone (rooms, walls, doors, windows and named blocks), answers are applied by rules, and PDFs
-and photos wait for the key.
+and photos wait for the key. The same key turns on the Rorker assistant (the "Ask" button: chat and
+one-tap voice across every job). It runs on the server with the signed-in person's own access, so it can
+change things for them but never shows what they couldn't see; `RORKER_ASSISTANT_MODEL` overrides the
+model. Voice uses the browser's own speech (Chrome, Edge, Safari).
+
+Admins can share a job from its header: a no-sign-in link at `/s/<token>` that shows the plan and only
+the tasks tagged to that person (or picked for a one-time sub). Links can expire and be turned off.
 
 ## Test the plan reader
 
@@ -73,11 +79,11 @@ an `expected.json` in a new folder; `house/expected.json` shows the format.
 
 Everything is new for this project: a new GitHub repo, Supabase project, Railway project and API key.
 
-1. **Supabase**: create the project, then run `supabase/migrations/20261025000001_init.sql`
+1. **Supabase**: create the project, then run the files in `supabase/migrations/` in order
    (SQL editor or `supabase db push`). It creates the tables, row-level security, the
    `plan-files`, `company-assets` and `pin-photos` buckets and the default stage templates.
 2. **Railway, web service**: root directory `web`. Variables: `NEXT_PUBLIC_SUPABASE_URL`,
-   `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY` (the assistant).
 3. **Railway, agent service**: root directory `agent` (builds `agent/Dockerfile`, runs the worker).
    Variables: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`.
 

@@ -1,9 +1,10 @@
 import "server-only";
-import { supabaseServer, SUPABASE_URL } from "@/lib/supabase/server";
+import { supabaseAdmin, supabaseServer, SUPABASE_URL } from "@/lib/supabase/server";
+import { newToken, shareView } from "@/lib/share";
 import type { Plan } from "@/lib/plan/types";
 import type {
-  Company, CompanyInput, ElementState, Job, JobInput, JobStage, JobSummary, Member, MemberInput, Pin, PinComment, PinInput,
-  PlanRow, PlanRun, Repo, StageStatus, StageTemplate,
+  Company, CompanyInput, ElementEdit, ElementState, ItemInput, Job, JobInput, JobItem, JobStage, JobSummary, Member, MemberInput, Pin, PinComment, PinInput,
+  PlanRow, PlanRun, Repo, ShareLink, ShareLinkInput, StageStatus, StageTemplate,
 } from "./types";
 
 type Row = Record<string, unknown>;
@@ -26,7 +27,11 @@ const safeName = (n: string) => n.replace(/[^\w.\-]+/g, "_");
 
 export class SupabaseRepo implements Repo {
   mode = "supabase" as const;
-  private db = supabaseServer;
+  private db: typeof supabaseServer;
+  /** elevated: the service client, for the one read RLS can't express (a shared link, no sign-in) */
+  constructor(elevated = false) {
+    this.db = elevated ? ((async () => supabaseAdmin()) as unknown as typeof supabaseServer) : supabaseServer;
+  }
 
   async createCompany(_userId: string, input: CompanyInput, fullName?: string) {
     const sb = await this.db();
@@ -208,6 +213,38 @@ export class SupabaseRepo implements Repo {
     check(await sb.from("element_states").upsert({ job_id: jobId, company_id: job.company_id, element_id: elementId, status, updated_by: userId, updated_at: new Date().toISOString() }));
   }
 
+  async listElementEdits(jobId: string) {
+    const sb = await this.db();
+    const rows = check(await sb.from("element_edits").select("element_id, data").eq("job_id", jobId)) as { element_id: string; data: ElementEdit }[];
+    return Object.fromEntries(rows.map((r) => [r.element_id, r.data]));
+  }
+  async saveElementEdit(jobId: string, userId: string, elementId: string, data: ElementEdit | null) {
+    const sb = await this.db();
+    if (!data || !Object.keys(data).length) {
+      check(await sb.from("element_edits").delete().eq("job_id", jobId).eq("element_id", elementId));
+      return;
+    }
+    const job = (await this.getJob(jobId))!;
+    check(await sb.from("element_edits").upsert({ job_id: jobId, company_id: job.company_id, element_id: elementId, data, updated_by: userId, updated_at: new Date().toISOString() }));
+  }
+  async listItems(jobId: string) {
+    const sb = await this.db();
+    return check(await sb.from("job_items").select("*").eq("job_id", jobId).order("created_at")) as JobItem[];
+  }
+  async createItem(jobId: string, userId: string, input: ItemInput) {
+    const sb = await this.db();
+    const job = (await this.getJob(jobId))!;
+    return check(await sb.from("job_items").insert({ ...input, job_id: jobId, company_id: job.company_id, created_by: userId }).select("*").single()) as JobItem;
+  }
+  async updateItem(itemId: string, input: Partial<ItemInput>) {
+    const sb = await this.db();
+    check(await sb.from("job_items").update(input).eq("id", itemId));
+  }
+  async deleteItem(itemId: string) {
+    const sb = await this.db();
+    check(await sb.from("job_items").delete().eq("id", itemId));
+  }
+
   async listPins(jobId: string) {
     const sb = await this.db();
     const rows = check(await sb.from("pins").select("*, pin_comments(count)").eq("job_id", jobId).order("number", { ascending: false })) as Row[];
@@ -251,5 +288,35 @@ export class SupabaseRepo implements Repo {
     const sb = await this.db();
     const r = check(await sb.storage.from("pin-photos").createSignedUrl(path, 3600)) as { signedUrl: string };
     return r.signedUrl;
+  }
+
+  async listShareLinks(jobId: string) {
+    const sb = await this.db();
+    return check(await sb.from("share_links").select("*").eq("job_id", jobId).order("created_at", { ascending: false })) as ShareLink[];
+  }
+  async createShareLink(jobId: string, userId: string, input: ShareLinkInput) {
+    const sb = await this.db();
+    const job = (await this.getJob(jobId))!;
+    return check(await sb.from("share_links").insert({ label: input.label, member_id: input.member_id ?? null, pin_ids: input.pin_ids ?? [], expires_at: input.expires_at ?? null,
+      token: newToken(), job_id: jobId, company_id: job.company_id, created_by: userId }).select("*").single()) as ShareLink;
+  }
+  async revokeShareLink(linkId: string) {
+    const sb = await this.db();
+    check(await sb.from("share_links").update({ revoked_at: new Date().toISOString() }).eq("id", linkId));
+  }
+  async getSharedView(token: string) {
+    if (!/^[\w-]{20,64}$/.test(token)) return null;
+    // no one is signed in: read with the service client, then cut it down to the link's scope
+    const repo = new SupabaseRepo(true);
+    const sb = await repo.db();
+    const link = check(await sb.from("share_links").select("*").eq("token", token).maybeSingle()) as ShareLink | null;
+    const job = link ? await repo.getJob(link.job_id) : null;
+    if (!link || !job) return null;
+    const [company, plan, edits, items, pins, stages, members] = await Promise.all([
+      sb.from("companies").select("*").eq("id", job.company_id).single().then((r) => companyFromRow(check(r) as Row)),
+      job.current_plan_id ? repo.getPlan(job.current_plan_id) : Promise.resolve(null),
+      repo.listElementEdits(job.id), repo.listItems(job.id), repo.listPins(job.id), repo.listStages(job.id), repo.listMembers(job.company_id),
+    ]);
+    return shareView(link, { company, job, plan: plan?.data ?? null, edits, items, pins, stages, members });
   }
 }

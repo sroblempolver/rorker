@@ -26,6 +26,9 @@ export interface Opening {
 export interface Fixture {
   id: string; kind: string; name: string; room_id: string | null; center: Pt; bbox: BBox; rotation: number;
   outline: Pt[][]; source: string; source_ref: string | null; confidence: number;
+  /** Real size and placement for the wall view and 3D; typical values for the kind when missing. */
+  height_mm?: number | null; elevation_mm?: number; facing?: number | null; front?: string | null; spec?: string | null;
+  product_name?: string | null; product_url?: string | null; notes?: string | null;
 }
 export interface Stair { id: string; polygon: Pt[]; room_id: string | null; outline: Pt[][] }
 export interface Floor {

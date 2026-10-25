@@ -8,11 +8,12 @@ import path from "node:path";
 import housePlan from "@/demo/house-plan.json";
 import type { Plan } from "@/lib/plan/types";
 import type {
-  Company, CompanyInput, ElementState, Job, JobInput, JobStage, JobSummary, Member, MemberInput, MemberRole, Pin, PinComment, PinInput,
-  PlanRow, PlanRun, Repo, StageStatus, StageTemplate,
+  Company, CompanyInput, ElementEdit, ElementState, ItemInput, Job, JobInput, JobItem, JobStage, JobSummary, Member, MemberInput, MemberRole, Pin, PinComment, PinInput,
+  PlanRow, PlanRun, ShareLink, ShareLinkInput, Repo, StageStatus, StageTemplate,
 } from "./types";
 import { DEFAULT_TEMPLATES } from "./templates";
-import { DEMO_CREW, samplePins, sampleStates } from "@/demo/sample";
+import { newToken, shareView } from "@/lib/share";
+import { DEMO_CREW, sampleItems, samplePins, sampleStates } from "@/demo/sample";
 
 const DIR = path.join(process.cwd(), ".data");
 const FILE = path.join(DIR, "demo.json");
@@ -30,7 +31,10 @@ interface Db {
   plans: PlanRow[];
   states: (ElementState & { job_id: string })[];
   pins: Pin[];
+  items?: JobItem[];
+  edits?: { job_id: string; element_id: string; data: ElementEdit }[];
   comments: PinComment[];
+  shares?: ShareLink[];
 }
 
 function empty(): Db {
@@ -111,6 +115,7 @@ export async function seedDemo(userId: string, name: string | null, email?: stri
       for (const st of sampleStates(plan)) db.states.push({ job_id: jobId, ...st });
       const crew = db.members.filter((m) => m.company_id === company.id && !m.is_owner);
       const pins = samplePins(plan, crew);
+      for (const it of sampleItems(plan)) (db.items ??= []).push({ id: randomUUID(), job_id: jobId, label: null, note: null, created_at: now(), ...it });
       pins.forEach((p, i) => db.pins.push({ id: randomUUID(), job_id: jobId, number: i + 1, element_id: null, floor_id: null, x: null, y: null, kind: "task", title: "", body: null, status: "open", priority: 2, due_date: null, tagged: [], close_requirement: "confirm", stage_id: null, links: [], created_by: userId, created_at: now(), closed_at: null, ...p } as Pin));
     });
   });
@@ -312,6 +317,32 @@ export class DemoRepo implements Repo {
     });
   }
 
+  async listElementEdits(jobId: string) {
+    return Object.fromEntries((load().edits ?? []).filter((e) => e.job_id === jobId).map((e) => [e.element_id, e.data]));
+  }
+  async saveElementEdit(jobId: string, _userId: string, elementId: string, data: ElementEdit | null) {
+    tx((db) => {
+      db.edits = (db.edits ?? []).filter((e) => !(e.job_id === jobId && e.element_id === elementId));
+      if (data && Object.keys(data).length) db.edits.push({ job_id: jobId, element_id: elementId, data });
+    });
+  }
+  async listItems(jobId: string) {
+    return (load().items ?? []).filter((i) => i.job_id === jobId);
+  }
+  async createItem(jobId: string, _userId: string, input: ItemInput) {
+    return tx((db) => {
+      const item: JobItem = { id: randomUUID(), job_id: jobId, label: null, note: null, created_at: now(), ...input };
+      (db.items ??= []).push(item);
+      return item;
+    });
+  }
+  async updateItem(itemId: string, input: Partial<ItemInput>) {
+    tx((db) => { Object.assign((db.items ?? []).find((i) => i.id === itemId)!, input); });
+  }
+  async deleteItem(itemId: string) {
+    tx((db) => { db.items = (db.items ?? []).filter((i) => i.id !== itemId); });
+  }
+
   async listPins(jobId: string) {
     const db = load();
     return db.pins.filter((p) => p.job_id === jobId).map((p) => ({ ...p, tagged: p.tagged ?? [], comment_count: db.comments.filter((c) => c.pin_id === p.id).length })).sort((a, b) => b.number - a.number);
@@ -351,6 +382,29 @@ export class DemoRepo implements Repo {
   }
   async photoUrl(p: string) {
     return `/api/demo-files/${p}`;
+  }
+
+  async listShareLinks(jobId: string) {
+    return (load().shares ?? []).filter((l) => l.job_id === jobId).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+  async createShareLink(jobId: string, _userId: string, input: ShareLinkInput) {
+    return tx((db) => {
+      const link: ShareLink = { id: randomUUID(), job_id: jobId, token: newToken(), label: input.label, member_id: input.member_id ?? null, pin_ids: input.pin_ids ?? [], expires_at: input.expires_at ?? null, revoked_at: null, created_at: now() };
+      (db.shares ??= []).push(link);
+      return link;
+    });
+  }
+  async revokeShareLink(linkId: string) {
+    tx((db) => { const l = (db.shares ?? []).find((x) => x.id === linkId); if (l) l.revoked_at = now(); });
+  }
+  async getSharedView(token: string) {
+    const db = load();
+    const link = (db.shares ?? []).find((l) => l.token === token);
+    const job = link && db.jobs.find((j) => j.id === link.job_id);
+    const company = job && db.companies.find((c) => c.id === job.company_id);
+    if (!link || !job || !company) return null;
+    const plan = job.current_plan_id ? db.plans.find((p) => p.id === job.current_plan_id)?.data ?? null : null;
+    return shareView(link, { company, job, plan, edits: await this.listElementEdits(job.id), items: await this.listItems(job.id), pins: await this.listPins(job.id), stages: await this.listStages(job.id), members: await this.listMembers(job.company_id) });
   }
 
   private async saveFile(rel: string, file: File) {

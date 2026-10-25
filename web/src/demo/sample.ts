@@ -1,5 +1,5 @@
 // Sample progress for the demo job, shared by local demo mode and the standalone preview.
-import type { ElementState, Member, MemberInput, Pin } from "@/lib/data/types";
+import type { ElementState, ItemInput, Member, MemberInput, Pin } from "@/lib/data/types";
 import { attachedToSide, roomSides, siteLayout } from "@/lib/plan/geometry";
 import type { Plan } from "@/lib/plan/types";
 
@@ -48,5 +48,43 @@ export function sampleStates(plan: Plan): ElementState[] {
   mark("dining", "done");
   mark("family", "done");
   mark("bathroom", "not_built");
+  return out;
+}
+
+const COUNTER = new Set(["base_cabinet", "kitchen_sink", "dishwasher", "range"]);
+
+/** Kitchen outlets laid out the way the electrical code asks (NEC 210.52(C)): every counter stretch
+ *  12" or wider gets one, no spot on the counter more than 24" from one (so at most 48" apart), and
+ *  the sink, range and fridge split the counter into separate stretches. Mounted about 8" above the
+ *  worktop. Plus a light switch beside each door into the room. All of them can be dragged. */
+export function sampleItems(plan: Plan): ItemInput[] {
+  const out: ItemInput[] = [];
+  for (const f of plan.floors) for (const r of f.rooms.filter((x) => x.type === "kitchen")) for (const side of roomSides(f, r)) {
+    const att = attachedToSide(f, side).filter((a) => a.gap < 120 && (a.f.elevation_mm ?? 0) < 100);
+    const top = Math.max(0, ...att.filter((a) => COUNTER.has(a.f.kind)).map((a) => (a.f.height_mm ?? 900)));
+    // counter stretches: runs of plain base cabinets between breaks
+    let start: number | null = null, end = 0;
+    const flush = () => {
+      if (start == null) return;
+      const len = end - start;
+      if (len >= 305) {
+        const n = Math.max(1, Math.ceil((len - 1220) / 1220) + 1);
+        for (let i = 0; i < n; i++) out.push({ kind: "outlet", label: "GFCI outlet", floor_id: f.id, side: side.key, x: Math.round(n === 1 ? start + len / 2 : start + 300 + ((len - 600) * i) / (n - 1)), y: Math.round(top + 200), note: "Countertop receptacle" });
+      }
+      start = null;
+    };
+    for (const a of att) {
+      if (a.f.kind === "base_cabinet" || a.f.kind === "dishwasher") {
+        if (start == null || a.from - end > 50) { flush(); start = a.from; }
+        end = a.to;
+      } else flush();
+    }
+    flush();
+    for (const s of side.segments) {
+      if (s.kind !== "opening" || !("leaves" in s.el) || s.el.kind === "window") continue;
+      const x = s.to + 150 < side.length - 50 ? s.to + 150 : s.from - 150;
+      if (x > 50) out.push({ kind: "switch", label: "Light switch", floor_id: f.id, side: side.key, x: Math.round(x), y: 1200, note: null });
+    }
+  }
   return out;
 }

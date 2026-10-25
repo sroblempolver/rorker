@@ -1,5 +1,5 @@
 // Shared SVG pieces for every plan view: floor material patterns and the survey-flag pin marker.
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { Pin } from "@/lib/data/types";
 import { MATERIAL_BASE, PIN_COLOR } from "./style";
 
@@ -56,14 +56,18 @@ export function PlanDefs({ id = "" }: { id?: string }) {
 
 /** A survey flag on a stake: the pin marker everywhere on the plan. Drawn in screen pixels; pass the
  *  size of one pixel in world units as `px`. */
-export function PinFlag({ pin, x, y, px, selected, onClick }: { pin: Pin; x: number; y: number; px: number; selected?: boolean; onClick?: (e: React.MouseEvent) => void }) {
+export function PinFlag({ pin, x, y, px, selected, onClick, onPointerDown, lifted }: {
+  pin: Pin; x: number; y: number; px: number; selected?: boolean; onClick?: (e: React.MouseEvent) => void;
+  /** start dragging the pin */
+  onPointerDown?: (e: React.PointerEvent) => void; lifted?: boolean;
+}) {
   const color = pin.status === "done" ? "#3fb46a" : PIN_COLOR[pin.kind];
   const s = (selected ? 1.25 : 1) * px;
   const label = pin.status === "done" ? "✓" : String(pin.number);
   const w = Math.max(22, label.length * 7 + 14);
   return (
-    <g transform={`translate(${x} ${y}) scale(${s})`} className="cursor-pointer" onClick={onClick} opacity={pin.status === "done" ? 0.8 : 1}>
-      <ellipse cx={0} cy={0} rx={6} ry={2.4} fill="#000" opacity={0.45} />
+    <g transform={`translate(${x} ${y}) scale(${s})`} className={onPointerDown ? (lifted ? "cursor-grabbing" : "cursor-grab") : "cursor-pointer"} onClick={onClick} onPointerDown={onPointerDown} opacity={pin.status === "done" ? 0.8 : 1}>
+      <ellipse cx={0} cy={0} rx={lifted ? 9 : 6} ry={lifted ? 3.4 : 2.4} fill="#000" opacity={lifted ? 0.3 : 0.45} />
       <line x1={0} y1={0} x2={0} y2={-38} stroke="#f0ece3" strokeWidth={2.2} strokeLinecap="round" />
       <path d={`M1 -38H${w}L${w - 6} -30.5L${w} -23H1Z`} fill={color} stroke={selected ? "#fff" : "#111"} strokeWidth={selected ? 1.8 : 1} />
       <text x={(w - 5) / 2 + 1} y={-26.5} textAnchor="middle" fontSize={11} fontWeight={700} fontFamily="var(--font-mono)" fill="#120c06">{label}</text>
@@ -108,4 +112,40 @@ export function useHoldToPin<H extends Record<"onPointerDown" | "onPointerMove" 
     },
     onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); placeRef.current(e); },
   };
+}
+
+/** Drag something across a view in world units. `start` goes in the thing's onPointerDown; it stops
+ *  the view from panning, follows the pointer (a few pixels of slack so a plain click stays a click)
+ *  and calls `drop` once with the final spot. `drag` is the live position, for drawing. */
+export function useWorldDrag(toWorld: (cx: number, cy: number) => { x: number; y: number }) {
+  const [drag, setDrag] = useState<{ id: string; x: number; y: number } | null>(null);
+  const start = (
+    id: string, e: React.PointerEvent, origin: { x: number; y: number },
+    drop: (x: number, y: number) => void, fit: (p: { x: number; y: number }, free: boolean) => { x: number; y: number } = (p) => p,
+  ) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const w0 = toWorld(e.clientX, e.clientY);
+    const off = { x: origin.x - w0.x, y: origin.y - w0.y };
+    const sx = e.clientX, sy = e.clientY;
+    let last = origin, moved = false;
+    const move = (ev: PointerEvent) => {
+      if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return;
+      moved = true;
+      const w = toWorld(ev.clientX, ev.clientY);
+      last = fit({ x: w.x + off.x, y: w.y + off.y }, ev.shiftKey);
+      setDrag({ id, ...last });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      setDrag(null);
+      if (moved) drop(last.x, last.y);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
+  return { drag, start };
 }

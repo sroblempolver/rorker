@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AllJobsMap } from "@/components/AllJobsMap";
 import { AppShell } from "@/components/ui/AppShell";
+import { AssistantDock } from "@/components/assistant/AssistantDock";
 import { getRepo, isDemo, requireCompany } from "@/lib/data";
 import { JOB_TYPES } from "@/lib/data/templates";
 
@@ -53,6 +54,7 @@ export default async function JobsPage() {
           <Link href="/jobs/new" className="btn btn-primary">New job</Link>
         </div></div>
       )}
+      <AssistantDock />
     </AppShell>
   );
 }

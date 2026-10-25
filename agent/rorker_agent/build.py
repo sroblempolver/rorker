@@ -50,6 +50,7 @@ ROOM_WORDS: list[tuple[str, str, str]] = [
 
 BLOCK_WORDS: list[tuple[str, str, str]] = [
     (r"door.?handle|handle", "_skip", ""),
+    (r"piple|people|person|human|figure", "_skip", ""),  # drawn people are decoration
     (r"s-?bed|single.?bed", "bed", "Single bed"),
     (r"bed", "bed", "Bed"),
     (r"night.?stand|bedside", "nightstand", "Nightstand"),
@@ -64,7 +65,7 @@ BLOCK_WORDS: list[tuple[str, str, str]] = [
     (r"desk", "desk", "Desk"),
     (r"dining.?table", "dining_table", "Dining table"),
     (r"table", "table", "Table"),
-    (r"plant|tree|shrub|piple", "plant", "Plant"),
+    (r"plant|tree|shrub", "plant", "Plant"),
     (r"toilet|^wc|water.?closet|^t$|^wc\d*$", "toilet", "Toilet"),
     (r"^(fh|hb|whb|lav)$", "washbasin", "Washbasin"),
     (r"basin|lavabo|vanity", "washbasin", "Washbasin"),

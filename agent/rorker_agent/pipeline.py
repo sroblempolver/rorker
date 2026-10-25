@@ -75,6 +75,8 @@ def run(path: str, ai: bool | None = None, filename: str | None = None) -> tuple
                 raise RuntimeError("PDFs without CAD data, photos and sketches need the AI step (no API key set).")
             from .vision import read_image_plan
             plan = read_image_plan(path, filename, kind)
+    from .furnish import furnish
+    plan = furnish(plan)
     timings["total_s"] = round(time.time() - t0, 2)
     plan.stats["timings"] = timings
     plan.stats["mode"] = "ai" if use_ai else "rules"

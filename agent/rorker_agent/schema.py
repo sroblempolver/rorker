@@ -30,7 +30,7 @@ OpeningKind = Literal["door", "double_door", "sliding_door", "garage_door", "win
 FixtureKind = Literal[
     # kitchen
     "base_cabinet", "wall_cabinet", "tall_cabinet", "island", "kitchen_sink", "cooktop", "range",
-    "oven", "fridge", "dishwasher",
+    "oven", "fridge", "dishwasher", "range_hood", "filler",
     # bath
     "toilet", "washbasin", "vanity", "bathtub", "shower", "towel_radiator",
     # utility
@@ -38,6 +38,8 @@ FixtureKind = Literal[
     # furniture
     "bed", "nightstand", "wardrobe", "sofa", "armchair", "chair", "dining_table", "table",
     "desk", "bookshelf", "sideboard", "tv", "lamp", "plant", "car",
+    # linework that belongs to something else (a door leaf drawn as a box, the inside of a tub)
+    "door_leaf", "part",
     "other",
 ]
 
@@ -103,6 +105,12 @@ class Fixture(BaseModel):
     source: Source = "drawing"
     source_ref: Optional[str] = None  # block name or candidate id
     confidence: float = 1.0
+    # real-world size and placement, for the wall view and 3D (typical values when not set)
+    height_mm: Optional[float] = None
+    elevation_mm: float = 0  # bottom above the floor: 1372 for a wall cabinet
+    facing: Optional[float] = None  # direction the front faces, degrees, atan2(dy, dx) in the plan frame
+    front: Optional[str] = None  # doors, door, drawers, door_drawer, sink, appliance, blind_corner, lazy_susan, open, panel
+    spec: Optional[str] = None  # catalogue-style size code, e.g. "SB36" or "Base 600"
 
 
 class Stair(BaseModel):

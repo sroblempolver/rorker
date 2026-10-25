@@ -1,22 +1,33 @@
 // What the job workspace needs from the outside world. The app wires it to server actions; the
 // standalone preview wires it to memory, so the same screens run in both.
-import type { ElementState, Job, JobStage, Member, Pin, PinComment, PinInput, PinStatus, PlanRow, PlanRun, StageStatus } from "@/lib/data/types";
+import type { AssistantSend } from "@/components/assistant/Assistant";
+import type { ElementEdit, ElementState, ItemInput, Job, JobItem, JobStage, Member, Pin, PinComment, PinInput, PinStatus, PlanRow, PlanRun, ShareLink, ShareLinkInput, StageStatus } from "@/lib/data/types";
 
 export interface WorkspaceData {
   job: Job;
   plan: PlanRow | null;
   stages: JobStage[];
   pins: Pin[];
+  items: JobItem[];
+  edits: Record<string, ElementEdit>;
   states: ElementState[];
   runs: PlanRun[];
   members: Member[];
   /** the signed-in person's team row, for "tagged to me" */
   me: string | null;
   aiAvailable: boolean;
+  /** 3D views are a premium feature; false shows the 2D plan only */
+  can3d?: boolean;
+  /** admins can send no-sign-in links to the job */
+  canShare?: boolean;
 }
 
 export interface WorkspaceApi {
   setElementState(elementId: string, status: ElementState["status"] | null): Promise<void>;
+  saveElementEdit(elementId: string, data: ElementEdit | null): Promise<void>;
+  createItem(input: ItemInput): Promise<JobItem>;
+  updateItem(itemId: string, input: Partial<ItemInput>): Promise<void>;
+  deleteItem(itemId: string): Promise<void>;
   createPin(input: PinInput): Promise<Pin>;
   updatePin(pinId: string, input: Partial<PinInput> & { status?: PinStatus }): Promise<void>;
   deletePin(pinId: string): Promise<void>;
@@ -31,4 +42,15 @@ export interface WorkspaceApi {
   answer(planId: string, answers: Record<string, string>): Promise<void>;
   refreshPlan(): Promise<{ runs: PlanRun[]; plan: PlanRow | null }>;
   backHref: string;
+  listShareLinks?(): Promise<ShareLink[]>;
+  createShareLink?(input: ShareLinkInput): Promise<ShareLink>;
+  revokeShareLink?(linkId: string): Promise<void>;
+  /** the full address of a link, to copy */
+  shareUrl?(token: string): string;
+  /** the preview has no second page: show what the link shows, right here */
+  openShare?(token: string): void;
+  /** the Rorker assistant (chat + voice); left out, the Ask button is hidden */
+  ask?: AssistantSend;
+  /** the assistant changed something: fetch the job again (a new `data` prop follows) */
+  afterAssistant?: () => void;
 }

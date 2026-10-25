@@ -156,6 +156,40 @@ create table public.element_states (
   primary key (job_id, element_id)
 );
 
+-- Per-job changes to plan elements made in the app: an object moved (dx, dy along the floor, dz up),
+-- resized, renamed, re-identified, or given a product link. The plan itself stays as read; these are
+-- applied on top, so a new plan version doesn't lose the drawing and the job keeps its changes.
+create table public.element_edits (
+  job_id uuid not null references public.jobs on delete cascade,
+  company_id uuid not null references public.companies on delete cascade,
+  element_id text not null,
+  data jsonb not null default '{}',   -- {"dx": mm, "dy": mm, "dz": mm, "name", "kind", "width", "depth", "height_mm", "spec", "product_name", "product_url", "notes", "type"}
+  updated_by uuid references auth.users,
+  updated_at timestamptz not null default now(),
+  primary key (job_id, element_id)
+);
+
+-- ---------------------------------------------------------------- wall items
+-- Small things the contractor places on a wall (outlets, switches, lights, plumbing points ...).
+-- They are job data, not plan data: dragged around and edited in the wall view.
+create type public.item_kind as enum ('outlet', 'switch', 'light', 'data', 'plumbing', 'vent', 'thermostat', 'mount', 'other');
+
+create table public.job_items (
+  id uuid primary key default gen_random_uuid(),
+  job_id uuid not null references public.jobs on delete cascade,
+  company_id uuid not null references public.companies on delete cascade,
+  kind public.item_kind not null,
+  label text,
+  floor_id text not null,
+  side text not null,            -- wall side key, "G-R04:2"
+  x double precision not null,   -- mm along the side from its left end, as seen from inside the room
+  y double precision not null,   -- mm above the floor, centre of the item
+  note text,
+  created_by uuid references auth.users,
+  created_at timestamptz not null default now()
+);
+create index on public.job_items (job_id);
+
 -- ---------------------------------------------------------------- pins and tasks
 create type public.pin_kind as enum ('task', 'issue', 'note', 'material');
 create type public.pin_status as enum ('open', 'in_progress', 'done');
@@ -220,6 +254,8 @@ alter table public.plan_runs enable row level security;
 alter table public.plans enable row level security;
 alter table public.element_states enable row level security;
 alter table public.pins enable row level security;
+alter table public.job_items enable row level security;
+alter table public.element_edits enable row level security;
 alter table public.pin_comments enable row level security;
 
 create policy "members read company" on public.companies for select using (public.is_member(id));
@@ -241,7 +277,7 @@ create policy "admins change templates" on public.stage_templates for all using 
 do $$
 declare t text;
 begin
-  foreach t in array array['jobs', 'job_stages', 'plan_runs', 'plans', 'element_states', 'pins', 'pin_comments']
+  foreach t in array array['jobs', 'job_stages', 'plan_runs', 'plans', 'element_states', 'element_edits', 'job_items', 'pins', 'pin_comments']
   loop
     execute format('create policy "members all" on public.%I for all using (public.is_member(company_id)) with check (public.is_member(company_id))', t);
   end loop;

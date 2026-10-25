@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getRepo, requireCompany, requireJob } from "@/lib/data";
 import { attempt } from "@/lib/result";
-import type { ElementState, JobStage, Pin, PinComment, PinInput, PinStatus, PlanRow, PlanRun, StageStatus } from "@/lib/data/types";
+import type { ElementEdit, ElementState, ItemInput, JobItem, JobStage, Pin, PinComment, PinInput, PinStatus, PlanRow, PlanRun, ShareLink, ShareLinkInput, StageStatus } from "@/lib/data/types";
 
 const str = (f: FormData, k: string) => {
   const v = f.get(k);
@@ -46,6 +46,70 @@ export async function setElementState(jobId: string, elementId: string, status: 
   await getRepo().setElementState(jobId, session.userId, elementId, status);
 }
 
+const EDIT_NUM = ["dx", "dy", "dz", "width", "depth", "height_mm"] as const;
+const EDIT_STR = ["name", "kind", "type", "spec", "product_name", "product_url", "notes"] as const;
+
+/** Save the whole set of app-side changes for one element (null clears them). */
+export async function saveElementEdit(jobId: string, elementId: string, data: ElementEdit | null) {
+  return attempt(async () => {
+    const { session } = await requireJob(jobId);
+    let clean: ElementEdit | null = null;
+    if (data) {
+      clean = {};
+      for (const k of EDIT_NUM) {
+        const v = data[k];
+        if (v == null) continue;
+        if (!Number.isFinite(v) || Math.abs(v) > 100000) throw new Error("That size or position looks wrong.");
+        clean[k] = Math.round(v);
+      }
+      for (const k of EDIT_STR) {
+        const v = data[k];
+        if (typeof v === "string" && v.trim()) clean[k] = v.trim().slice(0, 500);
+      }
+      if (clean.product_url && !/^https?:\/\//.test(clean.product_url)) throw new Error("Product links need to start with http:// or https://");
+      if (clean.width != null && clean.width < 20 || clean.depth != null && clean.depth < 20) throw new Error("That is too small.");
+    }
+    await getRepo().saveElementEdit(jobId, session.userId, elementId, clean);
+  });
+}
+
+// ---------------------------------------------------------------- wall items
+
+const ITEM_KINDS = ["outlet", "switch", "light", "data", "plumbing", "vent", "thermostat", "mount", "other"];
+function cleanItem<T extends Partial<ItemInput>>(input: T): T {
+  if (input.kind && !ITEM_KINDS.includes(input.kind)) throw new Error("Unknown item type.");
+  for (const k of ["x", "y"] as const) if (input[k] != null && !Number.isFinite(input[k])) throw new Error("Bad position.");
+  const out = { ...input };
+  if (out.x != null) out.x = Math.round(Math.max(0, out.x));
+  if (out.y != null) out.y = Math.round(Math.max(0, Math.min(6000, out.y)));
+  if (out.label !== undefined) out.label = out.label?.trim() || null;
+  if (out.note !== undefined) out.note = out.note?.trim() || null;
+  return out;
+}
+
+export async function createItem(jobId: string, input: ItemInput) {
+  return attempt(async (): Promise<JobItem> => {
+    const { session } = await requireJob(jobId);
+    return getRepo().createItem(jobId, session.userId, cleanItem(input));
+  });
+}
+
+export async function updateItem(jobId: string, itemId: string, input: Partial<ItemInput>) {
+  return attempt(async () => {
+    await requireJob(jobId);
+    if (!(await getRepo().listItems(jobId)).some((i) => i.id === itemId)) throw new Error("That item is gone.");
+    await getRepo().updateItem(itemId, cleanItem(input));
+  });
+}
+
+export async function deleteItem(jobId: string, itemId: string) {
+  return attempt(async () => {
+    await requireJob(jobId);
+    if (!(await getRepo().listItems(jobId)).some((i) => i.id === itemId)) return;
+    await getRepo().deleteItem(itemId);
+  });
+}
+
 // ---------------------------------------------------------------- pins
 
 export async function createPin(jobId: string, input: PinInput): Promise<Pin> {
@@ -78,6 +142,44 @@ export async function deletePin(jobId: string, pinId: string) {
   await requireJob(jobId);
   await getRepo().deletePin(pinId);
   revalidatePath("/jobs");
+}
+
+// ---------------------------------------------------------------- shared links (admins only)
+
+async function requireJobAdmin(jobId: string) {
+  const r = await requireJob(jobId);
+  if (r.session.role !== "admin") throw new Error("Only an admin can share a job. Ask the owner.");
+  return r;
+}
+
+export async function listShareLinks(jobId: string) {
+  return attempt(async (): Promise<ShareLink[]> => {
+    await requireJobAdmin(jobId);
+    return getRepo().listShareLinks(jobId);
+  });
+}
+
+export async function createShareLink(jobId: string, input: ShareLinkInput) {
+  return attempt(async (): Promise<ShareLink> => {
+    const { session } = await requireJobAdmin(jobId);
+    const repo = getRepo();
+    const label = input.label?.trim();
+    if (!label) throw new Error("Say who the link is for.");
+    const members = input.member_id ? await repo.listMembers(session.company.id) : [];
+    if (input.member_id && !members.some((m) => m.id === input.member_id)) throw new Error("That person isn't on your team.");
+    const pins = new Set((await repo.listPins(jobId)).map((p) => p.id));
+    const pin_ids = (input.pin_ids ?? []).filter((id) => pins.has(id));
+    if (!input.member_id && !pin_ids.length) throw new Error("Pick the tasks they should see.");
+    return repo.createShareLink(jobId, session.userId, { label: label.slice(0, 80), member_id: input.member_id ?? null, pin_ids, expires_at: input.expires_at ?? null });
+  });
+}
+
+export async function revokeShareLink(jobId: string, linkId: string) {
+  return attempt(async () => {
+    await requireJobAdmin(jobId);
+    if (!(await getRepo().listShareLinks(jobId)).some((l) => l.id === linkId)) return;
+    await getRepo().revokeShareLink(linkId);
+  });
 }
 
 async function commentsWithUrls(pinId: string): Promise<PinComment[]> {

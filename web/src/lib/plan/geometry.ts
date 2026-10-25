@@ -140,6 +140,8 @@ export interface WallSide {
   heading: "north" | "east" | "south" | "west";
   /** "North wall", or "North wall A" / "B" when an L-shaped room has two */
   label: string;
+  /** unit vector into the room */
+  inward: Pt;
   segments: { id: string; kind: "wall" | "opening"; from: number; to: number; el: Wall | Opening }[];
 }
 
@@ -191,7 +193,7 @@ export function roomSides(floor: Floor, room: Room): WallSide[] {
     const mid: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
     const out = (mid[0] + nx * 100 - c[0]) ** 2 + (mid[1] + ny * 100 - c[1]) ** 2 > (mid[0] - c[0]) ** 2 + (mid[1] - c[1]) ** 2 ? [nx, ny] : [-nx, -ny];
     const heading = Math.abs(out[0]) > Math.abs(out[1]) ? (out[0] > 0 ? "east" : "west") : out[1] > 0 ? "south" : "north";
-    sides.push({ key: `${room.id}:${i}`, roomId: room.id, index: i, a, b, length: len, heading, label: "", segments: segs });
+    sides.push({ key: `${room.id}:${i}`, roomId: room.id, index: i, a, b, length: len, heading, label: "", segments: segs, inward: [-out[0], -out[1]] });
   });
   for (const s of sides) {
     const same = sides.filter((t) => t.heading === s.heading);
@@ -258,7 +260,7 @@ export function attachedToSide(floor: Floor, side: WallSide, reach = 450): Attac
   const ux = (b[0] - a[0]) / len, uy = (b[1] - a[1]) / len;
   const out: Attached[] = [];
   for (const f of floor.fixtures) {
-    if (f.room_id !== side.roomId || f.kind === "car") continue;
+    if (f.room_id !== side.roomId || f.kind === "car" || f.kind === "door_leaf" || f.kind === "part") continue;
     const [x0, y0, x1, y1] = f.bbox;
     const corners: Pt[] = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
     let lo = Infinity, hi = -Infinity, gap = Infinity, far = 0;
@@ -281,7 +283,7 @@ export function attachedToWall(floor: Floor, wall: Wall): { openings: Opening[];
   const near = (q: Pt, d: number) => pointInPoly(q, wall.polygon) || edgeDistance(q, wall.polygon) < d;
   const openings = floor.openings.filter((o) => near([(o.a[0] + o.b[0]) / 2, (o.a[1] + o.b[1]) / 2], wall.thickness_mm + 60));
   const fixtures = floor.fixtures.filter((f) => {
-    if (f.kind === "car" || f.kind === "other" && (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]) < 150 * 150) return false;
+    if (f.kind === "car" || f.kind === "door_leaf" || f.kind === "part" || f.kind === "other" && (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]) < 150 * 150) return false;
     const [x0, y0, x1, y1] = f.bbox;
     return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].some((q) => near(q as Pt, 450));
   });
@@ -349,4 +351,31 @@ export function siteLayout(plan: Plan): Site {
   const p = toStreet(entry);
   const path = p ? p.map(([x, y], i) => [i === 0 || i === 3 ? x + (p[1][0] - p[0][0]) / 2 - 650 : x - (p[1][0] - p[0][0]) / 2 + 650, y] as Pt) : null;
   return { lot, street, front, building: bb, drive, path };
+}
+
+/** Convex hull (monotone chain), for filling a fixture drawn as loose linework. */
+export function hull(points: Pt[]): Pt[] {
+  const p = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (p.length < 3) return p;
+  const cross = (o: Pt, a: Pt, b: Pt) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo: Pt[] = [], up: Pt[] = [];
+  for (const q of p) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (const q of p.reverse()) { while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return [...lo.slice(0, -1), ...up.slice(0, -1)];
+}
+
+/** The fixture's footprint: its first closed outline when it has one (cabinets), else the hull of its linework. */
+export function footprint(f: Fixture): Pt[] {
+  const ring = f.outline.find((l) => l.length >= 4 && Math.hypot(l[0][0] - l[l.length - 1][0], l[0][1] - l[l.length - 1][1]) < 1);
+  if (ring && f.front) return ring;
+  const pts = f.outline.flat();
+  if (pts.length >= 3) return hull(pts);
+  const [x0, y0, x1, y1] = f.bbox;
+  return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+}
+
+/** Point on a wall side: `along` mm from its start, `off` mm into the room. */
+export function sidePoint(side: WallSide, along: number, off = 0): Pt {
+  const ux = (side.b[0] - side.a[0]) / side.length, uy = (side.b[1] - side.a[1]) / side.length;
+  return [side.a[0] + ux * along + side.inward[0] * off, side.a[1] + uy * along + side.inward[1] * off];
 }

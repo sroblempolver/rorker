@@ -2,11 +2,14 @@
 // The details card for whatever is selected on the plan: what it is, its ID, its build status, the
 // things you can do to that one element, what is attached to it, and the pins on it. With nothing
 // selected it summarises the current level, from the whole project down to one wall.
-import type { JobStage, Pin, PinAnchor, PinKind } from "@/lib/data/types";
+import { useState } from "react";
+import type { ElementEdit, ItemInput, ItemKind, JobItem, JobStage, Pin, PinAnchor, PinKind } from "@/lib/data/types";
 import { attachedToSide, attachedToWall, elementKindLabel, elementLabel, findElement, pointInPoly, roomOf, roomSides, sideOfWall, type WallSide } from "@/lib/plan/geometry";
 import type { Element, ElementStatus, Floor, Plan } from "@/lib/plan/types";
 import type { Level } from "@/components/plan/PlanViewer";
 import { PIN_COLOR, PIN_LABEL, STATUS_COLOR, STATUS_LABEL, STATUS_ORDER } from "@/components/plan/style";
+import { ITEM_HEIGHT, ITEM_LABEL } from "@/components/plan/items";
+import { FixtureCard, ItemPanel, RoomEdit } from "./Editors";
 import { PinRow } from "./PinsPanel";
 import { StageStrip } from "./StagesPanel";
 
@@ -47,16 +50,16 @@ export function StatusPicker({ value, onChange }: { value: ElementStatus | undef
 
 // ------------------------------------------------------------------ what you can do to one element
 
-type Action = { label: string; icon: string; kind: PinKind; title: (name: string) => string; status?: ElementStatus };
+type Action = { label: string; icon: string; kind: PinKind; title: (name: string) => string; status?: ElementStatus; item?: ItemKind; product?: boolean };
 const WALL_ACTIONS: Action[] = [
   { label: "Paint", icon: "▤", kind: "task", title: (n) => `Paint ${n}` },
   { label: "Tile", icon: "▦", kind: "task", title: (n) => `Tile ${n}` },
   { label: "Patch / drywall", icon: "▨", kind: "task", title: (n) => `Patch and skim ${n}` },
-  { label: "Outlet", icon: "⏻", kind: "task", title: () => "Add outlet, 300 mm up" },
-  { label: "Switch", icon: "⎍", kind: "task", title: () => "Add light switch, 1200 mm up" },
-  { label: "Light", icon: "✶", kind: "task", title: () => "Add wall light" },
-  { label: "Plumbing point", icon: "⌇", kind: "task", title: () => "Plumbing point" },
-  { label: "Mount / shelf", icon: "▭", kind: "task", title: () => "Fix mount or shelf (check backing)" },
+  { label: "Outlet", icon: "⏻", kind: "task", title: () => "Add outlet", item: "outlet" },
+  { label: "Switch", icon: "⎍", kind: "task", title: () => "Add light switch", item: "switch" },
+  { label: "Light", icon: "✶", kind: "task", title: () => "Add wall light", item: "light" },
+  { label: "Plumbing point", icon: "⌇", kind: "task", title: () => "Plumbing point", item: "plumbing" },
+  { label: "Mount / shelf", icon: "▭", kind: "task", title: () => "Fix mount or shelf (check backing)", item: "mount" },
   { label: "New window", icon: "◫", kind: "task", title: () => "Cut in new window" },
   { label: "New door", icon: "▯", kind: "task", title: () => "Cut in new door" },
   { label: "Insulate", icon: "≋", kind: "task", title: (n) => `Insulate ${n}` },
@@ -74,7 +77,7 @@ const FIXTURE_ACTIONS: Action[] = [
   { label: "Install", icon: "＋", kind: "task", title: (n) => `Install ${n}` },
   { label: "Replace", icon: "↻", kind: "task", title: (n) => `Replace ${n}` },
   { label: "Connect", icon: "⌇", kind: "task", title: (n) => `Connect ${n} (plumbing / power)` },
-  { label: "Spec / product", icon: "◈", kind: "material", title: (n) => `${n}: model and finish` },
+  { label: "Spec / product", icon: "◈", kind: "material", title: (n) => `${n}: model and finish`, product: true },
   { label: "Repair", icon: "⚒", kind: "issue", title: (n) => `Fix ${n}` },
   { label: "Remove", icon: "✕", kind: "task", title: (n) => `Remove ${n}`, status: "demolish" },
 ];
@@ -114,6 +117,15 @@ interface Props {
   onSelectPin: (id: string) => void;
   onAddPin: (a: AddPin) => void;
   setLevel: (l: Level) => void;
+  edits: Record<string, ElementEdit>;
+  onSaveEdit: (id: string, patch: ElementEdit | null) => Promise<void>;
+  items: JobItem[];
+  selectedItem: string | null;
+  onSelectItem: (id: string) => void;
+  onAddItem: (input: ItemInput) => Promise<void>;
+  onUpdateItem: (id: string, input: Partial<ItemInput>) => Promise<void>;
+  onDeleteItem: (id: string) => Promise<void>;
+  onPinKind: (k: PinKind) => void;
 }
 
 function pinsFor(plan: Plan, pins: Pin[], e: Element) {
@@ -159,9 +171,48 @@ function sideItems(floor: Floor, side: WallSide) {
   ];
 }
 
+/** The wall side an item goes on and where along it, for an action picked on an element. */
+function itemSpot(plan: Plan, level: Level, e: Element | null): { floorId: string; side: WallSide; x: number } | null {
+  if (level.kind === "wall") {
+    const f = plan.floors.find((x) => x.id === level.floorId)!;
+    const side = roomSides(f, f.rooms.find((r) => r.id === level.roomId)!).find((s) => s.key === level.sideKey);
+    if (!side) return null;
+    const seg = e ? side.segments.find((s) => s.id === e.el.id) : null;
+    const fix = e && !seg ? attachedToSide(f, side).find((a) => a.f.id === e.el.id) : null;
+    return { floorId: f.id, side, x: Math.round(seg ? (seg.from + seg.to) / 2 : fix ? (fix.from + fix.to) / 2 : side.length / 2) };
+  }
+  if (e?.kind === "wall") {
+    const side = sideOfWall(e.floor, e.el.id, level.kind === "room" ? level.roomId : null);
+    const seg = side?.segments.find((s) => s.id === e.el.id);
+    if (side) return { floorId: e.floor.id, side, x: Math.round(seg ? (seg.from + seg.to) / 2 : side.length / 2) };
+  }
+  return null;
+}
+
 export function Inspector(p: Props) {
   const { plan, level, selected, states } = p;
   const e = selected ? findElement(plan, selected) : null;
+  const [product, setProduct] = useState<string | null>(null);
+
+  /** Outlet, switch, light ...: put a real one on the wall (and face that wall) to drag into place. */
+  const placeItem = (kind: ItemKind, el: Element | null) => {
+    const spot = itemSpot(plan, level, el);
+    if (!spot) return false;
+    if (level.kind !== "wall") p.setLevel({ kind: "wall", floorId: spot.floorId, roomId: spot.side.roomId, sideKey: spot.side.key });
+    void p.onAddItem({ kind, floor_id: spot.floorId, side: spot.side.key, x: spot.x, y: ITEM_HEIGHT[kind] });
+    return true;
+  };
+
+  const item = p.selectedItem ? p.items.find((i) => i.id === p.selectedItem) : null;
+  if (item) {
+    const f = plan.floors.find((x) => x.id === item.floor_id);
+    const room = f?.rooms.find((r) => r.id === item.side.split(":")[0]);
+    const side = f && room ? roomSides(f, room).find((s) => s.key === item.side) : null;
+    return <ItemPanel key={item.id} item={item} wallLabel={side && room ? `${side.label}, ${room.name}` : "Wall"} wallLength={side?.length ?? null}
+      onUpdate={(input) => p.onUpdateItem(item.id, input)} onDelete={() => p.onDeleteItem(item.id)}
+      onShow={() => f && room && p.setLevel({ kind: "wall", floorId: f.id, roomId: room.id, sideKey: item.side })}
+      onPin={() => p.onAddPin({ elementId: null, floorId: item.floor_id, anchor: { view: "wall", side: item.side, x: item.x, y: -item.y }, preset: { kind: "task", title: `${item.label || ITEM_LABEL[item.kind]}: ` } })} />;
+  }
 
   if (e) {
     const myPins = pinsFor(plan, p.pins, e);
@@ -176,6 +227,8 @@ export function Inspector(p: Props) {
       return x == null ? null : { view: "wall" as const, side: level.sideKey, x: Math.round(x), y: seg?.kind === "wall" ? -1400 : fix ? -1100 : -2300 };
     })() : null;
     const pick = (a: Action) => {
+      if (a.product && e.kind === "fixture") return setProduct(e.el.id);
+      if (a.item && placeItem(a.item, e)) return;
       if (a.status) p.onSetStatus(e.el.id, a.status);
       p.onAddPin({ elementId: e.el.id, floorId: e.floor.id, anchor: wallAnchor, preset: { kind: a.kind, title: a.title(lname) } });
     };
@@ -194,6 +247,7 @@ export function Inspector(p: Props) {
               <Row k="Name" v={<>{SOURCE[e.el.label_source] ?? e.el.label_source}{e.el.confidence < 0.7 && <span className="text-amber"> · please check</span>}</>} />
               <Row k="Contains" v={`${e.floor.fixtures.filter((f) => f.room_id === e.el.id).length} items, ${e.el.opening_ids.length} doors and windows, ${e.el.wall_ids.length} walls`} />
               {e.el.notes && <Row k="Notes" v={e.el.notes} />}
+              <div className="mt-2 flex justify-end"><RoomEdit key={e.el.id} r={e.el} onSave={(patch) => p.onSaveEdit(e.el.id, { ...p.edits[e.el.id], ...patch })} /></div>
             </>
           )}
           {e.kind === "wall" && (
@@ -214,12 +268,9 @@ export function Inspector(p: Props) {
             </>
           )}
           {e.kind === "fixture" && (
-            <>
-              <Row k="Kind" v={e.el.kind === "other" ? "Not identified yet" : e.el.kind.replace("_", " ")} />
-              <Row k="Room" v={e.el.room_id ? elementLabel(findElement(plan, e.el.room_id)!) : "None"} />
-              <Row k="Size" v={`${Math.round(e.el.bbox[2] - e.el.bbox[0])} × ${Math.round(e.el.bbox[3] - e.el.bbox[1])} mm`} />
-              {e.el.source_ref && <Row k="Drawing" v={<span className="font-mono text-[12px]">{e.el.source_ref}</span>} />}
-            </>
+            <FixtureCard key={`${e.el.id}${product === e.el.id ? "p" : ""}`} f={e.el} edit={p.edits[e.el.id]} focus={product === e.el.id ? "product" : null}
+              room={e.el.room_id ? elementLabel(findElement(plan, e.el.room_id)!) : "None"}
+              onSave={async (patch) => { await p.onSaveEdit(e.el.id, patch); setProduct(null); }} />
           )}
           {e.kind === "stair" && <Row k="Room" v={e.el.room_id ? elementLabel(findElement(plan, e.el.room_id)!) : "None"} />}
         </div>
@@ -292,14 +343,22 @@ export function Inspector(p: Props) {
         <div>
           <p className="eyebrow mb-2">Work on this wall</p>
           <Actions actions={WALL_ACTIONS} name="this wall" onPick={(a) => {
+            if (a.item && placeItem(a.item, null)) return;
             if (a.status && main) p.onSetStatus(main.id, a.status);
             p.onAddPin({ elementId: main?.id ?? null, floorId: f.id, anchor: { view: "wall", side: side.key, x: Math.round(side.length / 2), y: -1400 }, preset: { kind: a.kind, title: a.title(`${side.label[0].toLowerCase()}${side.label.slice(1)} of the ${r.name.toLowerCase()}`) } });
           }} />
-          <p className="text-[12px] text-muted mt-2">Or click the exact spot on the wall with the pin tool, or right-click it.</p>
+          <p className="text-[12px] text-muted mt-2">Outlets, switches and lights go on the wall for you to drag into place. For anything else, pick up a pin and click the exact spot, or right-click it.</p>
         </div>
         <div>
           <p className="eyebrow mb-2">On this wall</p>
           <Chips items={sideItems(f, side)} states={states} onSelect={(id) => p.onSelect(id)} />
+          {p.items.some((i) => i.side === side.key) && (
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
+              {p.items.filter((i) => i.side === side.key).map((i) => (
+                <button key={i.id} onClick={() => p.onSelectItem(i.id)} className="chip hover:text-text hover:border-chalk">{i.label || ITEM_LABEL[i.kind]}<span className="font-mono text-[11px] opacity-70">{Math.round(i.y)} up</span></button>
+              ))}
+            </div>
+          )}
         </div>
         <div>
           <p className="eyebrow mb-2">Pins here ({here.length})</p>
@@ -335,7 +394,7 @@ export function Inspector(p: Props) {
   }
 
   // site and outside: the whole project
-  return <ProjectSummary plan={plan} pins={p.pins} states={states} stages={p.stages} setLevel={p.setLevel} />;
+  return <ProjectSummary plan={plan} pins={p.pins} states={states} stages={p.stages} setLevel={p.setLevel} onPinKind={p.onPinKind} />;
 }
 
 /** Share of a floor's elements in each status, for the progress bars. */
@@ -354,7 +413,7 @@ export function ProgressBar({ total, c }: { total: number; c: Record<ElementStat
   );
 }
 
-export function ProjectSummary({ plan, pins, states, stages, setLevel, compact }: { plan: Plan; pins: Pin[]; states: Map<string, ElementStatus>; stages: JobStage[]; setLevel: (l: Level) => void; compact?: boolean }) {
+export function ProjectSummary({ plan, pins, states, stages, setLevel, compact, onPinKind }: { plan: Plan; pins: Pin[]; states: Map<string, ElementStatus>; stages: JobStage[]; setLevel: (l: Level) => void; compact?: boolean; onPinKind?: (k: PinKind) => void }) {
   const floors = [...plan.floors].sort((a, b) => a.level - b.level);
   const open = pins.filter((x) => x.status !== "done");
   const current = stages.find((s) => s.status === "active");
@@ -391,7 +450,11 @@ export function ProjectSummary({ plan, pins, states, stages, setLevel, compact }
       <div className="flex flex-wrap gap-1.5">
         {(["task", "issue", "note", "material"] as const).map((k) => {
           const n = open.filter((x) => x.kind === k).length;
-          return <span key={k} className="chip"><span className="w-2 h-2 rounded-[1px]" style={{ background: PIN_COLOR[k] }} />{n} {PIN_LABEL[k].toLowerCase()}{n === 1 ? "" : "s"}</span>;
+          return (
+            <button key={k} type="button" onClick={() => onPinKind?.(k)} title={`Show the open ${PIN_LABEL[k].toLowerCase()}s`} className="chip hover:text-text hover:border-chalk">
+              <span className="w-2 h-2 rounded-[1px]" style={{ background: PIN_COLOR[k] }} />{n} {PIN_LABEL[k].toLowerCase()}{n === 1 ? "" : "s"}
+            </button>
+          );
         })}
         {pins.some((x) => x.anchor?.view === "site") && <span className="chip">{pins.filter((x) => x.anchor?.view === "site").length} on the site</span>}
       </div>

@@ -7097,7 +7097,12 @@
      ],
      "source": "drawing",
      "source_ref": "plant 1",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "G-F02",
@@ -11669,7 +11674,12 @@
      ],
      "source": "drawing",
      "source_ref": "plant 1",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "G-F03",
@@ -12115,7 +12125,12 @@
      ],
      "source": "drawing",
      "source_ref": "F standard lamp plan",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "G-F04",
@@ -12441,7 +12456,12 @@
      ],
      "source": "drawing",
      "source_ref": "desk chair (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "G-F05",
@@ -12925,7 +12945,12 @@
      ],
      "source": "drawing",
      "source_ref": "sofa 0 (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "G-F06",
@@ -13251,7 +13276,12 @@
      ],
      "source": "drawing",
      "source_ref": "desk chair (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "G-F07",
@@ -13577,7 +13607,12 @@
      ],
      "source": "drawing",
      "source_ref": "desk chair (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "G-F08",
@@ -13629,7 +13664,12 @@
      ],
      "source": "shape",
      "source_ref": "c5",
-     "confidence": 0.2
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "G-F09",
@@ -13955,12 +13995,17 @@
      ],
      "source": "drawing",
      "source_ref": "desk chair (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "G-F10",
-     "kind": "other",
-     "name": "Unidentified item",
+     "kind": "dining_table",
+     "name": "Dining table (likely)",
      "room_id": "G-R01",
      "center": [
       2110.1,
@@ -14055,7 +14100,12 @@
      ],
      "source": "shape",
      "source_ref": "c3",
-     "confidence": 0.2
+     "confidence": 0.55,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "G-F11",
@@ -14381,7 +14431,12 @@
      ],
      "source": "drawing",
      "source_ref": "desk chair (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "G-F12",
@@ -14717,332 +14772,15 @@
      ],
      "source": "drawing",
      "source_ref": "love seat (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "G-F13",
-     "kind": "plant",
-     "name": "Plant",
-     "room_id": "G-R02",
-     "center": [
-      8156.9,
-      4534.6
-     ],
-     "bbox": [
-      7799.2,
-      4054.9,
-      8514.6,
-      5014.4
-     ],
-     "rotation": -180.0,
-     "outline": [
-      [
-       [
-        8169.8,
-        4558.2
-       ],
-       [
-        8206.2,
-        4543.2
-       ],
-       [
-        8206.2,
-        4530.4
-       ],
-       [
-        8169.8,
-        4515.4
-       ]
-      ],
-      [
-       [
-        7861.4,
-        4855.9
-       ],
-       [
-        8045.5,
-        5014.4
-       ],
-       [
-        8266.1,
-        4866.6
-       ],
-       [
-        8298.3,
-        4877.3
-       ],
-       [
-        8418.2,
-        4825.9
-       ],
-       [
-        8424.6,
-        4746.7
-       ],
-       [
-        8298.3,
-        4774.5
-       ],
-       [
-        8343.2,
-        4742.4
-       ],
-       [
-        8338.9,
-        4723.1
-       ],
-       [
-        8257.6,
-        4746.7
-       ],
-       [
-        8225.4,
-        4804.5
-       ],
-       [
-        8073.4,
-        4877.3
-       ],
-       [
-        7996.3,
-        4774.5
-       ]
-      ],
-      [
-       [
-        8030.5,
-        4646.0
-       ],
-       [
-        8009.1,
-        4785.2
-       ],
-       [
-        7921.3,
-        4851.6
-       ],
-       [
-        7844.2,
-        4845.2
-       ],
-       [
-        7799.2,
-        4761.7
-       ],
-       [
-        7799.2,
-        4309.8
-       ],
-       [
-        7869.9,
-        4215.5
-       ],
-       [
-        7977.0,
-        4251.9
-       ],
-       [
-        8026.3,
-        4434.0
-       ]
-      ],
-      [
-       [
-        7863.5,
-        4494.0
-       ],
-       [
-        7863.5,
-        4586.0
-       ],
-       [
-        7925.6,
-        4637.4
-       ],
-       [
-        8064.8,
-        4652.4
-       ],
-       [
-        8169.8,
-        4607.5
-       ],
-       [
-        8169.8,
-        4470.4
-       ],
-       [
-        8067.0,
-        4429.7
-       ],
-       [
-        7921.3,
-        4449.0
-       ],
-       [
-        7863.5,
-        4494.0
-       ]
-      ],
-      [
-       [
-        8037.0,
-        4832.3
-       ],
-       [
-        8122.6,
-        4853.8
-       ]
-      ],
-      [
-       [
-        8041.3,
-        4239.1
-       ],
-       [
-        8122.6,
-        4217.7
-       ]
-      ],
-      [
-       [
-        7863.5,
-        4213.4
-       ],
-       [
-        8045.5,
-        4054.9
-       ],
-       [
-        8266.1,
-        4204.8
-       ],
-       [
-        8298.3,
-        4194.1
-       ],
-       [
-        8418.2,
-        4245.5
-       ],
-       [
-        8424.6,
-        4322.6
-       ],
-       [
-        8298.3,
-        4296.9
-       ],
-       [
-        8343.2,
-        4326.9
-       ],
-       [
-        8338.9,
-        4346.2
-       ],
-       [
-        8257.6,
-        4324.8
-       ],
-       [
-        8225.4,
-        4264.8
-       ],
-       [
-        8073.4,
-        4192.0
-       ],
-       [
-        7996.3,
-        4296.9
-       ]
-      ],
-      [
-       [
-        8240.4,
-        4187.7
-       ],
-       [
-        8362.5,
-        4157.7
-       ],
-       [
-        8476.0,
-        4159.8
-       ],
-       [
-        8514.6,
-        4236.9
-       ],
-       [
-        8510.3,
-        4275.5
-       ],
-       [
-        8467.4,
-        4316.2
-       ],
-       [
-        8193.3,
-        4393.3
-       ],
-       [
-        8107.6,
-        4438.3
-       ]
-      ],
-      [
-       [
-        8240.4,
-        4881.6
-       ],
-       [
-        8362.5,
-        4913.7
-       ],
-       [
-        8476.0,
-        4911.6
-       ],
-       [
-        8514.6,
-        4832.3
-       ],
-       [
-        8510.3,
-        4793.8
-       ],
-       [
-        8467.4,
-        4753.1
-       ],
-       [
-        8193.3,
-        4676.0
-       ],
-       [
-        8107.6,
-        4631.0
-       ]
-      ],
-      [
-       [
-        8309.0,
-        4708.1
-       ],
-       [
-        8309.0,
-        4361.2
-       ]
-      ]
-     ],
-     "source": "drawing",
-     "source_ref": "piple 1 top",
-     "confidence": 1.0
-    },
-    {
-     "id": "G-F14",
      "kind": "table",
      "name": "Table",
      "room_id": "G-R02",
@@ -15253,12 +14991,17 @@
      ],
      "source": "drawing",
      "source_ref": "table1.1",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F15",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "G-F14",
+     "kind": "sideboard",
+     "name": "Sideboard (likely)",
      "room_id": "G-R02",
      "center": [
       10683.1,
@@ -15379,10 +15122,15 @@
      ],
      "source": "shape",
      "source_ref": "c4",
-     "confidence": 0.2
+     "confidence": 0.4,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F16",
+     "id": "G-F15",
      "kind": "chair",
      "name": "Chair",
      "room_id": "G-R01",
@@ -15705,10 +15453,15 @@
      ],
      "source": "drawing",
      "source_ref": "desk chair (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F17",
+     "id": "G-F16",
      "kind": "chair",
      "name": "Chair",
      "room_id": "G-R01",
@@ -16031,10 +15784,15 @@
      ],
      "source": "drawing",
      "source_ref": "desk chair (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F18",
+     "id": "G-F17",
      "kind": "chair",
      "name": "Chair",
      "room_id": "G-R01",
@@ -16357,10 +16115,15 @@
      ],
      "source": "drawing",
      "source_ref": "desk chair (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F19",
+     "id": "G-F18",
      "kind": "chair",
      "name": "Chair",
      "room_id": "G-R02",
@@ -16679,10 +16442,15 @@
      ],
      "source": "drawing",
      "source_ref": "chair (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F20",
+     "id": "G-F19",
      "kind": "car",
      "name": "Car",
      "room_id": "G-R03",
@@ -29211,10 +28979,15 @@
      ],
      "source": "drawing",
      "source_ref": "mers",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F21",
+     "id": "G-F20",
      "kind": "other",
      "name": "Unidentified item",
      "room_id": "G-R02",
@@ -29303,12 +29076,17 @@
      ],
      "source": "shape",
      "source_ref": "c6",
-     "confidence": 0.2
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F22",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "G-F21",
+     "kind": "washing_machine",
+     "name": "Washer (likely)",
      "room_id": "G-R06",
      "center": [
       8215.1,
@@ -29347,10 +29125,15 @@
      ],
      "source": "shape",
      "source_ref": "c8",
-     "confidence": 0.2
+     "confidence": 0.45,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F23",
+     "id": "G-F22",
      "kind": "washbasin",
      "name": "Washbasin",
      "room_id": "G-R07",
@@ -29889,10 +29672,15 @@
      ],
      "source": "drawing",
      "source_ref": "fh",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F24",
+     "id": "G-F23",
      "kind": "toilet",
      "name": "Toilet",
      "room_id": "G-R07",
@@ -30591,12 +30379,17 @@
      ],
      "source": "drawing",
      "source_ref": "t",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F25",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "G-F24",
+     "kind": "shower",
+     "name": "Shower (likely)",
      "room_id": "G-R07",
      "center": [
       10510.1,
@@ -30661,138 +30454,17 @@
      ],
      "source": "shape",
      "source_ref": "c9",
-     "confidence": 0.2
+     "confidence": 0.45,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "G-F26",
-     "kind": "other",
-     "name": "Unidentified item",
-     "room_id": "G-R04",
-     "center": [
-      2147.6,
-      7974.6
-     ],
-     "bbox": [
-      498.1,
-      6612.6,
-      3797.1,
-      9336.6
-     ],
-     "rotation": 0.0,
-     "outline": [
-      [
-       [
-        3785.1,
-        6624.6
-       ],
-       [
-        3185.1,
-        6624.6
-       ],
-       [
-        3185.1,
-        9324.6
-       ],
-       [
-        3785.1,
-        9324.6
-       ],
-       [
-        3785.1,
-        6624.6
-       ]
-      ],
-      [
-       [
-        510.1,
-        8724.6
-       ],
-       [
-        510.1,
-        9324.6
-       ],
-       [
-        3185.1,
-        9324.6
-       ],
-       [
-        3185.1,
-        8724.6
-       ],
-       [
-        510.1,
-        8724.6
-       ]
-      ],
-      [
-       [
-        3185.1,
-        8744.6
-       ],
-       [
-        3785.1,
-        8744.6
-       ]
-      ],
-      [
-       [
-        2585.1,
-        8724.6
-       ],
-       [
-        2585.1,
-        9324.6
-       ]
-      ],
-      [
-       [
-        1985.1,
-        8724.6
-       ],
-       [
-        1985.1,
-        9324.6
-       ]
-      ],
-      [
-       [
-        785.1,
-        8724.6
-       ],
-       [
-        785.1,
-        9324.6
-       ]
-      ],
-      [
-       [
-        3185.1,
-        8144.6
-       ],
-       [
-        3785.1,
-        8144.6
-       ]
-      ],
-      [
-       [
-        3185.1,
-        7544.6
-       ],
-       [
-        3785.1,
-        7544.6
-       ]
-      ]
-     ],
-     "source": "shape",
-     "source_ref": "c7",
-     "confidence": 0.2
-    },
-    {
-     "id": "G-F27",
-     "kind": "other",
-     "name": "Unidentified item",
+     "kind": "door_leaf",
+     "name": "Door leaf",
      "room_id": "G-R06",
      "center": [
       8368.4,
@@ -30831,12 +30503,17 @@
      ],
      "source": "shape",
      "source_ref": "c10",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F28",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "G-F27",
+     "kind": "door_leaf",
+     "name": "Door leaf",
      "room_id": "G-R07",
      "center": [
       8781.9,
@@ -30875,236 +30552,17 @@
      ],
      "source": "shape",
      "source_ref": "c11",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F29",
-     "kind": "plant",
-     "name": "Plant",
-     "room_id": "G-R04",
-     "center": [
-      2706.0,
-      8454.7
-     ],
-     "bbox": [
-      2248.2,
-      7939.9,
-      3163.9,
-      8969.4
-     ],
-     "rotation": -289.3348656422745,
-     "outline": [
-      [
-       [
-        2684.7,
-        8060.7
-       ],
-       [
-        2753.0,
-        8100.3
-       ],
-       [
-        2813.3,
-        8226.7
-       ],
-       [
-        2808.3,
-        8341.9
-       ],
-       [
-        2679.0,
-        8387.3
-       ],
-       [
-        2604.5,
-        8304.4
-       ],
-       [
-        2573.8,
-        8158.6
-       ],
-       [
-        2599.8,
-        8090.5
-       ],
-       [
-        2683.4,
-        8063.4
-       ]
-      ],
-      [
-       [
-        2798.6,
-        8197.8
-       ],
-       [
-        2922.1,
-        8129.4
-       ],
-       [
-        2955.7,
-        8024.6
-       ],
-       [
-        2922.1,
-        7954.7
-       ],
-       [
-        2828.4,
-        7939.9
-       ],
-       [
-        2404.0,
-        8088.8
-       ],
-       [
-        2337.2,
-        8189.4
-       ],
-       [
-        2406.3,
-        8276.4
-       ],
-       [
-        2594.4,
-        8262.6
-       ]
-      ],
-      [
-       [
-        2935.9,
-        7968.0
-       ],
-       [
-        3148.4,
-        8088.6
-       ],
-       [
-        3128.6,
-        8336.2
-       ],
-       [
-        3147.5,
-        8377.2
-       ],
-       [
-        3163.9,
-        8514.4
-       ],
-       [
-        3117.9,
-        8557.8
-       ],
-       [
-        3063.7,
-        8429.3
-       ],
-       [
-        3046.2,
-        8483.1
-       ],
-       [
-        3026.6,
-        8485.4
-       ],
-       [
-        3021.9,
-        8400.8
-       ],
-       [
-        3055.7,
-        8354.9
-       ],
-       [
-        3031.0,
-        8161.6
-       ],
-       [
-        2906.5,
-        8123.6
-       ]
-      ],
-      [
-       [
-        2761.8,
-        8358.2
-       ],
-       [
-        2757.0,
-        8396.2
-       ],
-       [
-        2744.9,
-        8400.5
-       ],
-       [
-        2719.4,
-        8373.1
-       ]
-      ],
-      [
-       [
-        2341.7,
-        8176.5
-       ],
-       [
-        2248.2,
-        8472.6
-       ],
-       [
-        2330.0,
-        8809.3
-       ],
-       [
-        2324.0,
-        8856.8
-       ],
-       [
-        2381.9,
-        8963.6
-       ],
-       [
-        2442.9,
-        8969.4
-       ],
-       [
-        2426.7,
-        8845.7
-       ],
-       [
-        2474.0,
-        8876.8
-       ],
-       [
-        2491.4,
-        8868.4
-       ],
-       [
-        2441.6,
-        8797.4
-       ],
-       [
-        2399.3,
-        8780.5
-       ],
-       [
-        2374.5,
-        8496.4
-       ],
-       [
-        2479.0,
-        8250.9
-       ]
-      ]
-     ],
-     "source": "drawing",
-     "source_ref": "piple2 top",
-     "confidence": 1.0
-    },
-    {
-     "id": "G-F30",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "G-F28",
+     "kind": "door_leaf",
+     "name": "Door leaf",
      "room_id": "G-R09",
      "center": [
       9825.2,
@@ -31143,10 +30601,15 @@
      ],
      "source": "shape",
      "source_ref": "c15",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F31",
+     "id": "G-F29",
      "kind": "other",
      "name": "Unidentified item",
      "room_id": "G-R10",
@@ -31213,104 +30676,27 @@
      ],
      "source": "shape",
      "source_ref": "c14",
-     "confidence": 0.2
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F32",
-     "kind": "other",
-     "name": "Unidentified item",
-     "room_id": "G-R04",
-     "center": [
-      3485.1,
-      9024.6
-     ],
-     "bbox": [
-      3223.1,
-      8762.6,
-      3747.1,
-      9286.6
-     ],
-     "rotation": 0.0,
-     "outline": [
-      [
-       [
-        3235.1,
-        9024.6
-       ],
-       [
-        3243.0,
-        9213.5
-       ],
-       [
-        3296.2,
-        9266.8
-       ],
-       [
-        3635.1,
-        9274.6
-       ],
-       [
-        3674.0,
-        9266.8
-       ],
-       [
-        3727.3,
-        9213.5
-       ],
-       [
-        3735.1,
-        9024.6
-       ]
-      ],
-      [
-       [
-        3235.1,
-        9024.6
-       ],
-       [
-        3243.0,
-        8835.7
-       ],
-       [
-        3296.2,
-        8782.5
-       ],
-       [
-        3335.1,
-        8774.6
-       ],
-       [
-        3674.0,
-        8782.5
-       ],
-       [
-        3727.3,
-        8835.7
-       ],
-       [
-        3735.1,
-        9024.6
-       ]
-      ]
-     ],
-     "source": "shape",
-     "source_ref": "c16",
-     "confidence": 0.2
-    },
-    {
-     "id": "G-F33",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "G-F31",
+     "kind": "wardrobe",
+     "name": "Built-in storage (likely)",
      "room_id": "G-R05",
      "center": [
-      4488.6,
-      8860.0
+      4718.3,
+      8213.900000000001
      ],
      "bbox": [
-      4023.1,
-      7572.6,
-      4954.0,
-      10147.4
+      4494.6,
+      7584.6,
+      4942.0,
+      8843.2
      ],
      "rotation": 0.0,
      "outline": [
@@ -31323,7 +30709,34 @@
         4494.6,
         8843.2
        ]
-      ],
+      ]
+     ],
+     "source": "shape",
+     "source_ref": "c12 \u00b7 piece 1 of 2",
+     "confidence": 0.4,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
+    },
+    {
+     "id": "G-F64",
+     "kind": "wardrobe",
+     "name": "Built-in storage (likely)",
+     "room_id": "G-R05",
+     "center": [
+      4272.1,
+      9494.05
+     ],
+     "bbox": [
+      4035.1,
+      8852.7,
+      4509.1,
+      10135.4
+     ],
+     "rotation": 0.0,
+     "outline": [
       [
        [
         4482.6,
@@ -31346,23 +30759,28 @@
       ]
      ],
      "source": "shape",
-     "source_ref": "c12",
-     "confidence": 0.2
+     "source_ref": "c12 \u00b7 piece 2 of 2",
+     "confidence": 0.4,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F34",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "G-F32",
+     "kind": "bookshelf",
+     "name": "Shelving (likely)",
      "room_id": "G-R05",
      "center": [
-      4541.6,
-      9009.2
+      4791.950000000001,
+      8305.3
      ],
      "bbox": [
-      4076.2,
-      7721.9,
-      5007.1,
-      10296.6
+      4588.8,
+      7733.9,
+      4995.1,
+      8876.7
      ],
      "rotation": 0.0,
      "outline": [
@@ -31375,7 +30793,34 @@
         4588.8,
         8876.7
        ]
-      ],
+      ]
+     ],
+     "source": "shape",
+     "source_ref": "c13 \u00b7 piece 1 of 2",
+     "confidence": 0.4,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
+    },
+    {
+     "id": "G-F65",
+     "kind": "wardrobe",
+     "name": "Built-in storage (likely)",
+     "room_id": "G-R05",
+     "center": [
+      4345.75,
+      9585.400000000001
+     ],
+     "bbox": [
+      4088.2,
+      8886.2,
+      4603.3,
+      10284.6
+     ],
+     "rotation": 0.0,
+     "outline": [
       [
        [
         4576.8,
@@ -31398,13 +30843,18 @@
       ]
      ],
      "source": "shape",
-     "source_ref": "c13",
-     "confidence": 0.2
+     "source_ref": "c13 \u00b7 piece 2 of 2",
+     "confidence": 0.4,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F35",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "G-F33",
+     "kind": "door_leaf",
+     "name": "Door leaf",
      "room_id": "G-R12",
      "center": [
       8781.9,
@@ -31443,10 +30893,15 @@
      ],
      "source": "shape",
      "source_ref": "c17",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F36",
+     "id": "G-F34",
      "kind": "other",
      "name": "Unidentified item",
      "room_id": "G-R12",
@@ -31483,10 +30938,15 @@
      ],
      "source": "shape",
      "source_ref": "c20",
-     "confidence": 0.2
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F37",
+     "id": "G-F35",
      "kind": "other",
      "name": "Unidentified item",
      "room_id": "G-R11",
@@ -31697,10 +31157,15 @@
      ],
      "source": "shape",
      "source_ref": "c22",
-     "confidence": 0.2
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F38",
+     "id": "G-F36",
      "kind": "sofa",
      "name": "Loveseat",
      "room_id": "G-R11",
@@ -32045,10 +31510,15 @@
      ],
      "source": "drawing",
      "source_ref": "love seat (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F39",
+     "id": "G-F37",
      "kind": "other",
      "name": "Unidentified item",
      "room_id": "G-R11",
@@ -32119,12 +31589,17 @@
      ],
      "source": "shape",
      "source_ref": "c21",
-     "confidence": 0.2
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F40",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "G-F38",
+     "kind": "door_leaf",
+     "name": "Door leaf",
      "room_id": "G-R11",
      "center": [
       3396.6,
@@ -32163,10 +31638,15 @@
      ],
      "source": "shape",
      "source_ref": "c23",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F41",
+     "id": "G-F39",
      "kind": "other",
      "name": "Unidentified item",
      "room_id": "G-R05",
@@ -32563,10 +32043,15 @@
      ],
      "source": "shape",
      "source_ref": "c18",
-     "confidence": 0.2
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F42",
+     "id": "G-F40",
      "kind": "other",
      "name": "Unidentified item",
      "room_id": "G-R12",
@@ -32607,10 +32092,15 @@
      ],
      "source": "shape",
      "source_ref": "c19",
-     "confidence": 0.2
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F43",
+     "id": "G-F41",
      "kind": "desk",
      "name": "Desk",
      "room_id": "G-R12",
@@ -32735,10 +32225,15 @@
      ],
      "source": "drawing",
      "source_ref": "desk1400 (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F44",
+     "id": "G-F42",
      "kind": "chair",
      "name": "Chair",
      "room_id": "G-R12",
@@ -33933,10 +33428,15 @@
      ],
      "source": "drawing",
      "source_ref": "chair(top)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F45",
+     "id": "G-F43",
      "kind": "lamp",
      "name": "Desk lamp",
      "room_id": "G-R12",
@@ -34351,10 +33851,15 @@
      ],
      "source": "drawing",
      "source_ref": "desk lamp (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F46",
+     "id": "G-F44",
      "kind": "sofa",
      "name": "Sofa",
      "room_id": "G-R11",
@@ -34835,12 +34340,17 @@
      ],
      "source": "drawing",
      "source_ref": "sofa 0 (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "G-F47",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "G-F45",
+     "kind": "door_leaf",
+     "name": "Door leaf",
      "room_id": "G-R11",
      "center": [
       3396.6,
@@ -34879,7 +34389,1242 @@
      ],
      "source": "shape",
      "source_ref": "c24",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
+    },
+    {
+     "id": "G-F46",
+     "kind": "kitchen_sink",
+     "name": "Sink base 580",
+     "room_id": "G-R04",
+     "center": [
+      3485.0,
+      9034.6
+     ],
+     "bbox": [
+      3185.0,
+      8744.6,
+      3785.0,
+      9324.6
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        3785.0,
+        9324.6
+       ],
+       [
+        3785.0,
+        8744.6
+       ],
+       [
+        3185.0,
+        8744.6
+       ],
+       [
+        3185.0,
+        9324.6
+       ],
+       [
+        3785.0,
+        9324.6
+       ]
+      ],
+      [
+       [
+        3235.1,
+        9024.6
+       ],
+       [
+        3243.0,
+        9213.5
+       ],
+       [
+        3296.2,
+        9266.8
+       ],
+       [
+        3635.1,
+        9274.6
+       ],
+       [
+        3674.0,
+        9266.8
+       ],
+       [
+        3727.3,
+        9213.5
+       ],
+       [
+        3735.1,
+        9024.6
+       ]
+      ],
+      [
+       [
+        3235.1,
+        9024.6
+       ],
+       [
+        3243.0,
+        8835.7
+       ],
+       [
+        3296.2,
+        8782.5
+       ],
+       [
+        3335.1,
+        8774.6
+       ],
+       [
+        3674.0,
+        8782.5
+       ],
+       [
+        3727.3,
+        8835.7
+       ],
+       [
+        3735.1,
+        9024.6
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 900.0,
+     "elevation_mm": 0.0,
+     "facing": -180.0,
+     "front": "sink",
+     "spec": "Sink base 580"
+    },
+    {
+     "id": "G-F47",
+     "kind": "dishwasher",
+     "name": "Dishwasher 600",
+     "room_id": "G-R04",
+     "center": [
+      3485.0,
+      8444.6
+     ],
+     "bbox": [
+      3185.0,
+      8144.6,
+      3785.0,
+      8744.6
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        3785.0,
+        8744.6
+       ],
+       [
+        3785.0,
+        8144.6
+       ],
+       [
+        3185.0,
+        8144.6
+       ],
+       [
+        3185.0,
+        8744.6
+       ],
+       [
+        3785.0,
+        8744.6
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 900.0,
+     "elevation_mm": 0.0,
+     "facing": -180.0,
+     "front": "appliance",
+     "spec": "Dishwasher 600"
+    },
+    {
+     "id": "G-F48",
+     "kind": "base_cabinet",
+     "name": "Base cabinet 600",
+     "room_id": "G-R04",
+     "center": [
+      3485.0,
+      7844.6
+     ],
+     "bbox": [
+      3185.0,
+      7544.6,
+      3785.0,
+      8144.6
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        3785.0,
+        8144.6
+       ],
+       [
+        3785.0,
+        7544.6
+       ],
+       [
+        3185.0,
+        7544.6
+       ],
+       [
+        3185.0,
+        8144.6
+       ],
+       [
+        3785.0,
+        8144.6
+       ]
+      ],
+      [
+       [
+        3185.0,
+        7844.6
+       ],
+       [
+        3245.0,
+        7844.6
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 900.0,
+     "elevation_mm": 0.0,
+     "facing": -180.0,
+     "front": "doors",
+     "spec": "Base 600"
+    },
+    {
+     "id": "G-F49",
+     "kind": "fridge",
+     "name": "Fridge space 920",
+     "room_id": "G-R04",
+     "center": [
+      3435.0,
+      7084.6
+     ],
+     "bbox": [
+      3085.0,
+      6624.6,
+      3785.0,
+      7544.6
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        3785.0,
+        7544.6
+       ],
+       [
+        3785.0,
+        6624.6
+       ],
+       [
+        3085.0,
+        6624.6
+       ],
+       [
+        3085.0,
+        7544.6
+       ],
+       [
+        3785.0,
+        7544.6
+       ]
+      ],
+      [
+       [
+        3785.0,
+        7544.6
+       ],
+       [
+        3085.0,
+        6624.6
+       ]
+      ],
+      [
+       [
+        3785.0,
+        6624.6
+       ],
+       [
+        3085.0,
+        7544.6
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 1780.0,
+     "elevation_mm": 0.0,
+     "facing": -180.0,
+     "front": "appliance",
+     "spec": "Fridge space 920"
+    },
+    {
+     "id": "G-F50",
+     "kind": "wall_cabinet",
+     "name": "Wall cabinet 580",
+     "room_id": "G-R04",
+     "center": [
+      3620.0,
+      9034.6
+     ],
+     "bbox": [
+      3455.0,
+      8744.6,
+      3785.0,
+      9324.6
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        3785.0,
+        9324.6
+       ],
+       [
+        3785.0,
+        8744.6
+       ],
+       [
+        3455.0,
+        8744.6
+       ],
+       [
+        3455.0,
+        9324.6
+       ],
+       [
+        3785.0,
+        9324.6
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 720.0,
+     "elevation_mm": 1450.0,
+     "facing": -180.0,
+     "front": "doors",
+     "spec": "Wall unit 580\u00d7720"
+    },
+    {
+     "id": "G-F51",
+     "kind": "wall_cabinet",
+     "name": "Wall cabinet 600",
+     "room_id": "G-R04",
+     "center": [
+      3620.0,
+      8444.6
+     ],
+     "bbox": [
+      3455.0,
+      8144.6,
+      3785.0,
+      8744.6
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        3785.0,
+        8744.6
+       ],
+       [
+        3785.0,
+        8144.6
+       ],
+       [
+        3455.0,
+        8144.6
+       ],
+       [
+        3455.0,
+        8744.6
+       ],
+       [
+        3785.0,
+        8744.6
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 720.0,
+     "elevation_mm": 1450.0,
+     "facing": -180.0,
+     "front": "doors",
+     "spec": "Wall unit 600\u00d7720"
+    },
+    {
+     "id": "G-F52",
+     "kind": "wall_cabinet",
+     "name": "Wall cabinet 600",
+     "room_id": "G-R04",
+     "center": [
+      3620.0,
+      7844.6
+     ],
+     "bbox": [
+      3455.0,
+      7544.6,
+      3785.0,
+      8144.6
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        3785.0,
+        8144.6
+       ],
+       [
+        3785.0,
+        7544.6
+       ],
+       [
+        3455.0,
+        7544.6
+       ],
+       [
+        3455.0,
+        8144.6
+       ],
+       [
+        3785.0,
+        8144.6
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 720.0,
+     "elevation_mm": 1450.0,
+     "facing": -180.0,
+     "front": "doors",
+     "spec": "Wall unit 600\u00d7720"
+    },
+    {
+     "id": "G-F53",
+     "kind": "wall_cabinet",
+     "name": "Bridge cabinet 920",
+     "room_id": "G-R04",
+     "center": [
+      3480.0,
+      7084.6
+     ],
+     "bbox": [
+      3175.0,
+      6624.6,
+      3785.0,
+      7544.6
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        3785.0,
+        7544.6
+       ],
+       [
+        3785.0,
+        6624.6
+       ],
+       [
+        3175.0,
+        6624.6
+       ],
+       [
+        3175.0,
+        7544.6
+       ],
+       [
+        3785.0,
+        7544.6
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 340.0,
+     "elevation_mm": 1830.0,
+     "facing": -180.0,
+     "front": "doors",
+     "spec": "Bridge unit 920\u00d7340"
+    },
+    {
+     "id": "G-F54",
+     "kind": "base_cabinet",
+     "name": "Base cabinet 275",
+     "room_id": "G-R04",
+     "center": [
+      647.6,
+      9045.0
+     ],
+     "bbox": [
+      510.1,
+      8745.0,
+      785.1,
+      9345.0
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        510.1,
+        9345.0
+       ],
+       [
+        785.1,
+        9345.0
+       ],
+       [
+        785.1,
+        8745.0
+       ],
+       [
+        510.1,
+        8745.0
+       ],
+       [
+        510.1,
+        9345.0
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 900.0,
+     "elevation_mm": 0.0,
+     "facing": -90.0,
+     "front": "door",
+     "spec": "Base 275"
+    },
+    {
+     "id": "G-F55",
+     "kind": "base_cabinet",
+     "name": "Base cabinet 600",
+     "room_id": "G-R04",
+     "center": [
+      1085.1,
+      9045.0
+     ],
+     "bbox": [
+      785.1,
+      8745.0,
+      1385.1,
+      9345.0
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        785.1,
+        9345.0
+       ],
+       [
+        1385.1,
+        9345.0
+       ],
+       [
+        1385.1,
+        8745.0
+       ],
+       [
+        785.1,
+        8745.0
+       ],
+       [
+        785.1,
+        9345.0
+       ]
+      ],
+      [
+       [
+        1085.1,
+        8745.0
+       ],
+       [
+        1085.1,
+        8805.0
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 900.0,
+     "elevation_mm": 0.0,
+     "facing": -90.0,
+     "front": "doors",
+     "spec": "Base 600"
+    },
+    {
+     "id": "G-F56",
+     "kind": "base_cabinet",
+     "name": "Drawer base 600",
+     "room_id": "G-R04",
+     "center": [
+      1685.1,
+      9045.0
+     ],
+     "bbox": [
+      1385.1,
+      8745.0,
+      1985.1,
+      9345.0
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        1385.1,
+        9345.0
+       ],
+       [
+        1985.1,
+        9345.0
+       ],
+       [
+        1985.1,
+        8745.0
+       ],
+       [
+        1385.1,
+        8745.0
+       ],
+       [
+        1385.1,
+        9345.0
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 900.0,
+     "elevation_mm": 0.0,
+     "facing": -90.0,
+     "front": "drawers",
+     "spec": "Drawer base 600"
+    },
+    {
+     "id": "G-F57",
+     "kind": "range",
+     "name": "Range 600",
+     "room_id": "G-R04",
+     "center": [
+      2285.1,
+      9045.0
+     ],
+     "bbox": [
+      1985.1,
+      8745.0,
+      2585.1,
+      9345.0
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        1985.1,
+        9345.0
+       ],
+       [
+        2585.1,
+        9345.0
+       ],
+       [
+        2585.1,
+        8745.0
+       ],
+       [
+        1985.1,
+        8745.0
+       ],
+       [
+        1985.1,
+        9345.0
+       ]
+      ],
+      [
+       [
+        2243.1,
+        9165.0
+       ],
+       [
+        2235.4,
+        9198.8
+       ],
+       [
+        2213.7,
+        9226.0
+       ],
+       [
+        2182.5,
+        9241.0
+       ],
+       [
+        2147.7,
+        9241.0
+       ],
+       [
+        2116.5,
+        9226.0
+       ],
+       [
+        2094.8,
+        9198.8
+       ],
+       [
+        2087.1,
+        9165.0
+       ],
+       [
+        2094.8,
+        9131.2
+       ],
+       [
+        2116.5,
+        9104.0
+       ],
+       [
+        2147.7,
+        9089.0
+       ],
+       [
+        2182.5,
+        9089.0
+       ],
+       [
+        2213.7,
+        9104.0
+       ],
+       [
+        2235.4,
+        9131.2
+       ],
+       [
+        2243.1,
+        9165.0
+       ]
+      ],
+      [
+       [
+        2243.1,
+        8937.0
+       ],
+       [
+        2235.4,
+        8970.8
+       ],
+       [
+        2213.7,
+        8998.0
+       ],
+       [
+        2182.5,
+        9013.0
+       ],
+       [
+        2147.7,
+        9013.0
+       ],
+       [
+        2116.5,
+        8998.0
+       ],
+       [
+        2094.8,
+        8970.8
+       ],
+       [
+        2087.1,
+        8937.0
+       ],
+       [
+        2094.8,
+        8903.2
+       ],
+       [
+        2116.5,
+        8876.0
+       ],
+       [
+        2147.7,
+        8861.0
+       ],
+       [
+        2182.5,
+        8861.0
+       ],
+       [
+        2213.7,
+        8876.0
+       ],
+       [
+        2235.4,
+        8903.2
+       ],
+       [
+        2243.1,
+        8937.0
+       ]
+      ],
+      [
+       [
+        2483.1,
+        9165.0
+       ],
+       [
+        2475.4,
+        9198.8
+       ],
+       [
+        2453.7,
+        9226.0
+       ],
+       [
+        2422.5,
+        9241.0
+       ],
+       [
+        2387.7,
+        9241.0
+       ],
+       [
+        2356.5,
+        9226.0
+       ],
+       [
+        2334.8,
+        9198.8
+       ],
+       [
+        2327.1,
+        9165.0
+       ],
+       [
+        2334.8,
+        9131.2
+       ],
+       [
+        2356.5,
+        9104.0
+       ],
+       [
+        2387.7,
+        9089.0
+       ],
+       [
+        2422.5,
+        9089.0
+       ],
+       [
+        2453.7,
+        9104.0
+       ],
+       [
+        2475.4,
+        9131.2
+       ],
+       [
+        2483.1,
+        9165.0
+       ]
+      ],
+      [
+       [
+        2483.1,
+        8937.0
+       ],
+       [
+        2475.4,
+        8970.8
+       ],
+       [
+        2453.7,
+        8998.0
+       ],
+       [
+        2422.5,
+        9013.0
+       ],
+       [
+        2387.7,
+        9013.0
+       ],
+       [
+        2356.5,
+        8998.0
+       ],
+       [
+        2334.8,
+        8970.8
+       ],
+       [
+        2327.1,
+        8937.0
+       ],
+       [
+        2334.8,
+        8903.2
+       ],
+       [
+        2356.5,
+        8876.0
+       ],
+       [
+        2387.7,
+        8861.0
+       ],
+       [
+        2422.5,
+        8861.0
+       ],
+       [
+        2453.7,
+        8876.0
+       ],
+       [
+        2475.4,
+        8903.2
+       ],
+       [
+        2483.1,
+        8937.0
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 900.0,
+     "elevation_mm": 0.0,
+     "facing": -90.0,
+     "front": "appliance",
+     "spec": "Range 600"
+    },
+    {
+     "id": "G-F58",
+     "kind": "base_cabinet",
+     "name": "Drawer base 600",
+     "room_id": "G-R04",
+     "center": [
+      2885.1,
+      9045.0
+     ],
+     "bbox": [
+      2585.1,
+      8745.0,
+      3185.1,
+      9345.0
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        2585.1,
+        9345.0
+       ],
+       [
+        3185.1,
+        9345.0
+       ],
+       [
+        3185.1,
+        8745.0
+       ],
+       [
+        2585.1,
+        8745.0
+       ],
+       [
+        2585.1,
+        9345.0
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 900.0,
+     "elevation_mm": 0.0,
+     "facing": -90.0,
+     "front": "drawers",
+     "spec": "Drawer base 600"
+    },
+    {
+     "id": "G-F59",
+     "kind": "wall_cabinet",
+     "name": "Wall cabinet 275",
+     "room_id": "G-R04",
+     "center": [
+      647.6,
+      9180.0
+     ],
+     "bbox": [
+      510.1,
+      9015.0,
+      785.1,
+      9345.0
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        510.1,
+        9345.0
+       ],
+       [
+        785.1,
+        9345.0
+       ],
+       [
+        785.1,
+        9015.0
+       ],
+       [
+        510.1,
+        9015.0
+       ],
+       [
+        510.1,
+        9345.0
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 720.0,
+     "elevation_mm": 1450.0,
+     "facing": -90.0,
+     "front": "door",
+     "spec": "Wall unit 275\u00d7720"
+    },
+    {
+     "id": "G-F60",
+     "kind": "wall_cabinet",
+     "name": "Wall cabinet 600",
+     "room_id": "G-R04",
+     "center": [
+      1085.1,
+      9180.0
+     ],
+     "bbox": [
+      785.1,
+      9015.0,
+      1385.1,
+      9345.0
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        785.1,
+        9345.0
+       ],
+       [
+        1385.1,
+        9345.0
+       ],
+       [
+        1385.1,
+        9015.0
+       ],
+       [
+        785.1,
+        9015.0
+       ],
+       [
+        785.1,
+        9345.0
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 720.0,
+     "elevation_mm": 1450.0,
+     "facing": -90.0,
+     "front": "doors",
+     "spec": "Wall unit 600\u00d7720"
+    },
+    {
+     "id": "G-F61",
+     "kind": "wall_cabinet",
+     "name": "Wall cabinet 600",
+     "room_id": "G-R04",
+     "center": [
+      1685.1,
+      9180.0
+     ],
+     "bbox": [
+      1385.1,
+      9015.0,
+      1985.1,
+      9345.0
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        1385.1,
+        9345.0
+       ],
+       [
+        1985.1,
+        9345.0
+       ],
+       [
+        1985.1,
+        9015.0
+       ],
+       [
+        1385.1,
+        9015.0
+       ],
+       [
+        1385.1,
+        9345.0
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 720.0,
+     "elevation_mm": 1450.0,
+     "facing": -90.0,
+     "front": "doors",
+     "spec": "Wall unit 600\u00d7720"
+    },
+    {
+     "id": "G-F62",
+     "kind": "range_hood",
+     "name": "Range hood 600",
+     "room_id": "G-R04",
+     "center": [
+      2285.1,
+      9116.5
+     ],
+     "bbox": [
+      1985.1,
+      8888.0,
+      2585.1,
+      9345.0
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        1985.1,
+        9345.0
+       ],
+       [
+        2585.1,
+        9345.0
+       ],
+       [
+        2585.1,
+        8888.0
+       ],
+       [
+        1985.1,
+        8888.0
+       ],
+       [
+        1985.1,
+        9345.0
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 559.0,
+     "elevation_mm": 1611.0,
+     "facing": -90.0,
+     "front": "appliance",
+     "spec": "Hood 600"
+    },
+    {
+     "id": "G-F63",
+     "kind": "wall_cabinet",
+     "name": "Wall cabinet 600",
+     "room_id": "G-R04",
+     "center": [
+      2885.1,
+      9180.0
+     ],
+     "bbox": [
+      2585.1,
+      9015.0,
+      3185.1,
+      9345.0
+     ],
+     "rotation": 0.0,
+     "outline": [
+      [
+       [
+        2585.1,
+        9345.0
+       ],
+       [
+        3185.1,
+        9345.0
+       ],
+       [
+        3185.1,
+        9015.0
+       ],
+       [
+        2585.1,
+        9015.0
+       ],
+       [
+        2585.1,
+        9345.0
+       ]
+      ]
+     ],
+     "source": "drawing",
+     "source_ref": "kitchen-fit",
+     "confidence": 0.8,
+     "height_mm": 720.0,
+     "elevation_mm": 1450.0,
+     "facing": -90.0,
+     "front": "doors",
+     "spec": "Wall unit 600\u00d7720"
     }
    ],
    "stairs": [
@@ -37992,7 +38737,12 @@
      ],
      "source": "drawing",
      "source_ref": "F standard lamp plan",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F02",
@@ -38410,7 +39160,12 @@
      ],
      "source": "drawing",
      "source_ref": "desk lamp (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F03",
@@ -38828,7 +39583,12 @@
      ],
      "source": "drawing",
      "source_ref": "desk lamp (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F04",
@@ -38956,12 +39716,17 @@
      ],
      "source": "drawing",
      "source_ref": "desk1400 (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F05",
-     "kind": "other",
-     "name": "Unidentified item",
+     "kind": "nightstand",
+     "name": "Nightstand (likely)",
      "room_id": "1-R01",
      "center": [
       709.9,
@@ -39000,7 +39765,12 @@
      ],
      "source": "shape",
      "source_ref": "c4",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F06",
@@ -39444,7 +40214,12 @@
      ],
      "source": "drawing",
      "source_ref": "lamp (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F07",
@@ -39738,12 +40513,17 @@
      ],
      "source": "drawing",
      "source_ref": "armchaer",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F08",
-     "kind": "other",
-     "name": "Unidentified item",
+     "kind": "armchair",
+     "name": "Armchair (likely)",
      "room_id": "1-R01",
      "center": [
       3485.3,
@@ -39782,7 +40562,12 @@
      ],
      "source": "shape",
      "source_ref": "c3",
-     "confidence": 0.2
+     "confidence": 0.35,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F09",
@@ -40980,7 +41765,12 @@
      ],
      "source": "drawing",
      "source_ref": "chair(top)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F10",
@@ -41108,7 +41898,12 @@
      ],
      "source": "drawing",
      "source_ref": "desk1400 (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F11",
@@ -42306,7 +43101,12 @@
      ],
      "source": "drawing",
      "source_ref": "chair(top)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F12",
@@ -42630,7 +43430,12 @@
      ],
      "source": "drawing",
      "source_ref": "bed1",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F13",
@@ -42844,12 +43649,17 @@
      ],
      "source": "shape",
      "source_ref": "c5",
-     "confidence": 0.2
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F14",
-     "kind": "other",
-     "name": "Unidentified item",
+     "kind": "nightstand",
+     "name": "Nightstand (likely)",
      "room_id": "1-R01",
      "center": [
       709.9,
@@ -42888,7 +43698,12 @@
      ],
      "source": "shape",
      "source_ref": "c6",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F15",
@@ -43332,7 +44147,12 @@
      ],
      "source": "drawing",
      "source_ref": "lamp (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F16",
@@ -43816,332 +44636,15 @@
      ],
      "source": "drawing",
      "source_ref": "sofa 0 (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
      "id": "1-F17",
-     "kind": "plant",
-     "name": "Plant",
-     "room_id": "1-R02",
-     "center": [
-      5255.0,
-      5631.6
-     ],
-     "bbox": [
-      4775.2,
-      5273.9,
-      5734.7,
-      5989.2
-     ],
-     "rotation": -90.0,
-     "outline": [
-      [
-       [
-        5231.4,
-        5618.7
-       ],
-       [
-        5246.4,
-        5582.3
-       ],
-       [
-        5259.3,
-        5582.3
-       ],
-       [
-        5274.3,
-        5618.7
-       ]
-      ],
-      [
-       [
-        4933.7,
-        5927.1
-       ],
-       [
-        4775.2,
-        5742.9
-       ],
-       [
-        4923.0,
-        5522.3
-       ],
-       [
-        4912.3,
-        5490.2
-       ],
-       [
-        4963.7,
-        5370.3
-       ],
-       [
-        5043.0,
-        5363.8
-       ],
-       [
-        5015.1,
-        5490.2
-       ],
-       [
-        5047.2,
-        5445.2
-       ],
-       [
-        5066.5,
-        5449.5
-       ],
-       [
-        5043.0,
-        5530.9
-       ],
-       [
-        4985.1,
-        5563.0
-       ],
-       [
-        4912.3,
-        5715.1
-       ],
-       [
-        5015.1,
-        5792.2
-       ]
-      ],
-      [
-       [
-        5143.6,
-        5757.9
-       ],
-       [
-        5004.4,
-        5779.3
-       ],
-       [
-        4938.0,
-        5867.1
-       ],
-       [
-        4944.4,
-        5944.2
-       ],
-       [
-        5028.0,
-        5989.2
-       ],
-       [
-        5479.9,
-        5989.2
-       ],
-       [
-        5574.1,
-        5918.5
-       ],
-       [
-        5537.7,
-        5811.5
-       ],
-       [
-        5355.6,
-        5762.2
-       ]
-      ],
-      [
-       [
-        5295.7,
-        5925.0
-       ],
-       [
-        5203.6,
-        5925.0
-       ],
-       [
-        5152.2,
-        5862.9
-       ],
-       [
-        5137.2,
-        5723.6
-       ],
-       [
-        5182.2,
-        5618.7
-       ],
-       [
-        5319.2,
-        5618.7
-       ],
-       [
-        5359.9,
-        5721.5
-       ],
-       [
-        5340.7,
-        5867.1
-       ],
-       [
-        5295.7,
-        5925.0
-       ]
-      ],
-      [
-       [
-        4957.3,
-        5751.5
-       ],
-       [
-        4935.9,
-        5665.8
-       ]
-      ],
-      [
-       [
-        5550.5,
-        5747.2
-       ],
-       [
-        5572.0,
-        5665.8
-       ]
-      ],
-      [
-       [
-        5576.2,
-        5925.0
-       ],
-       [
-        5734.7,
-        5742.9
-       ],
-       [
-        5584.8,
-        5522.3
-       ],
-       [
-        5595.5,
-        5490.2
-       ],
-       [
-        5544.1,
-        5370.3
-       ],
-       [
-        5467.0,
-        5363.8
-       ],
-       [
-        5492.7,
-        5490.2
-       ],
-       [
-        5462.7,
-        5445.2
-       ],
-       [
-        5443.5,
-        5449.5
-       ],
-       [
-        5464.9,
-        5530.9
-       ],
-       [
-        5524.8,
-        5563.0
-       ],
-       [
-        5597.7,
-        5715.1
-       ],
-       [
-        5492.7,
-        5792.2
-       ]
-      ],
-      [
-       [
-        5601.9,
-        5548.0
-       ],
-       [
-        5631.9,
-        5426.0
-       ],
-       [
-        5629.8,
-        5312.4
-       ],
-       [
-        5552.7,
-        5273.9
-       ],
-       [
-        5514.1,
-        5278.2
-       ],
-       [
-        5473.4,
-        5321.0
-       ],
-       [
-        5396.3,
-        5595.1
-       ],
-       [
-        5351.4,
-        5680.8
-       ]
-      ],
-      [
-       [
-        4908.0,
-        5548.0
-       ],
-       [
-        4875.9,
-        5426.0
-       ],
-       [
-        4878.0,
-        5312.4
-       ],
-       [
-        4957.3,
-        5273.9
-       ],
-       [
-        4995.8,
-        5278.2
-       ],
-       [
-        5036.5,
-        5321.0
-       ],
-       [
-        5113.6,
-        5595.1
-       ],
-       [
-        5158.6,
-        5680.8
-       ]
-      ],
-      [
-       [
-        5081.5,
-        5479.5
-       ],
-       [
-        5428.5,
-        5479.5
-       ]
-      ]
-     ],
-     "source": "drawing",
-     "source_ref": "piple 1 top",
-     "confidence": 1.0
-    },
-    {
-     "id": "1-F18",
      "kind": "bed",
      "name": "Single bed",
      "room_id": "1-R03",
@@ -44554,12 +45057,17 @@
      ],
      "source": "drawing",
      "source_ref": "s-bed (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F19",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F18",
+     "kind": "door_leaf",
+     "name": "Door leaf",
      "room_id": "1-R02",
      "center": [
       7183.2,
@@ -44598,12 +45106,17 @@
      ],
      "source": "shape",
      "source_ref": "c7",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F20",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F19",
+     "kind": "door_leaf",
+     "name": "Door leaf",
      "room_id": "1-R03",
      "center": [
       7761.6,
@@ -44642,10 +45155,15 @@
      ],
      "source": "shape",
      "source_ref": "c8",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F21",
+     "id": "1-F20",
      "kind": "toilet",
      "name": "Toilet",
      "room_id": "1-R04",
@@ -45344,10 +45862,15 @@
      ],
      "source": "drawing",
      "source_ref": "t",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F22",
+     "id": "1-F21",
      "kind": "washbasin",
      "name": "Washbasin",
      "room_id": "1-R04",
@@ -45886,12 +46409,17 @@
      ],
      "source": "drawing",
      "source_ref": "fh",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F23",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F22",
+     "kind": "door_leaf",
+     "name": "Door leaf",
      "room_id": "1-R05",
      "center": [
       2476.6,
@@ -45930,10 +46458,15 @@
      ],
      "source": "shape",
      "source_ref": "c9",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F24",
+     "id": "1-F23",
      "kind": "washbasin",
      "name": "Washbasin",
      "room_id": "1-R07",
@@ -46472,10 +47005,15 @@
      ],
      "source": "drawing",
      "source_ref": "fh",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F25",
+     "id": "1-F24",
      "kind": "toilet",
      "name": "Toilet",
      "room_id": "1-R07",
@@ -47174,22 +47712,27 @@
      ],
      "source": "drawing",
      "source_ref": "t",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F26",
+     "id": "1-F25",
      "kind": "other",
-     "name": "Unidentified item",
+     "name": "Unidentified piece",
      "room_id": "1-R05",
      "center": [
-      3022.6,
+      2757.4,
       7396.6
      ],
      "bbox": [
-      2317.9,
-      6544.6,
-      3727.4,
-      8248.6
+      2329.9,
+      6556.6,
+      3184.9,
+      8236.6
      ],
      "rotation": 0.0,
      "outline": [
@@ -47203,6 +47746,43 @@
         8236.6
        ]
       ],
+      [
+       [
+        2329.9,
+        7986.6
+       ],
+       [
+        3184.9,
+        7986.6
+       ]
+      ]
+     ],
+     "source": "shape",
+     "source_ref": "c10 \u00b7 piece 1 of 2",
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
+    },
+    {
+     "id": "1-F53",
+     "kind": "other",
+     "name": "Unidentified piece",
+     "room_id": "1-R05",
+     "center": [
+      3459.3,
+      7396.6
+     ],
+     "bbox": [
+      3203.2,
+      6556.6,
+      3715.4,
+      8236.6
+     ],
+     "rotation": 0.0,
+     "outline": [
       [
        [
         3469.9,
@@ -47420,26 +48000,21 @@
         3712.2,
         8106.4
        ]
-      ],
-      [
-       [
-        2329.9,
-        7986.6
-       ],
-       [
-        3184.9,
-        7986.6
-       ]
       ]
      ],
      "source": "shape",
-     "source_ref": "c10",
-     "confidence": 0.2
+     "source_ref": "c10 \u00b7 piece 2 of 2",
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F27",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F26",
+     "kind": "door_leaf",
+     "name": "Door leaf",
      "room_id": "1-R04",
      "center": [
       1920.4,
@@ -47478,12 +48053,17 @@
      ],
      "source": "shape",
      "source_ref": "c15",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F28",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F27",
+     "kind": "door_leaf",
+     "name": "Door leaf",
      "room_id": "1-R07",
      "center": [
       8924.9,
@@ -47522,12 +48102,17 @@
      ],
      "source": "shape",
      "source_ref": "c14",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F29",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F28",
+     "kind": "bathtub",
+     "name": "Bathtub (likely)",
      "room_id": "1-R07",
      "center": [
       10509.9,
@@ -47566,12 +48151,17 @@
      ],
      "source": "shape",
      "source_ref": "c11",
-     "confidence": 0.2
+     "confidence": 0.45,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F30",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F29",
+     "kind": "part",
+     "name": "Part of 1-F28",
      "room_id": "1-R07",
      "center": [
       10509.9,
@@ -47610,12 +48200,17 @@
      ],
      "source": "shape",
      "source_ref": "c12",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F31",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F30",
+     "kind": "part",
+     "name": "Part of 1-F25",
      "room_id": "1-R05",
      "center": [
       2757.4,
@@ -47654,12 +48249,17 @@
      ],
      "source": "shape",
      "source_ref": "c17",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F32",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F31",
+     "kind": "shower",
+     "name": "Shower (likely)",
      "room_id": "1-R07",
      "center": [
       9034.9,
@@ -47778,10 +48378,15 @@
      ],
      "source": "shape",
      "source_ref": "c16",
-     "confidence": 0.2
+     "confidence": 0.45,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F33",
+     "id": "1-F32",
      "kind": "other",
      "name": "Unidentified item",
      "room_id": "1-R09",
@@ -47994,10 +48599,15 @@
      ],
      "source": "shape",
      "source_ref": "c18",
-     "confidence": 0.2
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F34",
+     "id": "1-F33",
      "kind": "other",
      "name": "Unidentified item",
      "room_id": "1-R06",
@@ -48076,10 +48686,15 @@
      ],
      "source": "shape",
      "source_ref": "c13",
-     "confidence": 0.2
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F35",
+     "id": "1-F34",
      "kind": "other",
      "name": "Unidentified item",
      "room_id": "1-R10",
@@ -48426,10 +49041,15 @@
      ],
      "source": "shape",
      "source_ref": "c19",
-     "confidence": 0.2
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F36",
+     "id": "1-F35",
      "kind": "other",
      "name": "Unidentified item",
      "room_id": "1-R10",
@@ -48458,12 +49078,17 @@
      ],
      "source": "shape",
      "source_ref": "c21",
-     "confidence": 0.2
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F37",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F36",
+     "kind": "nightstand",
+     "name": "Nightstand (likely)",
      "room_id": "1-R09",
      "center": [
       709.9,
@@ -48502,10 +49127,15 @@
      ],
      "source": "shape",
      "source_ref": "c22",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F38",
+     "id": "1-F37",
      "kind": "lamp",
      "name": "Lamp",
      "room_id": "1-R09",
@@ -48946,12 +49576,17 @@
      ],
      "source": "drawing",
      "source_ref": "lamp (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F39",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F38",
+     "kind": "door_leaf",
+     "name": "Door leaf",
      "room_id": "1-R10",
      "center": [
       7761.6,
@@ -48990,10 +49625,15 @@
      ],
      "source": "shape",
      "source_ref": "c20",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F40",
+     "id": "1-F39",
      "kind": "lamp",
      "name": "Lamp",
      "room_id": "1-R10",
@@ -49434,12 +50074,17 @@
      ],
      "source": "drawing",
      "source_ref": "lamp (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F41",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F40",
+     "kind": "nightstand",
+     "name": "Nightstand (likely)",
      "room_id": "1-R10",
      "center": [
       10707.9,
@@ -49478,10 +50123,15 @@
      ],
      "source": "shape",
      "source_ref": "c23",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F42",
+     "id": "1-F41",
      "kind": "bed",
      "name": "Bed",
      "room_id": "1-R09",
@@ -49802,10 +50452,15 @@
      ],
      "source": "drawing",
      "source_ref": "bed1",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F43",
+     "id": "1-F42",
      "kind": "bed",
      "name": "Bed",
      "room_id": "1-R10",
@@ -50126,12 +50781,17 @@
      ],
      "source": "drawing",
      "source_ref": "bed1",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F44",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F43",
+     "kind": "nightstand",
+     "name": "Nightstand (likely)",
      "room_id": "1-R09",
      "center": [
       709.9,
@@ -50170,10 +50830,15 @@
      ],
      "source": "shape",
      "source_ref": "c25",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F45",
+     "id": "1-F44",
      "kind": "lamp",
      "name": "Lamp",
      "room_id": "1-R09",
@@ -50614,10 +51279,15 @@
      ],
      "source": "drawing",
      "source_ref": "lamp (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F46",
+     "id": "1-F45",
      "kind": "other",
      "name": "Unidentified item",
      "room_id": "1-R06",
@@ -50828,10 +51498,15 @@
      ],
      "source": "shape",
      "source_ref": "c24",
-     "confidence": 0.2
+     "confidence": 0.2,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F47",
+     "id": "1-F46",
      "kind": "other",
      "name": "1w",
      "room_id": "1-R06",
@@ -51456,10 +52131,15 @@
      ],
      "source": "drawing",
      "source_ref": "1w",
-     "confidence": 0.3
+     "confidence": 0.3,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F48",
+     "id": "1-F47",
      "kind": "desk",
      "name": "Desk",
      "room_id": "1-R10",
@@ -51584,10 +52264,15 @@
      ],
      "source": "drawing",
      "source_ref": "desk1400 (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F49",
+     "id": "1-F48",
      "kind": "chair",
      "name": "Chair",
      "room_id": "1-R10",
@@ -52782,10 +53467,15 @@
      ],
      "source": "drawing",
      "source_ref": "chair(top)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F50",
+     "id": "1-F49",
      "kind": "lamp",
      "name": "Lamp",
      "room_id": "1-R10",
@@ -53226,12 +53916,17 @@
      ],
      "source": "drawing",
      "source_ref": "lamp (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F51",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F50",
+     "kind": "nightstand",
+     "name": "Nightstand (likely)",
      "room_id": "1-R10",
      "center": [
       10707.9,
@@ -53270,12 +53965,17 @@
      ],
      "source": "shape",
      "source_ref": "c26",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F52",
-     "kind": "other",
-     "name": "Unidentified item",
+     "id": "1-F51",
+     "kind": "door_leaf",
+     "name": "Door leaf",
      "room_id": "1-R09",
      "center": [
       3396.4,
@@ -53314,10 +54014,15 @@
      ],
      "source": "shape",
      "source_ref": "c27",
-     "confidence": 0.2
+     "confidence": 0.5,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     },
     {
-     "id": "1-F53",
+     "id": "1-F52",
      "kind": "lamp",
      "name": "Desk lamp",
      "room_id": "1-R10",
@@ -53732,7 +54437,12 @@
      ],
      "source": "drawing",
      "source_ref": "desk lamp (pl)",
-     "confidence": 1.0
+     "confidence": 1.0,
+     "height_mm": null,
+     "elevation_mm": 0.0,
+     "facing": null,
+     "front": null,
+     "spec": null
     }
    ],
    "stairs": [
@@ -54386,7 +55096,7 @@
   },
   {
    "code": "room_no_label",
-   "message": "G-R08 (0.85 m²) has no label in the drawing.",
+   "message": "G-R08 (0.85 m\u00b2) has no label in the drawing.",
    "element_ids": [
     "G-R08"
    ],
@@ -54394,7 +55104,7 @@
   },
   {
    "code": "room_split",
-   "message": "The drawing gives lobby G-R09 an area of 3.3 m², which matches G-R09 and G-R10 together (2.9 m²). The walls show two rooms.",
+   "message": "The drawing gives lobby G-R09 an area of 3.3 m\u00b2, which matches G-R09 and G-R10 together (2.9 m\u00b2). The walls show two rooms.",
    "element_ids": [
     "G-R09",
     "G-R10"
@@ -54403,7 +55113,7 @@
   },
   {
    "code": "room_no_label",
-   "message": "1-R02 (13.19 m²) has no label in the drawing.",
+   "message": "1-R02 (13.19 m\u00b2) has no label in the drawing.",
    "element_ids": [
     "1-R02"
    ],
@@ -54411,7 +55121,7 @@
   },
   {
    "code": "room_no_label",
-   "message": "1-R05 (2.44 m²) has no label in the drawing.",
+   "message": "1-R05 (2.44 m\u00b2) has no label in the drawing.",
    "element_ids": [
     "1-R05"
    ],
@@ -54419,7 +55129,7 @@
   },
   {
    "code": "room_no_label",
-   "message": "1-R08 (1.7 m²) has no label in the drawing.",
+   "message": "1-R08 (1.7 m\u00b2) has no label in the drawing.",
    "element_ids": [
     "1-R08"
    ],
@@ -54435,7 +55145,7 @@
   },
   {
    "code": "room_split",
-   "message": "The drawing gives room 1-R02 an area of 27 m², which matches 1-R02 and 1-R03 together (26.1 m²). The walls show two rooms.",
+   "message": "The drawing gives room 1-R02 an area of 27 m\u00b2, which matches 1-R02 and 1-R03 together (26.1 m\u00b2). The walls show two rooms.",
    "element_ids": [
     "1-R02",
     "1-R03"
@@ -54479,7 +55189,7 @@
    "doors": 10,
    "windows": 5,
    "openings": 7,
-   "fixtures": 47,
+   "fixtures": 45,
    "unidentified": 22
   },
   "1": {
@@ -54488,14 +55198,14 @@
    "doors": 10,
    "windows": 6,
    "openings": 3,
-   "fixtures": 53,
+   "fixtures": 52,
    "unidentified": 26
   },
   "timings": {
-   "convert_s": 0.57,
-   "extract_s": 1.74,
+   "convert_s": 0.05,
+   "extract_s": 1.37,
    "interpret_s": 0.0,
-   "total_s": 2.37
+   "total_s": 1.58
   },
   "mode": "rules"
  }

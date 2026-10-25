@@ -35,6 +35,18 @@ export interface PlanRun {
 }
 export interface PlanRow { id: string; job_id: string; version: number; data: Plan; created_at: string }
 
+/** A change made in the app to one plan element, applied on top of the plan as read. */
+export interface ElementEdit {
+  dx?: number; dy?: number; dz?: number; name?: string; kind?: string; type?: string; width?: number; depth?: number;
+  height_mm?: number; spec?: string; product_name?: string; product_url?: string; notes?: string;
+}
+
+export type ItemKind = "outlet" | "switch" | "light" | "data" | "plumbing" | "vent" | "thermostat" | "mount" | "other";
+/** A small thing placed on a wall (outlet, switch, light ...): dragged and edited in the wall view.
+ *  x is mm along the wall side from its left end as seen from inside; y is mm above the floor. */
+export interface JobItem { id: string; job_id: string; kind: ItemKind; label: string | null; floor_id: string; side: string; x: number; y: number; note: string | null; created_at: string }
+export interface ItemInput { kind: ItemKind; label?: string | null; floor_id: string; side: string; x: number; y: number; note?: string | null }
+
 export type PinKind = "task" | "issue" | "note" | "material";
 /** A pin placed in an upright view: on the outside of the building, or on one wall seen from inside. */
 export interface PinAnchor { view: "site" | "exterior" | "wall"; side?: string; x: number; y: number }
@@ -63,6 +75,24 @@ export interface Member {
   title: string | null; role: MemberRole; is_owner: boolean;
 }
 export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole }
+
+/** A no-sign-in link to one job for a team member or a one-time sub. It shows the plan and only the
+ *  pins that are theirs: the ones tagged to `member_id` (now and later), plus any listed in `pin_ids`. */
+export interface ShareLink {
+  id: string; job_id: string; token: string; label: string; member_id: string | null; pin_ids: string[];
+  expires_at: string | null; revoked_at: string | null; created_at: string;
+}
+export interface ShareLinkInput { label: string; member_id?: string | null; pin_ids?: string[]; expires_at?: string | null }
+/** What a shared link shows. Built by shareView(), never straight from the database. */
+export interface SharedView {
+  label: string; expires_at: string | null;
+  company: { name: string; logo_url: string | null; brand_color: string; phone: string | null };
+  job: { id: string; name: string; address: string | null };
+  plan: Plan | null; edits: Record<string, ElementEdit>; items: JobItem[];
+  pins: Pin[]; stages: { name: string; status: StageStatus }[];
+  /** names only, for the people tagged on these pins */
+  people: { id: string; full_name: string; title: string | null }[];
+}
 
 export interface Session { userId: string; email: string | null; name: string | null; company: Company | null; role: MemberRole | null; memberId: string | null }
 
@@ -98,6 +128,13 @@ export interface Repo {
   startAnswers(jobId: string, userId: string, planId: string, answers: Record<string, string>): Promise<string>;
   listElementStates(jobId: string): Promise<ElementState[]>;
   setElementState(jobId: string, userId: string, elementId: string, status: ElementState["status"] | null): Promise<void>;
+  listElementEdits(jobId: string): Promise<Record<string, ElementEdit>>;
+  saveElementEdit(jobId: string, userId: string, elementId: string, data: ElementEdit | null): Promise<void>;
+  // wall items
+  listItems(jobId: string): Promise<JobItem[]>;
+  createItem(jobId: string, userId: string, input: ItemInput): Promise<JobItem>;
+  updateItem(itemId: string, input: Partial<ItemInput>): Promise<void>;
+  deleteItem(itemId: string): Promise<void>;
   // pins
   listPins(jobId: string): Promise<Pin[]>;
   createPin(jobId: string, userId: string, input: PinInput): Promise<string>;
@@ -106,4 +143,10 @@ export interface Repo {
   listComments(pinId: string): Promise<PinComment[]>;
   addComment(pinId: string, userId: string, body: string, photos: File[]): Promise<void>;
   photoUrl(path: string): Promise<string>;
+
+  listShareLinks(jobId: string): Promise<ShareLink[]>;
+  createShareLink(jobId: string, userId: string, input: ShareLinkInput): Promise<ShareLink>;
+  revokeShareLink(linkId: string): Promise<void>;
+  /** No sign-in: the token is the key. Null when unknown, revoked or expired. */
+  getSharedView(token: string): Promise<SharedView | null>;
 }
