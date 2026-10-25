@@ -8,7 +8,7 @@
 // and emails. Nothing is fetched that the person couldn't see in the app themselves.
 import type { ElementStatus, Plan } from "@/lib/plan/types";
 import type { ItemInput, ItemKind, Job, JobItem, JobStage, Member, MemberRole, Pin, PinInput, PinKind, PinStatus, StageStatus } from "@/lib/data/types";
-import { elementLabel, findElement, roomOf, roomSides } from "@/lib/plan/geometry";
+import { elementLabel, findElement, labelPoint, roomOf, roomSides } from "@/lib/plan/geometry";
 import { today } from "@/lib/dates";
 
 export interface JobBundle { job: Job; plan: Plan | null; pins: Pin[]; stages: JobStage[]; items: JobItem[]; states: { element_id: string; status: ElementStatus }[] }
@@ -64,6 +64,10 @@ export const TOOLS: ToolSpec[] = [
       kind: { type: "string", enum: ITEM_KINDS }, height_mm: { type: "number" }, from_left_mm: { type: "number", description: "From the wall's left end seen from inside the room; middle when left out" }, label: { type: "string" },
     }, required: ["room", "wall", "kind"] },
   },
+  {
+    name: "whats_around", description: "What is next to an object or door/window: the things on its left and right (as seen standing in front of it, facing it, the way someone uses it), in front of it and behind it, with distances. Use it for \"the cabinet right of the stove\" or \"the outlet left of the sink\". Returns ids.",
+    input_schema: { type: "object", properties: { job: JOB, element_id: { type: "string", description: "The reference object's id, from find_in_plan" } }, required: ["element_id"] },
+  },
   { name: "team", description: "The team: names, titles and roles (and contact details for admins).", input_schema: { type: "object", properties: {} } },
 ];
 
@@ -75,9 +79,76 @@ export function instructions(me: AssistantBackend["me"], ctx: AssistantContext):
     "Keep replies short and plain: they are often read aloud to someone on a job site. No tables, no headings, no long lists; at most a few short sentences.",
     "Never give out information beyond what the tools return for this person. Don't reveal anything about other companies, and don't repeat personal contact details unless this person is an admin and asked for them.",
     "Never say which AI model or company powers you; you are the Rorker assistant.",
+    "Where things are: left and right of an object always mean as seen standing in front of it, facing it (the way you'd use a stove, a sink or a cabinet), not as seen on the plan. \"The cabinet right of the stove\" is the one at your right hand when you face the stove. Use whats_around to find it. Above and below mean height on the wall. North, south, east and west follow the plan (north is up). If two things still fit, ask one short question naming them by where they are.",
     `Today is ${today()}.`,
     ctx.jobId ? `They are looking at the job "${ctx.jobName ?? ctx.jobId}" (id ${ctx.jobId})${ctx.where ? `, at ${ctx.where}` : ""}${ctx.selected ? `, with ${ctx.selected} selected` : ""}. "This job", "here" and "this" refer to that.` : "They are on the jobs list.",
   ].join("\n");
+}
+
+
+// ---------------------------------------------------------------------------------------- where things are
+
+const HEAD = ["east", "south", "west", "north"];
+/** A compass word for a direction in the plan frame (x right, y down, north up). */
+const heading = (dx: number, dy: number) => HEAD[((Math.round(Math.atan2(dy, dx) / (Math.PI / 2)) % 4) + 4) % 4];
+
+/** The way an object's front faces, as a unit vector: its own facing, or else away from the nearest wall of its room. */
+function frontOf(fl: Plan["floors"][number], f: Plan["floors"][number]["fixtures"][number]): [number, number] {
+  if (f.facing != null) { const r = (f.facing * Math.PI) / 180; return [Math.cos(r), Math.sin(r)]; }
+  const room = fl.rooms.find((r) => r.id === f.room_id);
+  if (!room) return [0, 1];
+  let best: { d: number; n: [number, number] } | null = null;
+  for (const sd of roomSides(fl, room)) {
+    const ux = (sd.b[0] - sd.a[0]) / sd.length, uy = (sd.b[1] - sd.a[1]) / sd.length;
+    const t = Math.max(0, Math.min(sd.length, (f.center[0] - sd.a[0]) * ux + (f.center[1] - sd.a[1]) * uy));
+    const d = Math.hypot(f.center[0] - (sd.a[0] + ux * t), f.center[1] - (sd.a[1] + uy * t));
+    if (!best || d < best.d) best = { d, n: [sd.inward[0], sd.inward[1]] };
+  }
+  return best?.n ?? [0, 1];
+}
+
+/** Gap between two boxes, mm (0 when they touch or overlap). */
+const gap = (a: number[], b: number[]) => Math.round(Math.hypot(Math.max(0, a[0] - b[2], b[0] - a[2]), Math.max(0, a[1] - b[3], b[1] - a[3])));
+
+function around(plan: Plan, id: string) {
+  for (const fl of plan.floors) {
+    const ref = fl.fixtures.find((x) => x.id === id);
+    const op = ref ? null : fl.openings.find((x) => x.id === id);
+    if (!ref && !op) continue;
+    const c: [number, number] = ref ? ref.center : [(op!.a[0] + op!.b[0]) / 2, (op!.a[1] + op!.b[1]) / 2];
+    const box = ref ? ref.bbox : [Math.min(op!.a[0], op!.b[0]), Math.min(op!.a[1], op!.b[1]), Math.max(op!.a[0], op!.b[0]), Math.max(op!.a[1], op!.b[1])];
+    const roomId = ref ? ref.room_id : op!.room_ids[0] ?? null;
+    // the front, and the right hand of someone standing in front of it looking at it (y is down)
+    let n: [number, number];
+    if (ref) n = frontOf(fl, ref);
+    else { const room = fl.rooms.find((r) => r.id === roomId); const lp = room ? labelPoint(room.polygon) : c; const ux = op!.b[0] - op!.a[0], uy = op!.b[1] - op!.a[1], L = Math.hypot(ux, uy) || 1; let nx = -uy / L, ny = ux / L; if ((lp[0] - c[0]) * nx + (lp[1] - c[1]) * ny < 0) { nx = -nx; ny = -ny; } n = [nx, ny]; }
+    const look: [number, number] = [-n[0], -n[1]];
+    const right: [number, number] = [-look[1], look[0]];
+    const near = fl.fixtures.filter((x) => x.id !== id && x.kind !== "door_leaf" && x.kind !== "part" && (x.room_id === roomId || gap(x.bbox, box) < 600))
+      .map((x) => {
+        const vx = x.center[0] - c[0], vy = x.center[1] - c[1];
+        const a = vx * right[0] + vy * right[1], f = vx * n[0] + vy * n[1];
+        const side = Math.abs(a) >= Math.abs(f) * 0.8 ? (a > 0 ? "right" : "left") : f > 0 ? "in front" : "behind";
+        const up = (x.elevation_mm ?? 0) >= 1000;
+        return { id: x.id, what: x.name, side, ...(up ? { height: "up on the wall" } : {}), gap_mm: gap(x.bbox, box), centre_to_centre_mm: Math.round(Math.hypot(vx, vy)), along: a, up };
+      })
+      .filter((x) => x.gap_mm < 3500)
+      .sort((p, q) => p.gap_mm - q.gap_mm || p.centre_to_centre_mm - q.centre_to_centre_mm);
+    // "next to" means at the same height first: the base cabinet beside the range, not the wall cabinet above it
+    const refUp = (ref?.elevation_mm ?? 0) >= 1000;
+    const nextOn = (s: string) => {
+      const all = near.filter((x) => x.side === s).sort((p, q) => Math.abs(p.along) - Math.abs(q.along));
+      return all.find((x) => x.up === refUp) ?? all[0] ?? null;
+    };
+    const label = (x: { id: string; what: string; gap_mm: number } | null) => (x ? `${x.what} (${x.id}), ${x.gap_mm ? `${x.gap_mm} mm away` : "touching"}` : "nothing");
+    return {
+      reference: `${ref ? ref.name : op!.name} (${id}), front faces ${heading(n[0], n[1])}`,
+      how_to_read: "Left and right are as seen standing in front of it, facing it.",
+      next_on_the_right: label(nextOn("right")), next_on_the_left: label(nextOn("left")),
+      nearby: near.slice(0, 12).map(({ along: _a, up: _u, ...x }) => x), // eslint-disable-line @typescript-eslint/no-unused-vars
+    };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------------------- running
@@ -165,7 +236,7 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
           if (score > 0 && score >= Math.min(words.length, 2)) out.push({ id, what: `${label}${kind && !norm(label).includes(norm(kind)) ? ` (${kind.replace(/_/g, " ")})` : ""}`, room, floor: f.name, score });
         };
         for (const r of f.rooms) consider(r.id, r.name, `room ${r.type}`, null);
-        for (const x of f.fixtures) if (x.kind !== "door_leaf" && x.kind !== "part") consider(x.id, x.name, x.kind, roomName(x.room_id));
+        for (const x of f.fixtures) if (x.kind !== "door_leaf" && x.kind !== "part") { const n = frontOf(f, x); consider(x.id, `${x.name}, front faces ${heading(n[0], n[1])}`, x.kind, roomName(x.room_id)); }
         for (const o of f.openings) consider(o.id, o.name, o.kind, o.room_ids.map(roomName).filter(Boolean).join(" / ") || null);
       }
       return out.sort((a, b2) => b2.score - a.score).slice(0, 15).map(({ score: _s, ...r }) => r); // eslint-disable-line @typescript-eslint/no-unused-vars
@@ -252,6 +323,13 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
       const it = await b.createItem(d.job.id, { kind, label: str(input.label) || null, floor_id: found.f.id, side: side.key, x: Math.round(x), y: Math.round(y) });
       changed.any = true;
       return { added: kind, room: found.r.name, wall: side.label, height_mm: it.y, from_left_mm: it.x, wall_length_mm: Math.round(side.length) };
+    }
+    case "whats_around": {
+      const d = await resolveJob(b, ctx, input.job);
+      if (!d.plan) return "This job has no plan yet.";
+      const r = around(d.plan, str(input.element_id));
+      if (!r) throw new Error("Give the id of an object, door or window from find_in_plan.");
+      return r;
     }
     case "team": {
       const ms = await b.members();

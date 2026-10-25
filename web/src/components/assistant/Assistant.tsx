@@ -58,16 +58,16 @@ export function Assistant({ send, context, onChanged, open, setOpen, wide }: { s
 
   const dict = useDictation((said) => { void ask(said, true); });
   const voice = dict.supported && !dict.blocked;
+  const [blockedNote, setBlockedNote] = useState(false);
 
   useEffect(() => { list.current?.scrollTo({ top: list.current.scrollHeight }); }, [turns, busy, dict.interim]);
   useEffect(() => { if (typing) input.current?.focus(); }, [typing]);
   useEffect(() => { if (dict.error) setOpen(true); }, [dict.error, setOpen]);
-  // no microphone here: the main button opens the keyboard instead
-  useEffect(() => { if (dict.blocked) setTyping(true); }, [dict.blocked]);
 
   const close = () => { setOpen(false); setTyping(false); stopSpeaking(); ctl.current?.abort(); dict.stop(); };
   const tapMain = () => {
-    if (!voice) { setTyping(true); setOpen(true); return; }
+    // the mic stays the main button; where the page can't have the microphone it says why and opens typing
+    if (!voice) { setBlockedNote(dict.supported); setTyping(true); setOpen(true); return; }
     if (dict.listening) return dict.stop();
     setOpen(true);
     dict.start();
@@ -95,6 +95,7 @@ export function Assistant({ send, context, onChanged, open, setOpen, wide }: { s
             {dict.listening && <p className="text-[13.5px] text-accent">Listening… {dict.interim && <span className="text-text">“{dict.interim}”</span>}</p>}
             {busy && <p className="text-[13px] text-muted inline-flex items-center gap-2"><span className="dot bg-accent animate-pulse" />Working on it… <button className="underline" onClick={() => ctl.current?.abort()}>Stop</button></p>}
             {(err || dict.error) && <p className="text-[12.5px] text-amber">{err ?? dict.error}</p>}
+            {blockedNote && !dict.error && <p className="text-[12.5px] text-amber">The mic is blocked here because this preview runs inside a frame on the page; the browser won&apos;t give it the microphone, whatever your settings say. It works in the full app. Type below for now.</p>}
           </div>
           {typing && (
             <form className="border-t border-line p-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); void ask(text); }}>
@@ -105,16 +106,16 @@ export function Assistant({ send, context, onChanged, open, setOpen, wide }: { s
         </section>
       )}
       <div className="pointer-events-auto flex items-center gap-2">
-        {voice && (
+        {dict.supported && (
           <button onClick={() => { setTyping(!typing); setOpen(true); }} aria-pressed={typing} aria-label="Type instead" title="Type instead"
             className={`w-10 h-10 rounded-full grid place-items-center border shadow-lg ${typing ? "bg-panel-3 border-accent text-accent" : "bg-panel-2 border-line text-text hover:border-accent"}`}>
             <KeysIcon />
           </button>
         )}
-        <button onClick={tapMain} aria-pressed={dict.listening} aria-label={!voice ? "Open the assistant" : dict.listening ? "Stop listening" : "Talk to the assistant"}
-          title={!voice ? "Ask the assistant" : dict.listening ? "Listening… tap to stop" : "Tap and talk"}
+        <button onClick={tapMain} aria-pressed={dict.listening} aria-label={!dict.supported ? "Open the assistant" : !voice ? "Talk to the assistant (mic blocked here)" : dict.listening ? "Stop listening" : "Talk to the assistant"}
+          title={!dict.supported ? "Ask the assistant" : dict.blocked ? "The mic is blocked in this preview window" : dict.listening ? "Listening… tap to stop" : "Tap and talk"}
           className={`w-14 h-14 rounded-full grid place-items-center shadow-xl transition-colors ${dict.listening ? "bg-red text-white animate-pulse" : "bg-accent text-accent-ink hover:brightness-110"}`}>
-          {voice ? <MicIcon on={dict.listening} /> : <KeysIcon />}
+          {dict.supported ? <MicIcon on={dict.listening} /> : <KeysIcon />}
         </button>
       </div>
     </div>

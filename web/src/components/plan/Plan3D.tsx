@@ -689,6 +689,13 @@ export function Plan3D(p: Props) {
       }
       return null;
     };
+    // in the building, the storey you clicked is the one at that height, whatever the ray hit first
+    const floorAtY = (y: number, fallback: string) => {
+      const fs = three.current?.built?.floors ?? [];
+      let id = fallback;
+      for (const f of fs) if (y >= f.y0 - 0.25) id = f.id;
+      return id;
+    };
     const floorBase = (floorId: string) => three.current?.built?.floors.find((f) => f.id === floorId)?.y0 ?? 0;
     const planeHit = (e: { clientX: number; clientY: number }, plane: THREE.Plane) => {
       const t = three.current!;
@@ -768,7 +775,7 @@ export function Plan3D(p: Props) {
       if (cb.current.pinMode) return;
       const h = cast(e);
       if (cb.current.mode === "building") {
-        const fid = h?.pick.floorId ?? null;
+        const fid = h ? floorAtY(h.point.y, h.pick.floorId) : null;
         if (fid && t.built) { const i = t.built.floors.findIndex((f) => f.id === fid); if (i >= 0) t.focus = i; }
         el.style.cursor = h ? "pointer" : "";
       } else {
@@ -815,7 +822,7 @@ export function Plan3D(p: Props) {
       const h = cast(e);
       if (P.mode === "building") {
         if (h?.pick.type === "pin") return P.onSelectPin(h.pick.id);
-        if (h) P.onOpenFloor(h.pick.floorId);
+        if (h) P.onOpenFloor(floorAtY(h.point.y, h.pick.floorId));
         return;
       }
       if (!h) return P.onSelect(null);
