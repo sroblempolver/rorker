@@ -75,7 +75,7 @@ export async function seedDemo(userId: string, name: string | null) {
   const repo = new DemoRepo();
   tx((db) => {
     const id = randomUUID();
-    db.companies.push({ id, owner: userId, name: "Demo Builders", logo_url: null, brand_color: "#f0a83a", phone: "(555) 010-2030", email: "office@demobuilders.test", license_no: "GC-104882", website: null, address: null });
+    db.companies.push({ id, owner: userId, name: "Demo Builders", logo_url: null, brand_color: "#ff6a1f", phone: "(555) 010-2030", email: "office@demobuilders.test", license_no: "GC-104882", website: null, address: null });
     db.members.push({ company_id: id, user_id: userId, role: "owner", full_name: name });
     for (const t of DEFAULT_TEMPLATES) db.templates.push({ id: randomUUID(), company_id: id, is_default: true, ...t });
   });
@@ -106,7 +106,7 @@ export class DemoRepo implements Repo {
   async createCompany(userId: string, input: CompanyInput, fullName?: string) {
     return tx((db) => {
       const id = randomUUID();
-      db.companies.push({ id, owner: userId, name: input.name, logo_url: null, brand_color: input.brand_color || "#f0a83a", phone: input.phone ?? null, email: input.email ?? null, license_no: input.license_no ?? null, website: input.website ?? null, address: input.address ?? null });
+      db.companies.push({ id, owner: userId, name: input.name, logo_url: null, brand_color: input.brand_color || "#ff6a1f", phone: input.phone ?? null, email: input.email ?? null, license_no: input.license_no ?? null, website: input.website ?? null, address: input.address ?? null });
       db.members.push({ company_id: id, user_id: userId, role: "owner", full_name: fullName ?? null });
       for (const t of DEFAULT_TEMPLATES) db.templates.push({ id: randomUUID(), company_id: id, is_default: true, ...t });
       return id;
@@ -285,7 +285,7 @@ export class DemoRepo implements Repo {
     return tx((db) => {
       const id = randomUUID();
       const number = Math.max(0, ...db.pins.filter((p) => p.job_id === jobId).map((p) => p.number)) + 1;
-      db.pins.push({ id, job_id: jobId, number, element_id: input.element_id ?? null, floor_id: input.floor_id ?? null, x: input.x ?? null, y: input.y ?? null, kind: input.kind, title: input.title, body: input.body ?? null, status: "open", priority: input.priority ?? 2, due_date: input.due_date ?? null, assignee_id: null, close_requirement: input.close_requirement ?? "confirm", stage_id: input.stage_id ?? null, links: input.links ?? [], created_by: userId, created_at: now(), closed_at: null });
+      db.pins.push({ id, job_id: jobId, number, element_id: input.element_id ?? null, floor_id: input.floor_id ?? null, x: input.x ?? null, y: input.y ?? null, anchor: input.anchor ?? null, kind: input.kind, title: input.title, body: input.body ?? null, status: "open", priority: input.priority ?? 2, due_date: input.due_date ?? null, assignee_id: null, close_requirement: input.close_requirement ?? "confirm", stage_id: input.stage_id ?? null, links: input.links ?? [], created_by: userId, created_at: now(), closed_at: null });
       return id;
     });
   }

@@ -3,22 +3,41 @@
 // before it closes, carry links (spec sheets, product pages) and a comment thread with photos.
 import { useEffect, useRef, useState } from "react";
 import type { JobStage, Pin, PinComment, PinInput, PinKind, PinStatus } from "@/lib/data/types";
-import { elementLabel, findElement } from "@/lib/plan/geometry";
+import { elementLabel, findElement, roomSides } from "@/lib/plan/geometry";
 import type { Plan } from "@/lib/plan/types";
 import { PIN_COLOR, PIN_LABEL, PIN_STATUS_LABEL } from "@/components/plan/style";
+import type { PinTarget } from "@/components/plan/target";
 
 const KINDS: PinKind[] = ["task", "issue", "note", "material"];
 
-function where(plan: Plan | null, pin: Pin) {
-  if (!plan || !pin.element_id) return "On the plan";
-  const e = findElement(plan, pin.element_id);
-  return e ? `${elementLabel(e)} · ${e.floor.name}` : pin.element_id;
+/** Wall side key "G-R04:2" -> "North wall, Kitchen". */
+export function sideName(plan: Plan, key: string) {
+  const roomId = key.split(":")[0];
+  for (const f of plan.floors) {
+    const r = f.rooms.find((x) => x.id === roomId);
+    if (!r) continue;
+    const s = roomSides(f, r).find((x) => x.key === key);
+    return s ? `${s.label}, ${r.name}` : r.name;
+  }
+  return "A wall";
 }
 
+export function where(plan: Plan | null, t: { element_id?: string | null; elementId?: string | null; anchor?: Pin["anchor"] }) {
+  const id = t.element_id ?? t.elementId ?? null;
+  if (t.anchor?.view === "site") return "On the site";
+  if (t.anchor?.view === "exterior") return "Outside, on the front";
+  const e = plan && id ? findElement(plan, id) : null;
+  if (t.anchor?.view === "wall" && plan && t.anchor.side) return `${sideName(plan, t.anchor.side)}${e && e.kind === "fixture" ? ` · ${e.el.name}` : ""}`;
+  if (!plan || !id) return "On the plan";
+  return e ? `${elementLabel(e)} · ${e.floor.name}` : id;
+}
+
+/** The pin's survey flag as a little badge: kind colour, number, notched tail. */
 export function PinBadge({ pin, size = 26 }: { pin: Pin; size?: number }) {
-  const color = pin.status === "done" ? "#4cb782" : PIN_COLOR[pin.kind];
+  const color = pin.status === "done" ? "#3fb46a" : PIN_COLOR[pin.kind];
   return (
-    <span className="shrink-0 rounded-full grid place-items-center font-bold text-[#14100a]" style={{ width: size, height: size, background: color, fontSize: size * 0.45 }}>
+    <span className="shrink-0 grid place-items-center font-mono font-bold text-[#120c06]"
+      style={{ width: size * 1.15, height: size * 0.85, background: color, fontSize: size * 0.44, clipPath: "polygon(0 0, 100% 0, 84% 50%, 100% 100%, 0 100%)", paddingRight: size * 0.12 }}>
       {pin.status === "done" ? "✓" : pin.number}
     </span>
   );
@@ -26,14 +45,14 @@ export function PinBadge({ pin, size = 26 }: { pin: Pin; size?: number }) {
 
 export function PinRow({ pin, plan, onClick }: { pin: Pin; plan: Plan | null; onClick: () => void }) {
   return (
-    <button onClick={onClick} className="w-full text-left card px-3 py-2 flex items-center gap-3 hover:border-[#3a4552]">
+    <button onClick={onClick} className="w-full text-left card !rounded-[3px] px-3 py-2 flex items-center gap-3 hover:border-chalk">
       <PinBadge pin={pin} />
       <span className="min-w-0 flex-1">
         <span className={`block text-[14px] truncate ${pin.status === "done" ? "line-through text-muted" : ""}`}>{pin.title}</span>
         <span className="block text-[12px] text-muted truncate">{PIN_LABEL[pin.kind]} · {where(plan, pin)}</span>
       </span>
       {pin.status === "in_progress" && <span className="chip text-amber shrink-0">In progress</span>}
-      {(pin.comment_count ?? 0) > 0 && <span className="text-[12px] text-muted shrink-0">💬 {pin.comment_count}</span>}
+      {(pin.comment_count ?? 0) > 0 && <span className="font-mono text-[11.5px] text-muted shrink-0">{pin.comment_count} upd</span>}
     </button>
   );
 }
@@ -46,7 +65,7 @@ export function PinsList({ pins, plan, onSelect, onNew }: { pins: Pin[]; plan: P
   return (
     <div className="p-4 space-y-3">
       <div className="flex items-center gap-2">
-        <h2 className="font-display text-[18px] font-bold">Pins</h2>
+        <h2 className="font-display text-[25px] font-extrabold uppercase leading-none">Pins</h2>
         <span className="text-muted text-sm">{pins.filter((p) => p.status !== "done").length} open</span>
         <button className="btn btn-primary btn-sm ml-auto" onClick={onNew} disabled={!plan}>Drop a pin</button>
       </div>
@@ -58,25 +77,25 @@ export function PinsList({ pins, plan, onSelect, onNew }: { pins: Pin[]; plan: P
         ))}
       </div>
       {shown.length ? <div className="space-y-1.5">{shown.map((p) => <PinRow key={p.id} pin={p} plan={plan} onClick={() => onSelect(p.id)} />)}</div>
-        : <p className="text-muted text-sm py-6 text-center">{pins.length ? "Nothing here." : "No pins yet. Drop one on any room, wall, door or item."}</p>}
+        : <p className="text-muted text-sm py-6 text-center">{pins.length ? "Nothing here." : "No pins yet. Drop one anywhere: a room, a wall, a fixture, the site. Right-click or press and hold works too."}</p>}
     </div>
   );
 }
 
-export function PinForm({ plan, draft, stages, onCancel, onCreate }: {
-  plan: Plan | null; draft: { floorId: string; x: number | null; y: number | null; elementId: string | null }; stages: JobStage[];
+export function PinForm({ plan, draft, preset, stages, onCancel, onCreate }: {
+  plan: Plan | null; draft: PinTarget; preset?: { kind: PinKind; title: string; body?: string }; stages: JobStage[];
   onCancel: () => void; onCreate: (input: PinInput) => Promise<void>;
 }) {
-  const [kind, setKind] = useState<PinKind>("task");
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
+  const [kind, setKind] = useState<PinKind>(preset?.kind ?? "task");
+  const [title, setTitle] = useState(preset?.title ?? "");
+  const [body, setBody] = useState(preset?.body ?? "");
   const [due, setDue] = useState("");
   const [photo, setPhoto] = useState(false);
   const [stage, setStage] = useState(stages.find((s) => s.status === "active")?.id ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
-  useEffect(() => titleRef.current?.focus(), []);
+  useEffect(() => { titleRef.current?.focus(); titleRef.current?.select(); }, []);
   const e = plan && draft.elementId ? findElement(plan, draft.elementId) : null;
 
   const submit = async (ev: React.FormEvent) => {
@@ -86,7 +105,7 @@ export function PinForm({ plan, draft, stages, onCancel, onCreate }: {
     try {
       await onCreate({
         kind, title, body: body || null, due_date: due || null, close_requirement: photo ? "photo" : "confirm", stage_id: stage || null,
-        element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, priority: kind === "issue" ? 2 : 1,
+        element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, anchor: draft.anchor, priority: kind === "issue" ? 2 : 1,
       });
     } catch (x) {
       setErr(x instanceof Error ? x.message : "Could not save.");
@@ -98,13 +117,13 @@ export function PinForm({ plan, draft, stages, onCancel, onCreate }: {
     <form onSubmit={submit} className="p-4 space-y-4">
       <div>
         <p className="eyebrow">New pin</p>
-        <h2 className="font-display text-[19px] font-bold">{e ? `On ${elementLabel(e)}` : "On the plan"}</h2>
-        {e && <p className="text-muted text-[13px]">{e.floor.name} · <span className="font-mono">{e.el.id}</span></p>}
+        <h2 className="font-display text-[23px] font-extrabold uppercase leading-tight">{where(plan, draft)}</h2>
+        {e && <p className="mt-1"><span className="tag">{e.el.id}</span></p>}
       </div>
       <div className="grid grid-cols-4 gap-1.5">
         {KINDS.map((k) => (
           <button type="button" key={k} onClick={() => setKind(k)} aria-pressed={kind === k}
-            className={`h-9 rounded-lg border text-[12.5px] ${kind === k ? "border-transparent text-[#111] font-semibold" : "border-line bg-panel-2 hover:bg-panel-3"}`}
+            className={`h-9 rounded-[3px] border text-[13px] ${kind === k ? "border-transparent text-[#111] font-semibold" : "border-line bg-panel-2 hover:bg-panel-3"}`}
             style={kind === k ? { background: PIN_COLOR[k] } : undefined}>{PIN_LABEL[k]}</button>
         ))}
       </div>
@@ -179,19 +198,19 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
         <PinBadge pin={pin} size={34} />
         <div className="min-w-0">
           <p className="eyebrow">{PIN_LABEL[pin.kind]} #{pin.number}</p>
-          <h2 className="font-display text-[19px] font-bold leading-snug">{pin.title}</h2>
-          <button onClick={onShow} className="text-[13px] text-accent hover:underline">{where(plan, pin)} ›</button>
+          <h2 className="font-display text-[23px] font-extrabold leading-tight">{pin.title}</h2>
+          <button onClick={onShow} className="text-[13px] text-chalk hover:underline">{where(plan, pin)} ›</button>
         </div>
       </div>
       <div className="grid grid-cols-3 gap-1.5">
         {(["open", "in_progress", "done"] as PinStatus[]).map((s) => (
           <button key={s} disabled={busy} onClick={() => run(() => onUpdate({ status: s }))} aria-pressed={pin.status === s}
-            className={`h-9 rounded-lg border text-[12.5px] ${pin.status === s ? (s === "done" ? "bg-green text-[#0c1a12] border-transparent font-semibold" : s === "in_progress" ? "bg-amber text-[#1a1206] border-transparent font-semibold" : "bg-panel-3 border-[#3a4552]") : "border-line bg-panel-2 hover:bg-panel-3"}`}>
+            className={`h-9 rounded-[3px] border text-[13px] ${pin.status === s ? (s === "done" ? "bg-green text-[#0c1a12] border-transparent font-semibold" : s === "in_progress" ? "bg-amber text-[#1a1206] border-transparent font-semibold" : "bg-panel-3 border-muted") : "border-line bg-panel-2 hover:bg-panel-3"}`}>
             {PIN_STATUS_LABEL[s]}
           </button>
         ))}
       </div>
-      {pin.close_requirement === "photo" && pin.status !== "done" && <p className="text-[12.5px] text-muted">📷 Needs a photo in the thread before it can be marked done.</p>}
+      {pin.close_requirement === "photo" && pin.status !== "done" && <p className="text-[12.5px] text-amber">Needs a photo in the thread before it can be marked done.</p>}
       {err && <p className="text-red text-sm">{err}</p>}
       {pin.body && <p className="text-[14px] whitespace-pre-wrap leading-relaxed">{pin.body}</p>}
       <div className="flex flex-wrap gap-1.5">
@@ -205,7 +224,7 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
         <div className="space-y-1">
           {pin.links.map((l, i) => (
             <div key={i} className="flex items-center gap-2 text-[14px]">
-              <a href={l.url} target="_blank" rel="noreferrer" className="text-accent hover:underline truncate">{l.title || l.url}</a>
+              <a href={l.url} target="_blank" rel="noreferrer" className="text-chalk hover:underline truncate">{l.title || l.url}</a>
               <button className="text-muted hover:text-red text-[12px] ml-auto" onClick={() => run(() => onUpdate({ links: pin.links.filter((_, j) => j !== i) }))}>Remove</button>
             </div>
           ))}
@@ -226,10 +245,10 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
         {comments === null ? <p className="text-muted text-sm">Loading…</p> : (
           <div className="space-y-2.5">
             {comments.map((c) => (
-              <div key={c.id} className="card p-3">
+              <div key={c.id} className="card !rounded-[3px] p-3 border-l-2 !border-l-chalk">
                 <p className="text-[12px] text-muted mb-1">{c.author_name ?? "Team"} · {new Date(c.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p>
                 {c.body && <p className="text-[14px] whitespace-pre-wrap">{c.body}</p>}
-                {c.photos.length > 0 && <div className="grid grid-cols-3 gap-1.5 mt-2">{c.photos.map((u) => <a key={u} href={u} target="_blank" rel="noreferrer"><img src={u} alt="" className="w-full aspect-square object-cover rounded-md bg-ink" /></a>)}</div>}
+                {c.photos.length > 0 && <div className="grid grid-cols-3 gap-1.5 mt-2">{c.photos.map((u) => <a key={u} href={u} target="_blank" rel="noreferrer"><img src={u} alt="" className="w-full aspect-square object-cover rounded-[2px] bg-ink" /></a>)}</div>}
               </div>
             ))}
             {!comments.length && <p className="text-muted text-sm">No updates yet.</p>}
@@ -242,7 +261,7 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
           <textarea className="input" rows={2} placeholder="Add an update" value={body} onChange={(x) => setBody(x.target.value)} />
           <div className="flex items-center gap-2">
             <label className="btn btn-sm cursor-pointer">
-              📷 {files.length ? `${files.length} photo${files.length > 1 ? "s" : ""}` : "Photo"}
+              {files.length ? `${files.length} photo${files.length > 1 ? "s" : ""}` : "Photo"}
               <input ref={fileRef} type="file" accept="image/*" multiple capture="environment" className="hidden" onChange={(x) => setFiles(Array.from(x.target.files ?? []))} />
             </label>
             <button className="btn btn-primary btn-sm ml-auto" disabled={busy || (!body.trim() && !files.length)}>Post</button>
@@ -252,5 +271,47 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
 
       <button className="text-[13px] text-muted hover:text-red" onClick={() => { if (confirm("Delete this pin?")) run(onDelete); }}>Delete pin</button>
     </div>
+  );
+}
+
+/** The quick card that opens right where you dropped a pin: pick a kind, type a line, save. "More"
+ *  moves to the full form in the side panel with what you typed. */
+export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel }: {
+  plan: Plan | null; target: PinTarget; left: number; top: number;
+  onSave: (kind: PinKind, title: string) => Promise<void>; onMore: (kind: PinKind, title: string) => void; onCancel: () => void;
+}) {
+  const [kind, setKind] = useState<PinKind>("note");
+  const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => ref.current?.focus(), []);
+  const save = async (ev: React.FormEvent) => {
+    ev.preventDefault();
+    if (!title.trim()) return onMore(kind, "");
+    setBusy(true);
+    try { await onSave(kind, title.trim()); } finally { setBusy(false); }
+  };
+  return (
+    <form onSubmit={save} onKeyDown={(e) => e.key === "Escape" && onCancel()} style={{ left, top }}
+      className="absolute z-20 w-[290px] bg-panel border border-line border-t-[3px] border-t-accent rounded-[4px] shadow-[0_12px_40px_rgb(0_0_0/0.55)] p-3 space-y-2.5"
+      onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
+      <div className="flex items-center gap-2">
+        <span className="eyebrow !text-[12px] truncate">{where(plan, target)}</span>
+        <button type="button" onClick={onCancel} className="ml-auto text-muted hover:text-text text-lg leading-none" aria-label="Cancel">×</button>
+      </div>
+      <div className="grid grid-cols-4 gap-1">
+        {KINDS.map((k) => (
+          <button type="button" key={k} onClick={() => setKind(k)} aria-pressed={kind === k}
+            className={`h-7 rounded-[3px] border text-[12px] ${kind === k ? "border-transparent text-[#111] font-semibold" : "border-line bg-panel-2 hover:bg-panel-3"}`}
+            style={kind === k ? { background: PIN_COLOR[k] } : undefined}>{PIN_LABEL[k]}</button>
+        ))}
+      </div>
+      <input ref={ref} className="input !h-9" value={title} onChange={(e) => setTitle(e.target.value)}
+        placeholder={kind === "note" ? "Note for this spot" : kind === "issue" ? "What is wrong here?" : kind === "material" ? "What goes here?" : "What needs doing here?"} />
+      <div className="flex gap-1.5">
+        <button className="btn btn-primary btn-sm flex-1" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+        <button type="button" className="btn btn-sm" onClick={() => onMore(kind, title)}>More…</button>
+      </div>
+    </form>
   );
 }

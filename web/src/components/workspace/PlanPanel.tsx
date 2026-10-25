@@ -13,7 +13,7 @@ export function UploadBox({ onUpload, compact }: { onUpload: (f: File) => Promis
   const [over, setOver] = useState(false);
   return (
     <form
-      className={`rounded-xl border-2 border-dashed ${over ? "border-accent bg-accent/5" : "border-line"} ${compact ? "p-3" : "p-5"} text-center`}
+      className={`rounded-[4px] border-2 border-dashed ${over ? "border-accent bg-accent/5" : "border-line"} ${compact ? "p-3" : "p-5"} text-center`}
       onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
       onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) setFile(f); }}
       onSubmit={async (e) => {
@@ -45,14 +45,14 @@ export function QuestionsCard({ plan, onAnswer, onShow }: { plan: PlanRow; onAns
   if (!open.length) return null;
   const final = () => Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, v === OTHER ? (other[k]?.trim() || OTHER) : v]));
   return (
-    <div className="card p-4 !border-accent/50 space-y-4">
+    <div className="card !rounded-[4px] overflow-hidden"><div className="hazard h-2" /><div className="p-4 space-y-4">
       <div>
         <p className="eyebrow text-accent">{open.length} quick question{open.length > 1 ? "s" : ""}</p>
         <p className="text-[13px] text-muted">The plan reader wasn&apos;t sure about these. Your answers fix the plan.</p>
       </div>
       {open.map((q) => (
         <fieldset key={q.id}>
-          <legend className="text-[14px] mb-2">{q.text} <button type="button" onClick={() => onShow(q.element_ids)} className="text-accent text-[13px] hover:underline whitespace-nowrap">Show on plan</button></legend>
+          <legend className="text-[14px] mb-2">{q.text} <button type="button" onClick={() => onShow(q.element_ids)} className="text-chalk text-[13px] hover:underline whitespace-nowrap">Show on plan</button></legend>
           <div className="flex flex-wrap gap-1.5">
             {q.options.map((o) => (
               <button type="button" key={o} onClick={() => setAnswers({ ...answers, [q.id]: o })} aria-pressed={answers[q.id] === o}
@@ -66,7 +66,7 @@ export function QuestionsCard({ plan, onAnswer, onShow }: { plan: PlanRow; onAns
       <button className="btn btn-primary w-full" disabled={busy} onClick={async () => { setBusy(true); try { await onAnswer(final()); } finally { setBusy(false); } }}>
         {busy ? "Sending…" : "Send answers"}
       </button>
-    </div>
+    </div></div>
   );
 }
 
@@ -77,7 +77,7 @@ export function PlanPanel({ plan, runs, aiAvailable, onUpload, onAnswer, onShow 
   const unidentified = plan ? plan.data.floors.reduce((n, f) => n + ((plan.data.stats[f.id] as { unidentified?: number } | undefined)?.unidentified ?? 0), 0) : 0;
   return (
     <div className="p-4 space-y-4">
-      <h2 className="font-display text-[18px] font-bold">Plan</h2>
+      <h2 className="font-display text-[25px] font-extrabold uppercase leading-none">Plan</h2>
       {plan && <QuestionsCard key={plan.id} plan={plan} onAnswer={onAnswer} onShow={onShow} />}
       {plan && s && (
         <div className="card p-4 space-y-1 text-[14px]">

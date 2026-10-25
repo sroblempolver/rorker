@@ -36,16 +36,18 @@ export interface PlanRun {
 export interface PlanRow { id: string; job_id: string; version: number; data: Plan; created_at: string }
 
 export type PinKind = "task" | "issue" | "note" | "material";
+/** A pin placed in an upright view: on the outside of the building, or on one wall seen from inside. */
+export interface PinAnchor { view: "site" | "exterior" | "wall"; side?: string; x: number; y: number }
 export type PinStatus = "open" | "in_progress" | "done";
 export interface Pin {
   id: string; job_id: string; number: number; element_id: string | null; floor_id: string | null;
-  x: number | null; y: number | null; kind: PinKind; title: string; body: string | null; status: PinStatus;
+  x: number | null; y: number | null; anchor?: PinAnchor | null; kind: PinKind; title: string; body: string | null; status: PinStatus;
   priority: number; due_date: string | null; assignee_id: string | null; close_requirement: "confirm" | "photo";
   stage_id: string | null; links: { title: string; url: string }[]; created_by: string | null; created_at: string;
   closed_at: string | null; comment_count?: number;
 }
 export interface PinInput {
-  element_id?: string | null; floor_id?: string | null; x?: number | null; y?: number | null; kind: PinKind;
+  element_id?: string | null; floor_id?: string | null; x?: number | null; y?: number | null; anchor?: PinAnchor | null; kind: PinKind;
   title: string; body?: string | null; priority?: number; due_date?: string | null; close_requirement?: "confirm" | "photo";
   stage_id?: string | null; links?: { title: string; url: string }[];
 }

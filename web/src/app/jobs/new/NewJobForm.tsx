@@ -44,7 +44,7 @@ export function NewJobForm({ templates, ai }: { templates: { id: string; name: s
       </section>
       <section className="card p-5 space-y-3">
         <p className="eyebrow">Plan</p>
-        <label className="block rounded-xl border-2 border-dashed border-line p-5 text-center cursor-pointer hover:border-[#3a4552]">
+        <label className="block rounded-[4px] border-2 border-dashed border-line p-5 text-center cursor-pointer hover:border-chalk">
           <span className="block text-[14px] mb-1">{file ? file.name : "Add the AutoCAD file, a PDF or a photo of the plan"}</span>
           <span className="block text-[12px] text-muted">Optional. You can add it later from the job.{!ai && " PDFs and photos need the plan reader key; AutoCAD files work without it."}</span>
           <input type="file" name="plan" accept=".dwg,.dxf,.pdf,image/*" className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />

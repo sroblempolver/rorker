@@ -1,21 +1,27 @@
 @import "tailwindcss";
 
-/* Rorker: dark, calm, game-like but professional. Amber is the one accent. */
+/* Rorker: a job site after hours. Graphite and poured concrete for the chrome, safety orange for
+   actions, chalk-line blue for "this is selected", spray-marking colours for build status.
+   Squared corners and stamped tags instead of soft app cards; the plan itself carries the colour
+   through real floor materials. */
 :root {
-  --ink: #0e1217;
-  --panel: #161b22;
-  --panel-2: #1d242d;
-  --panel-3: #252e39;
-  --line: #2a333e;
-  --text: #e7eaee;
-  --muted: #8f9aa7;
-  --accent: #f0a83a;
-  --accent-ink: #1a1206;
-  --red: #e5534b;
-  --amber: #e9a23b;
-  --green: #4cb782;
-  --grey: #8a94a0;
-  --glass: #7cc3e6;
+  --ink: #17181b;        /* site at night */
+  --panel: #202125;      /* concrete, shaded */
+  --panel-2: #292a2f;
+  --panel-3: #34353b;
+  --line: #3e3f45;
+  --text: #f0ece3;       /* plaster white */
+  --muted: #a7a196;      /* sanded grey */
+  --accent: #ff6a1f;     /* safety orange */
+  --accent-ink: #1c0c03;
+  --chalk: #55b2ff;      /* chalk line */
+  --red: #e8432e;        /* marking paint: not built */
+  --amber: #f3c530;      /* marking paint: in progress */
+  --green: #3fb46a;      /* marking paint: done */
+  --grey: #9c978d;       /* existing */
+  --magenta: #db4ea6;    /* demolish */
+  --glass: #8fd3f0;
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -28,11 +34,15 @@
   --color-muted: var(--muted);
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
+  --color-chalk: var(--chalk);
   --color-red: var(--red);
   --color-amber: var(--amber);
   --color-green: var(--green);
-  --font-display: var(--font-chakra), "Barlow", system-ui, sans-serif;
-  --font-sans: var(--font-barlow), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-magenta: var(--magenta);
+  --font-display: var(--font-signage), "Arial Narrow", system-ui, sans-serif;
+  --font-stencil: var(--font-stencil), var(--font-signage), "Arial Narrow", sans-serif;
+  --font-sans: var(--font-body), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-tag), ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 
 html, body { height: 100%; }
@@ -41,31 +51,42 @@ body { background: var(--ink); color: var(--text); font-family: var(--font-sans)
 
 /* component classes sit in a layer so Tailwind utilities (hidden, sm:flex, ...) can override them */
 @layer components {
-.font-display { font-family: var(--font-display); letter-spacing: 0.04em; }
-.eyebrow { font-family: var(--font-display); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.font-display { font-family: var(--font-display); letter-spacing: 0.02em; }
+.font-stencil { font-family: var(--font-stencil); letter-spacing: 0.04em; }
+.eyebrow { font-family: var(--font-display); font-weight: 700; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
 
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 9px;
-  font-family: var(--font-display); font-weight: 600; font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase;
-  border: 1px solid var(--line); background: var(--panel-2); color: var(--text); cursor: pointer; transition: background .15s, border-color .15s; white-space: nowrap; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 4px;
+  font-family: var(--font-display); font-weight: 700; font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text); cursor: pointer; transition: background .15s, border-color .15s, transform .08s; white-space: nowrap; }
 .btn:hover { background: var(--panel-3); }
+.btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .5; cursor: default; }
-.btn-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-.btn-primary:hover { background: #f5b552; }
+.btn-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); box-shadow: inset 0 -3px 0 rgb(0 0 0 / .22); }
+.btn-primary:hover { background: #ff7d3b; }
 .btn-ghost { background: transparent; border-color: transparent; }
 .btn-ghost:hover { background: var(--panel-2); }
-.btn-sm { height: 30px; padding: 0 10px; font-size: 11px; border-radius: 7px; }
-.btn:focus-visible, .input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn-sm { height: 30px; padding: 0 10px; font-size: 13px; }
+.btn:focus-visible, .input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--chalk); outline-offset: 2px; }
 
-.input { width: 100%; height: 40px; padding: 0 12px; border-radius: 9px; background: var(--ink); border: 1px solid var(--line); color: var(--text); font-size: 15px; }
+.input { width: 100%; height: 40px; padding: 0 12px; border-radius: 4px; background: var(--ink); border: 1px solid var(--line); color: var(--text); font-size: 15px; }
+.input:focus { border-color: var(--chalk); outline: none; }
 textarea.input { height: auto; padding: 10px 12px; line-height: 1.45; }
 select.input { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
   background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 32px; }
-.input::placeholder { color: #5d6875; }
+.input::placeholder { color: #6e6a62; }
 .label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
 
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
-.chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 999px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 3px; font-size: 12.5px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
 .dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }
+
+/* element ID, styled like a punched inventory tag */
+.tag { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 6px; font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  letter-spacing: 0.04em; color: #1b1a17; background: #e9dfc8; border-radius: 2px 6px 6px 2px; white-space: nowrap; }
+.tag::before { content: ""; width: 6px; height: 6px; border-radius: 99px; background: var(--ink); box-shadow: inset 0 0 0 1.5px #b6aa8f; }
+
+/* hazard stripes for anything waiting on the user */
+.hazard { background: repeating-linear-gradient(-45deg, var(--accent) 0 10px, #1c0c03 10px 20px); }
 
 .scroll-thin { scrollbar-width: thin; scrollbar-color: var(--panel-3) transparent; }
 }

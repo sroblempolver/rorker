@@ -108,7 +108,7 @@ function App() {
       <header className="h-14 shrink-0 border-b border-line bg-panel flex items-center gap-4 px-4">
         <button onClick={() => setPage("jobs")} aria-label="All jobs"><Logo size={20} /></button>
         <nav className="flex items-center gap-1 ml-2">
-          <button onClick={() => setPage("jobs")} className={`px-3 h-9 rounded-lg font-display text-[12.5px] font-semibold tracking-[0.1em] uppercase ${page === "jobs" ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>Jobs</button>
+          <button onClick={() => setPage("jobs")} className={`px-3 h-9 rounded-[3px] font-display text-[15px] font-bold tracking-[0.1em] uppercase ${page === "jobs" ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>Jobs</button>
         </nav>
         <span className="chip ml-auto"><span className="sm:hidden">Preview</span><span className="hidden sm:inline">Preview · sample data, nothing is saved</span></span>
       </header>
@@ -116,7 +116,7 @@ function App() {
         <div className="flex-1 overflow-y-auto">
           <div className="px-4 sm:px-6 pt-6 pb-4">
             <p className="eyebrow">All jobs</p>
-            <h1 className="font-display text-[26px] font-bold">1 active job</h1>
+            <h1 className="font-display text-[34px] font-extrabold uppercase leading-none tracking-[0.01em]">1 active job</h1>
             <p className="text-muted text-sm">Click the building to go inside. In the full app every job you run shows up here.</p>
           </div>
           <div className="px-4 sm:px-6 pb-8"><AllJobsMap jobs={[summary(data)]} /></div>

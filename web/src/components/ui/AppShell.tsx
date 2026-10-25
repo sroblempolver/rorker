@@ -6,7 +6,7 @@ import { Logo } from "./AuthShell";
 export function AppShell({ session, children, demo, active, fill }: { session: Session; children: React.ReactNode; demo: boolean; active: "jobs" | "settings"; fill?: boolean }) {
   const c = session.company;
   const tab = (href: string, label: string, on: boolean) => (
-    <Link href={href} className={`px-3 h-9 inline-flex items-center rounded-lg font-display text-[12.5px] font-semibold tracking-[0.1em] uppercase ${on ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</Link>
+    <Link href={href} className={`px-3 h-9 inline-flex items-center rounded-[3px] font-display text-[15px] font-bold tracking-[0.1em] uppercase ${on ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</Link>
   );
   return (
     <div className={fill ? "min-h-full lg:h-full flex flex-col" : "min-h-full flex flex-col"}>

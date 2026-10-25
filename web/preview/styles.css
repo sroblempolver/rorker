@@ -1,5 +1,5 @@
 @import "../src/app/globals.css";
 @source "../src";
 @source "./";
-:root { --font-chakra: "Chakra Petch"; --font-barlow: "Barlow"; color-scheme: dark; }
+:root { --font-signage: "Big Shoulders"; --font-stencil: "Big Shoulders Stencil"; --font-body: "Instrument Sans"; --font-tag: "IBM Plex Mono"; color-scheme: dark; }
 html, body, #root { height: 100%; }

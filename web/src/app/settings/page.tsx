@@ -15,7 +15,7 @@ export default async function SettingsPage() {
         <div className="flex items-end gap-3">
           <div>
             <p className="eyebrow">Company</p>
-            <h1 className="font-display text-[26px] font-bold">{s.company.name}</h1>
+            <h1 className="font-display text-[34px] font-extrabold uppercase leading-none tracking-[0.01em]">{s.company.name}</h1>
           </div>
           <Link href="/settings/stages" className="btn ml-auto">Stage templates</Link>
         </div>

@@ -8,7 +8,7 @@ create table public.companies (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   logo_path text,
-  brand_color text not null default '#f0a83a',
+  brand_color text not null default '#ff6a1f',
   phone text,
   email text,
   license_no text,
@@ -153,6 +153,7 @@ create table public.pins (
   floor_id text,
   x double precision,            -- position on the plan, mm, optional
   y double precision,
+  anchor jsonb,                  -- spot outside the floor plans: {"view": "site" | "exterior" | "wall", "side": "G-R04:2", "x": mm, "y": mm}
   kind public.pin_kind not null default 'task',
   title text not null,
   body text,
@@ -229,14 +230,14 @@ end $$;
 -- Sign-up step 2: create the company, make the caller its owner, seed default stage templates.
 create or replace function public.create_company(
   p_name text, p_phone text default null, p_email text default null, p_license text default null,
-  p_website text default null, p_color text default '#f0a83a', p_full_name text default null
+  p_website text default null, p_color text default '#ff6a1f', p_full_name text default null
 ) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare cid uuid;
 begin
   if auth.uid() is null then raise exception 'not signed in'; end if;
   insert into companies (name, phone, email, license_no, website, brand_color)
-    values (p_name, p_phone, p_email, p_license, p_website, coalesce(p_color, '#f0a83a')) returning id into cid;
+    values (p_name, p_phone, p_email, p_license, p_website, coalesce(p_color, '#ff6a1f')) returning id into cid;
   insert into company_members (company_id, user_id, role) values (cid, auth.uid(), 'owner');
   insert into profiles (user_id, full_name) values (auth.uid(), p_full_name)
     on conflict (user_id) do update set full_name = coalesce(excluded.full_name, profiles.full_name);

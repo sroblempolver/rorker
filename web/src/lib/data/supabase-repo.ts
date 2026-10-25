@@ -15,7 +15,7 @@ function check<T>(res: { data: T; error: { message: string } | null }): T {
 
 export function companyFromRow(r: Row): Company {
   return {
-    id: r.id as string, name: r.name as string, brand_color: (r.brand_color as string) || "#f0a83a",
+    id: r.id as string, name: r.name as string, brand_color: (r.brand_color as string) || "#ff6a1f",
     logo_url: r.logo_path ? `${SUPABASE_URL}/storage/v1/object/public/company-assets/${r.logo_path}` : null,
     phone: (r.phone as string) ?? null, email: (r.email as string) ?? null, license_no: (r.license_no as string) ?? null,
     website: (r.website as string) ?? null, address: (r.address as string) ?? null,

@@ -2,15 +2,16 @@
 // One job: the plan on the left, the side panel on the right (details, pins, stages, plan). All state
 // lives here and every change goes through the WorkspaceApi, so the same screen runs on the server
 // actions or on the in-memory preview.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementStatus } from "@/lib/plan/types";
-import type { Pin } from "@/lib/data/types";
+import type { Pin, PinInput, PinKind } from "@/lib/data/types";
 import { findElement, roomOf } from "@/lib/plan/geometry";
 import { PlanViewer, type Level } from "@/components/plan/PlanViewer";
 import type { ColorMode } from "@/components/plan/FloorCanvas";
+import type { PinTarget, ScreenPoint } from "@/components/plan/target";
 import type { WorkspaceApi, WorkspaceData } from "./api";
-import { Inspector } from "./Inspector";
-import { PinDetail, PinForm, PinsList } from "./PinsPanel";
+import { Inspector, ProjectSummary, type AddPin } from "./Inspector";
+import { PinDetail, PinForm, PinsList, QuickPin } from "./PinsPanel";
 import { PlanPanel, UploadBox } from "./PlanPanel";
 import { StagesPanel, StageStrip } from "./StagesPanel";
 
@@ -22,12 +23,14 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const [stages, setStages] = useState(data.stages);
   const [pins, setPins] = useState(data.pins);
   const [states, setStates] = useState(() => new Map(data.states.map((s) => [s.element_id, s.status] as [string, ElementStatus])));
-  const [level, setLevelRaw] = useState<Level>({ kind: "exterior" });
+  const [level, setLevelRaw] = useState<Level>({ kind: "site" });
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedPin, setSelectedPin] = useState<string | null>(null);
   const [colorMode, setColorMode] = useState<ColorMode>("type");
   const [pinMode, setPinMode] = useState(false);
-  const [draft, setDraft] = useState<{ floorId: string; x: number | null; y: number | null; elementId: string | null } | null>(null);
+  // a pin being made: `at` set means the quick card at that screen point, otherwise the full form
+  const [draft, setDraft] = useState<(PinTarget & { at?: ScreenPoint; preset?: { kind: PinKind; title: string } }) | null>(null);
+  const mapRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab>(data.plan ? "details" : "plan");
   const [flyTo, setFlyTo] = useState<{ ids: string[]; n: number } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -48,7 +51,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       setRuns(fresh.runs);
       if (fresh.plan && fresh.plan.id !== plan?.id) {
         setPlan(fresh.plan);
-        setLevelRaw({ kind: "exterior" });
+        setLevelRaw({ kind: "site" });
         setSelected(null);
         say(`Plan ready: version ${fresh.plan.version}`);
         setTab(fresh.plan.data.questions.some((q) => !q.answer) ? "plan" : "details");
@@ -61,6 +64,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     setLevelRaw(l);
     setPinMode(false);
     setSelectedPin(null);
+    setDraft((d) => (d?.at ? null : d));
     setSelected(l.kind === "room" ? l.roomId : null);
     if (l.kind === "room") setTab("details");
   }, []);
@@ -83,6 +87,12 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     setDraft(null);
     setTab("pins");
     if (!pin || !plan) return;
+    if (pin.anchor?.view === "site" || pin.anchor?.view === "exterior") return setLevelRaw({ kind: pin.anchor.view });
+    if (pin.anchor?.view === "wall" && pin.anchor.side) {
+      const roomId = pin.anchor.side.split(":")[0];
+      const f = plan.data.floors.find((x) => x.rooms.some((r) => r.id === roomId));
+      if (f) return setLevelRaw({ kind: "wall", floorId: f.id, roomId, sideKey: pin.anchor.side });
+    }
     const e = pin.element_id ? findElement(plan.data, pin.element_id) : null;
     const floorId = e?.floor.id ?? pin.floor_id;
     if (!floorId) return;
@@ -102,12 +112,29 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     setFlyTo({ ids, n: Date.now() });
   }, [plan]);
 
-  const placePin = useCallback((floorId: string, x: number | null, y: number | null, elementId: string | null) => {
+  /** A click on the map with the pin tool (or right-click / long-press): quick card right there. */
+  const placePin = useCallback((t: PinTarget, at: ScreenPoint) => {
     setPinMode(false);
     setSelectedPin(null);
-    setDraft({ floorId, x: x == null ? null : Math.round(x), y: y == null ? null : Math.round(y), elementId });
+    setDraft({ ...t, at });
+  }, []);
+
+  /** From the side panel (an element's actions): straight to the full form. */
+  const addPin = useCallback((a: AddPin) => {
+    setPinMode(false);
+    setSelectedPin(null);
+    setDraft({ floorId: a.floorId ?? null, x: null, y: null, elementId: a.elementId, anchor: a.anchor ?? null, preset: a.preset });
     setTab("pins");
   }, []);
+
+  const createPin = useCallback(async (input: PinInput) => {
+    const p = await api.createPin(input);
+    setPins((l) => [...l, p]);
+    setDraft(null);
+    setSelectedPin(p.id);
+    say(`Pin #${p.number} added`);
+    return p;
+  }, [api, say]);
 
   const setStatus = useCallback(async (id: string, s: ElementStatus | null) => {
     setStates((m) => { const n = new Map(m); if (s) n.set(id, s); else n.delete(id); return n; });
@@ -132,13 +159,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
 
   const panel = useMemo(() => {
     if (tab === "pins") {
-      if (draft) return <PinForm plan={plan?.data ?? null} draft={draft} stages={stages} onCancel={() => setDraft(null)} onCreate={async (input) => {
-        const p = await api.createPin(input);
-        setPins((l) => [...l, p]);
-        setDraft(null);
-        setSelectedPin(p.id);
-        say(`Pin #${p.number} added`);
-      }} />;
+      if (draft && !draft.at) return <PinForm key={`${draft.elementId}${draft.anchor?.x}${draft.preset?.title}`} plan={plan?.data ?? null} draft={draft} preset={draft.preset} stages={stages} onCancel={() => setDraft(null)} onCreate={async (input) => { await createPin(input); }} />;
       if (pin) return <PinDetail pin={pin} plan={plan?.data ?? null} stages={stages} onBack={() => setSelectedPin(null)} onShow={() => showPin(pin.id)}
         onUpdate={(input) => updatePin(pin.id, input)}
         onDelete={async () => { await api.deletePin(pin.id); setPins((l) => l.filter((x) => x.id !== pin.id)); setSelectedPin(null); }}
@@ -148,7 +169,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
           setPins((l) => l.map((x) => (x.id === pin.id ? { ...x, comment_count: c.length } : x)));
           return c;
         }} />;
-      return <PinsList pins={pins} plan={plan?.data ?? null} onSelect={showPin} onNew={() => { if (level.kind === "exterior" && plan) setLevel({ kind: "floor", floorId: plan.data.floors[0].id }); setPinMode(true); say("Click the plan where the pin goes"); }} />;
+      return <PinsList pins={pins} plan={plan?.data ?? null} onSelect={showPin} onNew={() => { setPinMode(true); say("Click the map where the pin goes"); }} />;
     }
     if (tab === "stages") return (
       <StagesPanel stages={stages}
@@ -171,15 +192,23 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         }} />
     );
     if (!plan) return null;
-    return <Inspector plan={plan.data} level={level} selected={selected} states={states} pins={pins} setLevel={setLevel}
-      onSetStatus={setStatus} onSelect={select} onSelectPin={showPin}
-      onAddPin={(id) => { const e = findElement(plan.data, id); if (e) placePin(e.floor.id, null, null, id); }} />;
-  }, [tab, draft, pin, plan, stages, pins, runs, level, selected, states, api, data.aiAvailable, say, showPin, updatePin, stageOp, setLevel, setStatus, select, placePin, showElements]);
+    return <Inspector plan={plan.data} level={level} selected={selected} states={states} pins={pins} stages={stages} setLevel={setLevel}
+      onSetStatus={setStatus} onSelect={select} onSelectPin={showPin} onAddPin={addPin} />;
+  }, [tab, draft, pin, plan, stages, pins, runs, level, selected, states, api, data.aiAvailable, say, showPin, updatePin, stageOp, setLevel, setStatus, select, addPin, createPin, showElements]);
+
+  // where the quick card sits inside the map, kept on screen
+  const quick = (() => {
+    if (!draft?.at || !mapRef.current) return null;
+    const r = mapRef.current.getBoundingClientRect();
+    const left = Math.max(8, Math.min(r.width - 298, draft.at.x - r.left + 14));
+    const top = Math.max(8, Math.min(r.height - 190, draft.at.y - r.top - 40));
+    return { left, top };
+  })();
 
   const tabBtn = (t: Tab, label: string, badge?: number) => (
     <button key={t} onClick={() => { setTab(t); if (t !== "pins") setDraft(null); }} aria-selected={tab === t} role="tab"
-      className={`flex-1 h-11 text-[12px] font-display font-semibold tracking-[0.1em] uppercase border-b-2 inline-flex items-center justify-center gap-1.5 ${tab === t ? "border-accent text-text" : "border-transparent text-muted hover:text-text"}`}>
-      {label}{badge ? <span className={`text-[10.5px] rounded-full px-1.5 min-w-[18px] ${t === "plan" ? "bg-accent text-accent-ink" : "bg-panel-3 text-text"}`}>{badge}</span> : null}
+      className={`flex-1 h-12 text-[14px] font-display font-bold tracking-[0.1em] uppercase border-b-[3px] inline-flex items-center justify-center gap-1.5 ${tab === t ? "border-accent text-text" : "border-transparent text-muted hover:text-text"}`}>
+      {label}{badge ? <span className={`font-mono text-[11px] rounded-[2px] px-1.5 min-w-[18px] ${t === "plan" ? "bg-accent text-accent-ink" : "bg-panel-3 text-text"}`}>{badge}</span> : null}
     </button>
   );
 
@@ -187,32 +216,33 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     <div className="flex-1 min-h-0 flex flex-col">
       <div className="shrink-0 border-b border-line bg-panel px-4 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-2">
         <div className="min-w-0">
-          <h1 className="font-display text-[18px] font-bold leading-tight truncate">{job.name}</h1>
+          <h1 className="font-stencil text-[22px] font-extrabold uppercase leading-none truncate">{job.name}</h1>
           <p className="text-[12.5px] text-muted truncate">{[job.address, job.client_name].filter(Boolean).join(" · ") || "No address yet"}</p>
         </div>
         <div className="flex-1 min-w-[180px] max-w-[420px]">
           <div className="flex items-baseline gap-2 text-[12.5px] mb-1">
-            <span className="text-muted">Stage</span>
+            <span className="eyebrow !text-[11.5px]">Stage</span>
             <span className="truncate">{currentStage?.name ?? (!stages.length ? "No stages" : stages.every((s) => s.status === "done") ? "All done" : stages.some((s) => s.status === "done") ? `Next: ${stages.find((s) => s.status !== "done")!.name}` : "Not started")}</span>
-            <span className="ml-auto text-muted shrink-0">{stages.filter((s) => s.status === "done").length}/{stages.length}</span>
+            <span className="ml-auto text-muted font-mono shrink-0">{stages.filter((s) => s.status === "done").length}/{stages.length}</span>
           </div>
           <StageStrip stages={stages} />
         </div>
         <div className="flex items-center gap-2 ml-auto">
           {working && <span className="chip"><span className="dot bg-accent animate-pulse" />Reading plan…</span>}
           {lastRun?.status === "failed" && !working && <span className="chip text-red">Last read failed</span>}
-          <span className="chip">{openPins} open pin{openPins === 1 ? "" : "s"}</span>
+          <span className="chip font-mono !text-text"><span className="w-2 h-2 bg-accent" />{openPins} open pin{openPins === 1 ? "" : "s"}</span>
         </div>
       </div>
 
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
-        <div className="relative h-[62vh] shrink-0 lg:shrink lg:h-auto lg:flex-1 min-w-0 border-b lg:border-b-0 lg:border-r border-line">
+        <div ref={mapRef} className="relative h-[62vh] shrink-0 lg:shrink lg:h-auto lg:flex-1 min-w-0 border-b lg:border-b-0 lg:border-r border-line">
           {plan ? (
             <PlanViewer plan={plan.data} level={level} setLevel={setLevel} selected={selected} onSelect={(id) => select(id)} selectedPin={selectedPin} onSelectPin={showPin}
-              states={states} pins={pins} colorMode={colorMode} setColorMode={setColorMode} pinMode={pinMode} setPinMode={setPinMode} onPlacePin={placePin}
-              flyTo={flyTo} onAllJobs={onAllJobs} jobName={job.name} />
+              states={states} pins={pins} colorMode={colorMode} setColorMode={setColorMode} pinMode={pinMode} setPinMode={setPinMode} onPlacePin={placePin} draft={draft}
+              flyTo={flyTo} onAllJobs={onAllJobs} jobName={job.name}
+              hud={<div className="w-[300px] bg-[#17181b]/92 backdrop-blur-sm border border-line border-l-[3px] border-l-accent rounded-[4px] p-3"><ProjectSummary compact plan={plan.data} pins={pins} states={states} stages={stages} setLevel={setLevel} /></div>} />
           ) : (
-            <div className="h-full grid place-items-center p-6 bg-[#0f141a]">
+            <div className="h-full grid place-items-center p-6 bg-ink">
               <div className="max-w-md w-full text-center">
                 <p className="font-display text-xl font-bold mb-1">{working ? "Reading the plan…" : "No plan yet"}</p>
                 <p className="text-muted mb-5">{working ? "Walls, rooms, doors and windows are being found and numbered. This takes a minute or two." : "Upload the AutoCAD file, a PDF or a photo of the drawing. It becomes a clickable plan."}</p>
@@ -220,7 +250,12 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
               </div>
             </div>
           )}
-          {toast && <div role="status" className="absolute left-1/2 -translate-x-1/2 top-14 z-10 px-4 py-2 rounded-lg bg-[#1d242d] border border-line shadow-lg text-[14px]">{toast}</div>}
+          {quick && draft?.at && (
+            <QuickPin key={`${draft.at.x},${draft.at.y}`} plan={plan?.data ?? null} target={draft} left={quick.left} top={quick.top} onCancel={() => setDraft(null)}
+              onSave={async (kind, title) => { await guard(() => createPin({ kind, title, element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, anchor: draft.anchor, priority: kind === "issue" ? 2 : 1 })); }}
+              onMore={(kind, title) => { setDraft({ ...draft, at: undefined, preset: { kind, title } }); setTab("pins"); }} />
+          )}
+          {toast && <div role="status" className="absolute left-1/2 -translate-x-1/2 top-14 z-10 px-4 py-2 rounded-[3px] bg-panel-2 border border-line border-l-[3px] border-l-accent shadow-lg text-[14px]">{toast}</div>}
           {plan && questions > 0 && tab !== "plan" && (
             <button onClick={() => setTab("plan")} className="absolute left-1/2 -translate-x-1/2 bottom-3 z-10 btn btn-primary btn-sm shadow-lg">
               {questions} question{questions > 1 ? "s" : ""} about this plan

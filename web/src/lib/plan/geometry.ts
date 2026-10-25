@@ -1,4 +1,4 @@
-import type { BBox, Element, Floor, Opening, Plan, Pt, Room, Wall } from "./types";
+import type { BBox, Element, Fixture, Floor, Opening, Plan, Pt, Room, Wall } from "./types";
 
 export function polyArea(p: Pt[]): number {
   let a = 0;
@@ -138,6 +138,8 @@ export interface WallSide {
   a: Pt; b: Pt;          // along the inside face of the room, a -> b
   length: number;
   heading: "north" | "east" | "south" | "west";
+  /** "North wall", or "North wall A" / "B" when an L-shaped room has two */
+  label: string;
   segments: { id: string; kind: "wall" | "opening"; from: number; to: number; el: Wall | Opening }[];
 }
 
@@ -189,8 +191,12 @@ export function roomSides(floor: Floor, room: Room): WallSide[] {
     const mid: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
     const out = (mid[0] + nx * 100 - c[0]) ** 2 + (mid[1] + ny * 100 - c[1]) ** 2 > (mid[0] - c[0]) ** 2 + (mid[1] - c[1]) ** 2 ? [nx, ny] : [-nx, -ny];
     const heading = Math.abs(out[0]) > Math.abs(out[1]) ? (out[0] > 0 ? "east" : "west") : out[1] > 0 ? "south" : "north";
-    sides.push({ key: `${room.id}:${i}`, roomId: room.id, index: i, a, b, length: len, heading, segments: segs });
+    sides.push({ key: `${room.id}:${i}`, roomId: room.id, index: i, a, b, length: len, heading, label: "", segments: segs });
   });
+  for (const s of sides) {
+    const same = sides.filter((t) => t.heading === s.heading);
+    s.label = `${s.heading[0].toUpperCase()}${s.heading.slice(1)} wall${same.length > 1 ? ` ${"ABCDEF"[same.indexOf(s)]}` : ""}`;
+  }
   return sides;
 }
 
@@ -204,6 +210,8 @@ function collinear(a: Pt, b: Pt, c: Pt): boolean {
 
 export interface FrontView {
   width: number; minX: number;
+  /** which edge of the plan (y down) the front faces */
+  side: "top" | "bottom";
   storeys: { floor: Floor; x0: number; x1: number; y0: number; y1: number; openings: { o: Opening; x0: number; x1: number; kind: string }[] }[];
   roofPeak: number; height: number;
 }
@@ -236,5 +244,109 @@ export function frontView(plan: Plan): FrontView {
     return { floor: f, x0: fb[0], x1: fb[2], y0: -(i + 1) * H, y1: -i * H, openings: ops };
   });
   const width = bb[2] - bb[0];
-  return { width, minX: bb[0], storeys, roofPeak: Math.min(3200, width * 0.22), height: floors.length * H };
+  return { width, minX: bb[0], side, storeys, roofPeak: Math.min(3200, width * 0.22), height: floors.length * H };
+}
+
+// ------------------------------------------------------------------ things attached to a wall
+
+
+export interface Attached { f: Fixture; from: number; to: number; gap: number }
+
+/** Fixtures standing against one side of a room, projected along it (from/to in mm from side.a). */
+export function attachedToSide(floor: Floor, side: WallSide, reach = 450): Attached[] {
+  const { a, b, length: len } = side;
+  const ux = (b[0] - a[0]) / len, uy = (b[1] - a[1]) / len;
+  const out: Attached[] = [];
+  for (const f of floor.fixtures) {
+    if (f.room_id !== side.roomId || f.kind === "car") continue;
+    const [x0, y0, x1, y1] = f.bbox;
+    const corners: Pt[] = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+    let lo = Infinity, hi = -Infinity, gap = Infinity, far = 0;
+    for (const q of corners) {
+      const t = (q[0] - a[0]) * ux + (q[1] - a[1]) * uy;
+      const d = Math.abs((q[0] - a[0]) * -uy + (q[1] - a[1]) * ux);
+      lo = Math.min(lo, t); hi = Math.max(hi, t); gap = Math.min(gap, d); far = Math.max(far, d);
+    }
+    // skip thin linework, things that only touch the side at a corner, and big pieces that fill the
+    // room (an L-shaped counter's box touches every side; it belongs to none of them)
+    const deep = ["bed", "bathtub", "car", "sofa"].includes(f.kind) ? 2600 : 1400;
+    if (gap > reach || far > deep || hi < 150 || lo > len - 150 || hi - lo < 120) continue;
+    out.push({ f, from: Math.max(0, lo), to: Math.min(len, hi), gap });
+  }
+  return out.sort((p, q) => p.from - q.from);
+}
+
+/** Doors, windows and fixtures on or against one wall piece. */
+export function attachedToWall(floor: Floor, wall: Wall): { openings: Opening[]; fixtures: Fixture[] } {
+  const near = (q: Pt, d: number) => pointInPoly(q, wall.polygon) || edgeDistance(q, wall.polygon) < d;
+  const openings = floor.openings.filter((o) => near([(o.a[0] + o.b[0]) / 2, (o.a[1] + o.b[1]) / 2], wall.thickness_mm + 60));
+  const fixtures = floor.fixtures.filter((f) => {
+    if (f.kind === "car" || f.kind === "other" && (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]) < 150 * 150) return false;
+    const [x0, y0, x1, y1] = f.bbox;
+    return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].some((q) => near(q as Pt, 450));
+  });
+  return { openings, fixtures };
+}
+
+/** The room side that a wall piece belongs to, for "face this wall". Prefers the given room. */
+export function sideOfWall(floor: Floor, wallId: string, preferRoom?: string | null): WallSide | null {
+  const rooms = floor.rooms.filter((r) => r.wall_ids.includes(wallId) || floor.walls.find((w) => w.id === wallId)?.room_ids.includes(r.id));
+  rooms.sort((r, q) => (q.id === preferRoom ? 1 : 0) - (r.id === preferRoom ? 1 : 0));
+  for (const r of rooms) {
+    const sides = roomSides(floor, r).filter((s) => s.segments.some((g) => g.id === wallId));
+    if (sides.length) {
+      const seg = (s: WallSide) => s.segments.filter((g) => g.id === wallId).reduce((n, g) => n + g.to - g.from, 0);
+      return sides.sort((s, t) => seg(t) - seg(s))[0];
+    }
+  }
+  return null;
+}
+
+// ------------------------------------------------------------------ the site around the building
+
+export interface Site {
+  lot: BBox;               // estimated lot, in plan coordinates
+  street: BBox;            // band in front of the lot
+  front: "top" | "bottom";
+  building: BBox;
+  drive: Pt[] | null;      // from the garage door to the street
+  path: Pt[] | null;       // from the main entrance to the street
+}
+
+/** A plausible lot drawn around the building: street on the front side, drive to the garage door,
+ *  a path to the front door. Clearly an estimate; it gives the job a place to pin site things. */
+export function siteLayout(plan: Plan): Site {
+  const floors = [...plan.floors].sort((a, b) => a.level - b.level);
+  const bb = unionBBox(floors.map(floorBBox));
+  const fv = frontView(plan);
+  const front = fv.side;
+  const side = 6000, frontYard = 9000, back = 12000;
+  const lot: BBox = front === "bottom"
+    ? [bb[0] - side, bb[1] - back, bb[2] + side, bb[3] + frontYard]
+    : [bb[0] - side, bb[1] - frontYard, bb[2] + side, bb[3] + back];
+  const street: BBox = front === "bottom" ? [lot[0] - 40000, lot[3] + 1500, lot[2] + 40000, lot[3] + 9500] : [lot[0] - 40000, lot[1] - 9500, lot[2] + 40000, lot[1] - 1500];
+  const edgeY = front === "bottom" ? lot[3] + 1500 : lot[1] - 1500;
+  const g = floors[0];
+  const toStreet = (o: Opening | undefined): Pt[] | null => {
+    if (!o) return null;
+    const mx = (o.a[0] + o.b[0]) / 2, my = (o.a[1] + o.b[1]) / 2;
+    if (front === "bottom" ? my < (bb[1] + bb[3]) / 2 : my > (bb[1] + bb[3]) / 2) return null; // not on the street side
+    const hw = Math.max(o.width_mm / 2, 600);
+    return [[mx - hw, my], [mx + hw, my], [mx + hw, edgeY], [mx - hw, edgeY]];
+  };
+  const garage = g?.openings.find((o) => o.exterior && o.kind === "garage_door")
+    ?? g?.openings.find((o) => o.exterior && g.rooms.find((r) => r.id === o.room_ids[0])?.type === "garage" && o.width_mm > 2000);
+  const entryRooms = new Set(["foyer", "hallway", "stair_hall"]);
+  const entry = g?.openings
+    .filter((o) => o.exterior && ["door", "double_door"].includes(o.kind) && o.room_ids.some((id) => entryRooms.has(g.rooms.find((r) => r.id === id)?.type ?? "")))
+    .sort((p, q) => q.width_mm - p.width_mm)[0];
+  let drive = toStreet(garage);
+  if (!drive && garage) {
+    // garage door on the side: run the drive along the building to the street
+    const gr = g.rooms.find((r) => garage.room_ids.includes(r.id));
+    if (gr) { const rb = bboxOf(gr.polygon); drive = [[rb[0] + 300, front === "bottom" ? rb[3] : rb[1]], [rb[2] - 300, front === "bottom" ? rb[3] : rb[1]], [rb[2] - 300, edgeY], [rb[0] + 300, edgeY]]; }
+  }
+  const p = toStreet(entry);
+  const path = p ? p.map(([x, y], i) => [i === 0 || i === 3 ? x + (p[1][0] - p[0][0]) / 2 - 650 : x - (p[1][0] - p[0][0]) / 2 + 650, y] as Pt) : null;
+  return { lot, street, front, building: bb, drive, path };
 }

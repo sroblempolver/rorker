@@ -12,7 +12,7 @@ export function StageStrip({ stages }: { stages: JobStage[] }) {
   return (
     <div className="flex gap-1 w-full" aria-label="Stages">
       {stages.map((s) => (
-        <div key={s.id} title={`${s.name}: ${LABEL[s.status]}`} className={`h-1.5 flex-1 rounded-full ${s.status === "done" ? "bg-green" : s.status === "active" ? "bg-accent" : "bg-panel-3"}`} />
+        <div key={s.id} title={`${s.name}: ${LABEL[s.status]}`} className={`h-1.5 flex-1 rounded-[1px] ${s.status === "done" ? "bg-green" : s.status === "active" ? "bg-accent" : "bg-panel-3"}`} />
       ))}
     </div>
   );
@@ -35,16 +35,16 @@ export function StagesPanel({ stages, onStatus, onAdd, onRename, onDelete, onMov
     <div className="p-4 space-y-4">
       <div>
         <div className="flex items-baseline gap-2">
-          <h2 className="font-display text-[18px] font-bold">Stages</h2>
+          <h2 className="font-display text-[25px] font-extrabold uppercase leading-none">Stages</h2>
           <span className="text-muted text-sm">{done} of {stages.length} done</span>
         </div>
         <div className="mt-2"><StageStrip stages={stages} /></div>
       </div>
       <ol className="space-y-1.5">
         {stages.map((s, i) => (
-          <li key={s.id} className={`card px-3 py-2.5 flex items-center gap-3 ${s.status === "active" ? "!border-accent/60" : ""}`}>
+          <li key={s.id} className={`card !rounded-[3px] px-3 py-2.5 flex items-center gap-3 ${s.status === "active" ? "!border-accent/60" : ""}`}>
             <button onClick={() => onStatus(s.id, NEXT[s.status])} title={`${LABEL[s.status]}. Click to change.`}
-              className={`w-6 h-6 rounded-full border-2 grid place-items-center shrink-0 text-[12px] font-bold ${s.status === "done" ? "bg-green border-green text-[#0c1a12]" : s.status === "active" ? "border-accent text-accent" : "border-[#3a4552] text-muted"}`}>
+              className={`w-7 h-7 rounded-[2px] border-2 grid place-items-center shrink-0 text-[12px] font-mono font-bold ${s.status === "done" ? "bg-green border-green text-[#0c1a12]" : s.status === "active" ? "border-accent text-accent" : "border-muted text-muted"}`}>
               {s.status === "done" ? "✓" : i + 1}
             </button>
             {editing === s.id ? (
@@ -58,9 +58,9 @@ export function StagesPanel({ stages, onStatus, onAdd, onRename, onDelete, onMov
               </button>
             )}
             <div className="flex items-center gap-0.5 shrink-0 text-muted">
-              <button className="w-7 h-7 rounded hover:bg-panel-3 disabled:opacity-30" disabled={i === 0} onClick={() => onMove(s.id, -1)} title="Move up">↑</button>
-              <button className="w-7 h-7 rounded hover:bg-panel-3 disabled:opacity-30" disabled={i === stages.length - 1} onClick={() => onMove(s.id, 1)} title="Move down">↓</button>
-              <button className="w-7 h-7 rounded hover:bg-panel-3 hover:text-red" onClick={() => { if (confirm(`Remove “${s.name}” from this job?`)) onDelete(s.id); }} title="Remove">×</button>
+              <button className="w-7 h-7 rounded-[2px] hover:bg-panel-3 disabled:opacity-30" disabled={i === 0} onClick={() => onMove(s.id, -1)} title="Move up">↑</button>
+              <button className="w-7 h-7 rounded-[2px] hover:bg-panel-3 disabled:opacity-30" disabled={i === stages.length - 1} onClick={() => onMove(s.id, 1)} title="Move down">↓</button>
+              <button className="w-7 h-7 rounded-[2px] hover:bg-panel-3 hover:text-red" onClick={() => { if (confirm(`Remove “${s.name}” from this job?`)) onDelete(s.id); }} title="Remove">×</button>
             </div>
           </li>
         ))}

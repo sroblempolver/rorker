@@ -6,7 +6,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Pin } from "@/lib/data/types";
 import { bboxOf, centroid, unionBBox, edgeDistance, elementCenter, findElement, floorBBox, labelPoint, lineD, pathD, pointInPoly, roomOf, roomSides, type WallSide } from "@/lib/plan/geometry";
 import type { BBox, ElementStatus, Floor, Opening, Plan, Pt, Room } from "@/lib/plan/types";
-import { FIXTURE_STROKE, GLASS, PIN_COLOR, ROOM_FILL, STATUS_COLOR, WALL_EXT_FILL, WALL_FILL } from "./style";
+import { CHALK, FIXTURE_STROKE, GLASS, GROUND, ROOM_MATERIAL, STATUS_COLOR, WALL_EXT_TOP, WALL_SIDE, WALL_TOP } from "./style";
+import { DraftFlag, PinFlag, PlanDefs, useHoldToPin } from "./svg";
+import type { Controls, PinTarget, ScreenPoint } from "./target";
 import { usePanZoom } from "./usePanZoom";
 
 export type ColorMode = "type" | "progress";
@@ -27,8 +29,10 @@ interface Props {
   onOpenRoom: (id: string) => void;
   onOpenSide: (side: WallSide) => void;
   onUp: () => void;
-  onPlacePin: (x: number | null, y: number | null, elementId: string | null) => void;
-  controls: (api: { zoomBy: (f: number) => void; home: () => void }) => void;
+  /** Drop a pin at a world point; `at` is the screen point, for the quick-note card. */
+  onPlacePin: (t: PinTarget, at: ScreenPoint) => void;
+  draft?: PinTarget | null;
+  controls: Controls;
 }
 
 const box = (b: BBox) => ({ x: b[0], y: b[1], w: Math.max(1, b[2] - b[0]), h: Math.max(1, b[3] - b[1]) });
@@ -127,6 +131,7 @@ export function FloorCanvas(props: Props) {
   const sides = useMemo(() => (room ? roomSides(floor, room) : []), [floor, room]);
   const floorPins = useMemo(
     () => pins.map((p) => {
+      if (p.anchor && p.anchor.view !== "wall") return null; // site and outside pins live in those views
       if (p.floor_id !== floor.id && !(!p.floor_id && p.element_id?.startsWith(floor.id + "-"))) return null;
       const pt = pinPoint(plan, p);
       if (!pt) return null;
@@ -150,81 +155,78 @@ export function FloorCanvas(props: Props) {
   const status = (id: string) => states.get(id);
   const inRoom = (ids: string[] | string | null) => !room || (Array.isArray(ids) ? ids.includes(room.id) : ids === room.id);
 
+  const place = (e: { clientX: number; clientY: number }, fallback?: string | null) => {
+    const w = pz.toWorld(e.clientX, e.clientY);
+    props.onPlacePin({ floorId: floor.id, x: Math.round(w.x), y: Math.round(w.y), elementId: hitTest(floor, [w.x, w.y]) ?? fallback ?? null, anchor: null }, { x: e.clientX, y: e.clientY });
+  };
   const click = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (pinMode) {
-      const w = pz.toWorld(e.clientX, e.clientY);
-      return props.onPlacePin(w.x, w.y, id);
-    }
+    if (pinMode) return place(e, id);
     props.onSelect(id);
   };
   const roomClick = (r: Room, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (pinMode) {
-      const w = pz.toWorld(e.clientX, e.clientY);
-      return props.onPlacePin(w.x, w.y, hitTest(floor, [w.x, w.y]) ?? r.id);
-    }
+    if (pinMode) return place(e, r.id);
     if (!room || room.id !== r.id) props.onOpenRoom(r.id);
     else props.onSelect(r.id);
   };
   const hov = (id: string | null) => () => setHover(id);
 
+  // press and hold (touch) or right-click anywhere drops a note right there
+  const handlers = useHoldToPin(pz.handlers, (e) => place(e));
+
   const lw = px; // one screen pixel in world units
-  const fs = 12.5 * px;
-  const shadowOff = 260;
+  const fs = 13 * px;
+  const H = 150; // wall height drawn as a shadow offset, mm, for the extruded look
+  const W = fb[2] - fb[0], Hh = fb[3] - fb[1];
+  const draftPt = props.draft && !props.draft.anchor && props.draft.floorId === floor.id && props.draft.x != null && props.draft.y != null ? [props.draft.x, props.draft.y] as Pt : null;
 
   return (
     <svg
       ref={ref}
       className={`w-full h-full block touch-none select-none ${pinMode ? "cursor-crosshair" : pz.dragging ? "cursor-grabbing" : "cursor-default"}`}
       viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
-      {...pz.handlers}
-      onClick={(e) => {
-        if (pinMode) {
-          const w = pz.toWorld(e.clientX, e.clientY);
-          props.onPlacePin(w.x, w.y, hitTest(floor, [w.x, w.y]));
-        } else props.onSelect(null);
-      }}
+      {...handlers}
+      onClick={(e) => { if (pinMode) place(e); else props.onSelect(null); }}
       role="application"
       aria-label={`${floor.name} plan`}
     >
+      <PlanDefs />
       <defs>
-        <pattern id="grid1m" width={1000} height={1000} patternUnits="userSpaceOnUse">
-          <path d="M1000 0H0V1000" fill="none" stroke="#1a222c" strokeWidth={14} />
+        <pattern id="survey" width={1000} height={1000} patternUnits="userSpaceOnUse">
+          <path d="M1000 0H0V1000" fill="none" stroke="#262923" strokeWidth={10} />
+          <path d="M0 -40V40M-40 0H40" stroke="#33372f" strokeWidth={14} />
         </pattern>
-        <pattern id="grid5m" width={5000} height={5000} patternUnits="userSpaceOnUse">
-          <path d="M5000 0H0V5000" fill="none" stroke="#212b36" strokeWidth={28} />
-        </pattern>
-        <pattern id="hatch" width={260} height={260} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <rect width={260} height={260} fill="transparent" />
-          <line x1={0} y1={0} x2={0} y2={260} stroke="#b07be0" strokeWidth={70} opacity={0.7} />
-        </pattern>
-        <filter id="fshadow" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation={220} /></filter>
+        <filter id="soft" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation={240} /></filter>
       </defs>
-      <rect x={fb[0] - 60000} y={fb[1] - 60000} width={fb[2] - fb[0] + 120000} height={fb[3] - fb[1] + 120000} fill="#0f141a" />
-      <rect x={fb[0] - 60000} y={fb[1] - 60000} width={fb[2] - fb[0] + 120000} height={fb[3] - fb[1] + 120000} fill="url(#grid1m)" />
-      <rect x={fb[0] - 60000} y={fb[1] - 60000} width={fb[2] - fb[0] + 120000} height={fb[3] - fb[1] + 120000} fill="url(#grid5m)" />
-
-      {/* soft shadow under the building */}
-      <g transform={`translate(${shadowOff * 0.6} ${shadowOff})`} opacity={0.55} filter="url(#fshadow)" pointerEvents="none">
-        {floor.footprint.map((r, i) => <path key={i} d={pathD(r)} fill="#000" />)}
-        {floor.walls.map((w) => <path key={w.id} d={pathD(w.polygon)} fill="#000" />)}
+      {/* the lot: ground with a 1 m survey grid */}
+      <rect x={fb[0] - 80000} y={fb[1] - 80000} width={W + 160000} height={Hh + 160000} fill={GROUND} />
+      <rect x={fb[0] - 80000} y={fb[1] - 80000} width={W + 160000} height={Hh + 160000} fill="url(#survey)" />
+      <g pointerEvents="none" fontFamily="var(--font-mono)" fontSize={fs * 0.75} fill="#5d6157">
+        <text x={fb[0]} y={fb[1] - 900}>{floor.name.toUpperCase()} · {(W / 1000).toFixed(1)} × {(Hh / 1000).toFixed(1)} m</text>
       </g>
 
-      {/* rooms */}
+      {/* soft ground shadow under the building */}
+      <g transform="translate(260 420)" opacity={0.6} filter="url(#soft)" pointerEvents="none">
+        {floor.footprint.map((r, i) => <path key={i} d={pathD(r)} fill="#000" />)}
+      </g>
+
+      {/* rooms, floored in their material */}
       <g>
         {floor.rooms.map((r) => {
           const st = status(r.id);
           const dim = room && room.id !== r.id;
-          let fill = ROOM_FILL[r.type] ?? ROOM_FILL.other;
-          if (colorMode === "progress") fill = st ? STATUS_COLOR[st] : "#3a424d";
           const hot = hover === r.id, sel = selected === r.id;
           return (
             <g key={r.id} onClick={(e) => roomClick(r, e)} onPointerEnter={hov(r.id)} onPointerLeave={hov(null)} className="cursor-pointer">
-              <path d={pathD(r.polygon)} fill={fill} fillOpacity={colorMode === "progress" ? (st ? 0.42 : 1) : 1} />
+              <path d={pathD(r.polygon)} fill={`url(#mat-${ROOM_MATERIAL[r.type] ?? "concrete"})`} />
+              {colorMode === "progress" && <path d={pathD(r.polygon)} fill={st ? STATUS_COLOR[st] : "#1d1f1b"} fillOpacity={st ? 0.55 : 0.6} />}
               {st === "demolish" && <path d={pathD(r.polygon)} fill="url(#hatch)" />}
-              {(hot || sel) && <path d={pathD(r.polygon)} fill="#fff" fillOpacity={sel ? 0.08 : 0.05} stroke={sel ? "var(--accent)" : "#fff"} strokeOpacity={sel ? 1 : 0.35} strokeWidth={(sel ? 2.5 : 1.5) * lw} />}
-              {dim && <path d={pathD(r.polygon)} fill="#0b0f14" fillOpacity={0.55} />}
+              {/* inner shade along the walls gives the floor depth */}
+              <path d={pathD(r.polygon)} fill="none" stroke="#000" strokeOpacity={0.28} strokeWidth={140} style={{ clipPath: "none" }} pointerEvents="none" />
+              {hot && !sel && <path d={pathD(r.polygon)} fill="#fff" fillOpacity={0.08} />}
+              {sel && <path d={pathD(r.polygon)} fill={CHALK} fillOpacity={0.1} stroke={CHALK} strokeWidth={2.5 * lw} strokeDasharray={`${10 * lw} ${5 * lw}`} />}
+              {dim && <path d={pathD(r.polygon)} fill="#0c0d0b" fillOpacity={0.62} />}
             </g>
           );
         })}
@@ -234,28 +236,29 @@ export function FloorCanvas(props: Props) {
       <g>
         {floor.stairs.map((s) => (
           <g key={s.id} onClick={(e) => click(s.id, e)} onPointerEnter={hov(s.id)} onPointerLeave={hov(null)} className="cursor-pointer" opacity={inRoom(s.room_id) ? 1 : 0.35}>
-            <path d={pathD(s.polygon)} fill="#000" fillOpacity={0.12} stroke={selected === s.id ? "var(--accent)" : hover === s.id ? "#fff" : "transparent"} strokeWidth={2 * lw} />
-            <path d={lineD(s.outline)} fill="none" stroke="#a7c7a0" strokeOpacity={0.8} strokeWidth={lw} />
+            <path d={pathD(s.polygon)} fill="#000" fillOpacity={0.18} stroke={selected === s.id ? CHALK : hover === s.id ? "#fff" : "transparent"} strokeWidth={2 * lw} />
+            <path d={lineD(s.outline)} fill="none" stroke="#f0ece3" strokeOpacity={0.75} strokeWidth={1.2 * lw} />
           </g>
         ))}
       </g>
 
-      {/* fixtures */}
+      {/* fixtures: the drawing's own linework, in white like a pencil overlay */}
       <g>
         {floor.fixtures.map((f) => {
           const b = f.bbox, sel = selected === f.id, hot = hover === f.id;
           const faint = f.kind === "other";
           const st = status(f.id);
+          const ink = colorMode === "progress" && st ? STATUS_COLOR[st] : FIXTURE_STROKE;
           return (
             <g key={f.id} onClick={(e) => click(f.id, e)} onPointerEnter={hov(f.id)} onPointerLeave={hov(null)} className="cursor-pointer" opacity={inRoom(f.room_id) ? 1 : 0.3}>
-              <rect x={b[0]} y={b[1]} width={b[2] - b[0]} height={b[3] - b[1]} rx={60} fill={sel || hot ? "#fff" : "transparent"} fillOpacity={sel ? 0.1 : 0.06}
-                stroke={sel ? "var(--accent)" : hot ? "#fff" : colorMode === "progress" && st ? STATUS_COLOR[st] : "transparent"} strokeOpacity={hot && !sel ? 0.5 : 1} strokeWidth={1.5 * lw} strokeDasharray={sel ? undefined : `${4 * lw} ${3 * lw}`} />
+              <rect x={b[0]} y={b[1]} width={b[2] - b[0]} height={b[3] - b[1]} rx={40} fill={sel ? CHALK : hot ? "#fff" : "transparent"} fillOpacity={sel ? 0.16 : 0.1}
+                stroke={sel ? CHALK : hot ? "#fff" : "transparent"} strokeWidth={1.5 * lw} strokeDasharray={sel ? undefined : `${4 * lw} ${3 * lw}`} />
               {f.outline.length ? (
-                <path d={lineD(f.outline)} fill="none" stroke={colorMode === "progress" && st ? STATUS_COLOR[st] : FIXTURE_STROKE} strokeOpacity={faint ? 0.5 : 0.9} strokeWidth={lw} strokeLinejoin="round" />
+                <path d={lineD(f.outline)} fill="none" stroke={ink} strokeOpacity={faint ? 0.55 : 0.92} strokeWidth={1.2 * lw} strokeLinejoin="round" strokeLinecap="round" />
               ) : (
                 <>
-                  <rect x={b[0]} y={b[1]} width={b[2] - b[0]} height={b[3] - b[1]} rx={80} fill="none" stroke={FIXTURE_STROKE} strokeWidth={lw} />
-                  <text x={f.center[0]} y={f.center[1] + fs * 0.35} textAnchor="middle" fontSize={fs * 0.85} fill={FIXTURE_STROKE}>{f.name}</text>
+                  <rect x={b[0]} y={b[1]} width={b[2] - b[0]} height={b[3] - b[1]} rx={60} fill="none" stroke={ink} strokeWidth={lw} />
+                  <text x={f.center[0]} y={f.center[1] + fs * 0.35} textAnchor="middle" fontSize={fs * 0.8} fill={ink}>{f.name}</text>
                 </>
               )}
             </g>
@@ -263,20 +266,23 @@ export function FloorCanvas(props: Props) {
         })}
       </g>
 
-      {/* walls */}
+      {/* walls, extruded: a dark side drawn first, offset down-right, then the plaster top */}
+      <g pointerEvents="none">
+        {floor.walls.map((w) => <path key={`s${w.id}`} d={pathD(w.polygon)} fill={WALL_SIDE} opacity={inRoom(w.room_ids) ? 0.7 : 0.25} transform={`translate(${H * 0.5} ${H})`} />)}
+      </g>
       <g>
         {floor.walls.map((w) => {
           const st = status(w.id), sel = selected === w.id, hot = hover === w.id;
-          const fill = colorMode === "progress" && st ? STATUS_COLOR[st] : w.exterior ? WALL_EXT_FILL : WALL_FILL;
+          const fill = colorMode === "progress" && st ? STATUS_COLOR[st] : w.exterior ? WALL_EXT_TOP : WALL_TOP;
           return (
-            <path key={w.id} d={pathD(w.polygon)} fill={hot && !sel ? "#ffffff" : fill} stroke={sel ? "var(--accent)" : "none"} strokeWidth={3 * lw}
+            <path key={w.id} d={pathD(w.polygon)} fill={hot && !sel ? "#ffffff" : fill} stroke={sel ? CHALK : "#00000033"} strokeWidth={(sel ? 3.5 : 1) * lw}
               opacity={inRoom(w.room_ids) ? 1 : 0.35} className="cursor-pointer"
               onClick={(e) => click(w.id, e)} onPointerEnter={hov(w.id)} onPointerLeave={hov(null)} />
           );
         })}
       </g>
 
-      {/* openings: glass for windows, swing arcs for doors */}
+      {/* openings: glass for windows, timber leaves and swing arcs for doors */}
       <g>
         {floor.openings.map((o) => {
           const sel = selected === o.id, hot = hover === o.id, st = status(o.id);
@@ -287,47 +293,53 @@ export function FloorCanvas(props: Props) {
             <g key={o.id} onClick={(e) => click(o.id, e)} onPointerEnter={hov(o.id)} onPointerLeave={hov(null)} className="cursor-pointer" opacity={inRoom(o.room_ids) ? 1 : 0.35}>
               {isWin ? (
                 <>
-                  <path d={pathD(o.polygon)} fill={tint ?? GLASS} fillOpacity={0.9} />
-                  <path d={`M${o.a[0]} ${o.a[1]}L${o.b[0]} ${o.b[1]}`} stroke="#0f141a" strokeWidth={1.2 * lw} />
+                  <path d={pathD(o.polygon)} fill={tint ?? GLASS} />
+                  <path d={`M${o.a[0]} ${o.a[1]}L${o.b[0]} ${o.b[1]}`} stroke="#2b5a6b" strokeWidth={1.6 * lw} />
                 </>
               ) : (
                 <>
-                  <path d={pathD(o.polygon)} fill={tint ?? (o.kind === "opening" ? "transparent" : "#0f141a")} fillOpacity={tint ? 0.6 : 0.35} />
-                  {o.kind === "opening" && <path d={`M${o.a[0]} ${o.a[1]}L${o.b[0]} ${o.b[1]}`} stroke="#c8d0da" strokeOpacity={0.35} strokeWidth={lw} strokeDasharray={`${5 * lw} ${4 * lw}`} />}
-                  {o.kind === "garage_door" && <path d={`M${o.a[0]} ${o.a[1]}L${o.b[0]} ${o.b[1]}`} stroke="#c8d0da" strokeWidth={3 * lw} strokeDasharray={`${10 * lw} ${4 * lw}`} />}
+                  <path d={pathD(o.polygon)} fill={tint ?? (o.kind === "opening" ? "transparent" : "#3a2c20")} fillOpacity={tint ? 0.7 : o.kind === "opening" ? 0 : 0.55} />
+                  {o.kind === "opening" && <path d={`M${o.a[0]} ${o.a[1]}L${o.b[0]} ${o.b[1]}`} stroke="#f0ece3" strokeOpacity={0.4} strokeWidth={lw} strokeDasharray={`${5 * lw} ${4 * lw}`} />}
+                  {o.kind === "garage_door" && <path d={`M${o.a[0]} ${o.a[1]}L${o.b[0]} ${o.b[1]}`} stroke="#f0ece3" strokeWidth={4 * lw} strokeDasharray={`${12 * lw} ${4 * lw}`} />}
                   {leafPaths(o).map((p, i) => (
                     <g key={i} pointerEvents="none">
-                      <path d={p.arc} fill="none" stroke={tint ?? "#e9a23b"} strokeOpacity={0.7} strokeWidth={lw} strokeDasharray={`${3 * lw} ${3 * lw}`} />
-                      <path d={p.leaf} stroke={tint ?? "#f2c27a"} strokeWidth={2 * lw} strokeLinecap="round" />
+                      <path d={p.arc} fill="none" stroke={tint ?? "#f0ece3"} strokeOpacity={0.45} strokeWidth={lw} strokeDasharray={`${3 * lw} ${3 * lw}`} />
+                      <path d={p.leaf} stroke={tint ?? "#c99a62"} strokeWidth={4 * lw} strokeLinecap="round" />
                     </g>
                   ))}
                 </>
               )}
-              {/* fat invisible hit target so small doors are easy to tap */}
               <circle cx={mid[0]} cy={mid[1]} r={Math.max(o.width_mm / 2, 9 * lw)} fill="transparent" />
-              {(sel || hot) && <path d={pathD(o.polygon)} fill="none" stroke={sel ? "var(--accent)" : "#fff"} strokeWidth={2.5 * lw} />}
+              {(sel || hot) && <path d={pathD(o.polygon)} fill="none" stroke={sel ? CHALK : "#fff"} strokeWidth={2.5 * lw} />}
             </g>
           );
         })}
       </g>
 
-      {/* room labels */}
+      {/* room labels: painted name, area and ID tag */}
       <g pointerEvents="none">
         {floor.rooms.map((r) => {
           if (room && room.id !== r.id) return null;
           const [x, y] = labelPoint(r.polygon);
           const b = bboxOf(r.polygon);
-          const tw = r.name.length * fs * 0.56;
+          const name = r.name.toUpperCase();
+          const tw = name.length * fs * 0.52;
           if (tw > (b[2] - b[0]) * 0.95 && !room) return null;
           const n = openByRoom.get(r.id) ?? 0;
+          const sub = `${r.area_m2.toFixed(1)} m²`;
+          const showSub = sub.length * fs * 0.5 + 5 * fs < (b[2] - b[0]) * 0.95;
           return (
             <g key={r.id}>
-              <text x={x} y={y} textAnchor="middle" fontSize={fs} fontFamily="var(--font-display)" fontWeight={600} letterSpacing={fs * 0.04} fill="#eef1f4" style={{ paintOrder: "stroke" }} stroke="#0f141a" strokeOpacity={0.6} strokeWidth={3 * lw}>{r.name}</text>
-              {r.area_m2.toFixed(1).length * fs * 0.45 + fs * 4 < (b[2] - b[0]) * 0.95 && <text x={x} y={y + fs * 1.25} textAnchor="middle" fontSize={fs * 0.8} fill="#aab4c0" style={{ paintOrder: "stroke" }} stroke="#0f141a" strokeOpacity={0.6} strokeWidth={3 * lw}>{r.area_m2.toFixed(1)} m² · {r.id}</text>}
+              <text x={x} y={y} textAnchor="middle" fontSize={fs * 1.15} fontFamily="var(--font-display)" fontWeight={800} letterSpacing={fs * 0.06} fill="#fbf8f2" style={{ paintOrder: "stroke" }} stroke="#15130f" strokeOpacity={0.7} strokeWidth={3.5 * lw}>{name}</text>
+              {showSub && (
+                <g transform={`translate(${x} ${y + fs * 1.05})`}>
+                  <text textAnchor="middle" y={fs * 0.35} fontSize={fs * 0.78} fontFamily="var(--font-mono)" fill="#efe7d6" style={{ paintOrder: "stroke" }} stroke="#15130f" strokeOpacity={0.7} strokeWidth={3 * lw}>{sub} · {r.id}</text>
+                </g>
+              )}
               {n > 0 && !room && (
-                <g transform={`translate(${x + tw / 2 + 9 * lw} ${y - fs * 0.4})`}>
-                  <circle r={8 * lw} fill="var(--red)" />
-                  <text y={3.6 * lw} textAnchor="middle" fontSize={10 * lw} fontWeight={700} fill="#fff">{n}</text>
+                <g transform={`translate(${x + tw / 2 + 10 * lw} ${y - fs * 0.45})`}>
+                  <rect x={-8 * lw} y={-8 * lw} width={16 * lw} height={16 * lw} rx={2 * lw} fill="#ff6a1f" stroke="#1c0c03" strokeWidth={lw} />
+                  <text y={3.8 * lw} textAnchor="middle" fontSize={10.5 * lw} fontFamily="var(--font-mono)" fontWeight={700} fill="#1c0c03">{n}</text>
                 </g>
               )}
             </g>
@@ -342,14 +354,15 @@ export function FloorCanvas(props: Props) {
             const c = centroid(room.polygon);
             const mx = (s.a[0] + s.b[0]) / 2, my = (s.a[1] + s.b[1]) / 2;
             const d = Math.hypot(c[0] - mx, c[1] - my) || 1;
-            const inset = Math.min(32 * lw, d * 0.4);
+            const inset = Math.min(34 * lw, d * 0.4);
             const x = mx + ((c[0] - mx) / d) * inset, y = my + ((c[1] - my) / d) * inset;
-            const label = `${s.heading[0].toUpperCase()}${s.heading.slice(1)} wall`;
-            const w = label.length * 6.6 * lw + 16 * lw;
+            const label = s.label.toUpperCase();
+            const w = label.length * 7.2 * lw + 26 * lw;
             return (
               <g key={s.key} transform={`translate(${x} ${y})`} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); props.onOpenSide(s); }}>
-                <rect x={-w / 2} y={-11 * lw} width={w} height={22 * lw} rx={11 * lw} fill="#0f141a" fillOpacity={0.85} stroke="var(--accent)" strokeWidth={1.2 * lw} />
-                <text y={4 * lw} textAnchor="middle" fontSize={11 * lw} fontFamily="var(--font-display)" fontWeight={600} letterSpacing={0.6 * lw} fill="var(--accent)">{label} ›</text>
+                <rect x={-w / 2} y={-12 * lw} width={w} height={24 * lw} rx={2 * lw} fill="#ff6a1f" stroke="#1c0c03" strokeWidth={1.2 * lw} />
+                <text x={-4 * lw} y={5 * lw} textAnchor="middle" fontSize={14 * lw} fontFamily="var(--font-display)" fontWeight={800} letterSpacing={1 * lw} fill="#1c0c03">{label}</text>
+                <path d={`M${w / 2 - 14 * lw} ${-4 * lw}L${w / 2 - 9 * lw} 0L${w / 2 - 14 * lw} ${4 * lw}`} fill="none" stroke="#1c0c03" strokeWidth={2 * lw} />
               </g>
             );
           })}
@@ -361,17 +374,9 @@ export function FloorCanvas(props: Props) {
         {floorPins.map(({ pin, pt }) => {
           const e = pin.element_id ? findElement(plan, pin.element_id) : null;
           if (room && e && roomOf(e) !== room.id && !pointInPoly(pt, room.polygon)) return null;
-          const sel = selectedPin === pin.id;
-          const s = (sel ? 1.25 : 1) * lw;
-          const color = pin.status === "done" ? "#4cb782" : PIN_COLOR[pin.kind];
-          return (
-            <g key={pin.id} transform={`translate(${pt[0]} ${pt[1]}) scale(${s})`} className="cursor-pointer" onClick={(ev) => { ev.stopPropagation(); props.onSelectPin(pin.id); }} opacity={pin.status === "done" ? 0.75 : 1}>
-              <ellipse cx={0} cy={0} rx={5} ry={2} fill="#000" opacity={0.4} />
-              <path d="M0 0 C-3 -7 -11 -11 -11 -20 A11 11 0 1 1 11 -20 C11 -11 3 -7 0 0Z" fill={color} stroke={sel ? "#fff" : "#0f141a"} strokeWidth={sel ? 2 : 1.2} />
-              <text y={-16} textAnchor="middle" fontSize={11} fontWeight={700} fill="#14100a">{pin.status === "done" ? "✓" : pin.number}</text>
-            </g>
-          );
+          return <PinFlag key={pin.id} pin={pin} x={pt[0]} y={pt[1]} px={lw} selected={selectedPin === pin.id} onClick={(ev) => { ev.stopPropagation(); props.onSelectPin(pin.id); }} />;
         })}
+        {draftPt && <DraftFlag x={draftPt[0]} y={draftPt[1]} px={lw} />}
       </g>
     </svg>
   );

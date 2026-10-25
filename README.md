@@ -5,7 +5,7 @@ clickable, numbered 2D plan of the building. Every room, wall, door, window and 
 pins, tasks, status and (later) quotes and client updates hang off.
 
 This repo is Phase 1: contractor accounts and company setup, jobs and the all-jobs view, the plan reader,
-the game-style plan (outside → floor → room → wall), pins and tasks on any element, and per-job stages
+the game-style job map (whole site → outside → floor → room → wall, with things on each wall drawn from the front), pins and quick notes anywhere on it, and per-job stages
 from company templates.
 
 ```
