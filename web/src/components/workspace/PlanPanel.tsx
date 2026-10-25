@@ -1,0 +1,114 @@
+"use client";
+// Where the plan comes from: upload a drawing, watch the reader work, answer its few questions.
+import { useState } from "react";
+import type { PlanRow, PlanRun } from "@/lib/data/types";
+
+const RUN_LABEL: Record<PlanRun["status"], string> = { queued: "Waiting", running: "Reading…", needs_answers: "Has questions", done: "Done", failed: "Failed" };
+const KIND: Record<string, string> = { dwg: "AutoCAD drawing", dxf: "AutoCAD drawing", pdf: "PDF", image: "Photo or image" };
+
+export function UploadBox({ onUpload, compact }: { onUpload: (f: File) => Promise<void>; compact?: boolean }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [over, setOver] = useState(false);
+  return (
+    <form
+      className={`rounded-xl border-2 border-dashed ${over ? "border-accent bg-accent/5" : "border-line"} ${compact ? "p-3" : "p-5"} text-center`}
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) setFile(f); }}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!file) return;
+        setBusy(true); setErr(null);
+        try { await onUpload(file); setFile(null); } catch (x) { setErr(x instanceof Error ? x.message : "Upload failed."); }
+        setBusy(false);
+      }}
+    >
+      <p className="text-[14px] mb-1">{file ? file.name : "Drop the AutoCAD file, a PDF or a photo"}</p>
+      <p className="text-[12px] text-muted mb-3">DWG, DXF, PDF, JPG or PNG. Photos of a paper plan or a hand sketch work too.</p>
+      <div className="flex gap-2 justify-center">
+        <label className="btn btn-sm cursor-pointer">Choose file<input type="file" className="hidden" accept=".dwg,.dxf,.pdf,image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label>
+        <button className="btn btn-primary btn-sm" disabled={!file || busy}>{busy ? "Uploading…" : "Read plan"}</button>
+      </div>
+      {err && <p className="text-red text-sm mt-2">{err}</p>}
+    </form>
+  );
+}
+
+const OTHER = "Something else";
+
+export function QuestionsCard({ plan, onAnswer, onShow }: { plan: PlanRow; onAnswer: (answers: Record<string, string>) => Promise<void>; onShow: (ids: string[]) => void }) {
+  const open = plan.data.questions.filter((q) => !q.answer);
+  const [answers, setAnswers] = useState<Record<string, string>>(() => Object.fromEntries(open.map((q) => [q.id, q.default ?? q.options[0] ?? ""])));
+  const [other, setOther] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  if (!open.length) return null;
+  const final = () => Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, v === OTHER ? (other[k]?.trim() || OTHER) : v]));
+  return (
+    <div className="card p-4 !border-accent/50 space-y-4">
+      <div>
+        <p className="eyebrow text-accent">{open.length} quick question{open.length > 1 ? "s" : ""}</p>
+        <p className="text-[13px] text-muted">The plan reader wasn&apos;t sure about these. Your answers fix the plan.</p>
+      </div>
+      {open.map((q) => (
+        <fieldset key={q.id}>
+          <legend className="text-[14px] mb-2">{q.text} <button type="button" onClick={() => onShow(q.element_ids)} className="text-accent text-[13px] hover:underline whitespace-nowrap">Show on plan</button></legend>
+          <div className="flex flex-wrap gap-1.5">
+            {q.options.map((o) => (
+              <button type="button" key={o} onClick={() => setAnswers({ ...answers, [q.id]: o })} aria-pressed={answers[q.id] === o}
+                className={`chip !h-8 !text-[13px] ${answers[q.id] === o ? "!bg-accent !text-accent-ink !border-accent" : "hover:text-text"}`}>{o}</button>
+            ))}
+          </div>
+          {answers[q.id] === OTHER && <input className="input mt-2" autoFocus placeholder="What is it?" value={other[q.id] ?? ""} onChange={(e) => setOther({ ...other, [q.id]: e.target.value })} />}
+          {!q.options.length && <input className="input" value={answers[q.id] ?? ""} onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })} />}
+        </fieldset>
+      ))}
+      <button className="btn btn-primary w-full" disabled={busy} onClick={async () => { setBusy(true); try { await onAnswer(final()); } finally { setBusy(false); } }}>
+        {busy ? "Sending…" : "Send answers"}
+      </button>
+    </div>
+  );
+}
+
+export function PlanPanel({ plan, runs, aiAvailable, onUpload, onAnswer, onShow }: {
+  plan: PlanRow | null; runs: PlanRun[]; aiAvailable: boolean; onUpload: (f: File) => Promise<void>; onAnswer: (a: Record<string, string>) => Promise<void>; onShow: (ids: string[]) => void;
+}) {
+  const s = plan?.data.source;
+  const unidentified = plan ? plan.data.floors.reduce((n, f) => n + ((plan.data.stats[f.id] as { unidentified?: number } | undefined)?.unidentified ?? 0), 0) : 0;
+  return (
+    <div className="p-4 space-y-4">
+      <h2 className="font-display text-[18px] font-bold">Plan</h2>
+      {plan && <QuestionsCard key={plan.id} plan={plan} onAnswer={onAnswer} onShow={onShow} />}
+      {plan && s && (
+        <div className="card p-4 space-y-1 text-[14px]">
+          <p><span className="text-muted">From</span> {s.filename} <span className="text-muted">({KIND[s.kind] ?? s.kind})</span></p>
+          <p><span className="text-muted">Version</span> {plan.version} · {new Date(plan.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p>
+          <p><span className="text-muted">Read with</span> {s.ai_used ? "the full plan reader" : "drawing geometry only"}</p>
+          {unidentified ? <p className="text-muted text-[13px]">{unidentified} drawn items are not identified yet. They still show on the plan and can be pinned.</p> : null}
+        </div>
+      )}
+      {!aiAvailable && <p className="text-[12.5px] text-muted">Running without the plan reader key: AutoCAD files are read from their geometry, and PDFs and photos wait until the key is set.</p>}
+      <div>
+        <p className="eyebrow mb-2">{plan ? "Replace with a new drawing" : "Upload the plan"}</p>
+        <UploadBox onUpload={onUpload} compact={!!plan} />
+      </div>
+      {runs.length > 0 && (
+        <div>
+          <p className="eyebrow mb-2">History</p>
+          <div className="space-y-1.5">
+            {runs.slice(0, 8).map((r) => (
+              <div key={r.id} className="card px-3 py-2 text-[13px]">
+                <div className="flex items-center gap-2">
+                  <span className={`dot ${r.status === "running" || r.status === "queued" ? "animate-pulse" : ""}`} style={{ background: r.status === "failed" ? "var(--red)" : r.status === "done" ? "var(--green)" : "var(--accent)" }} />
+                  <span className="truncate">{r.kind === "answers" ? "Applying your answers" : r.file_name ?? "Plan"}</span>
+                  <span className="ml-auto text-muted shrink-0">{RUN_LABEL[r.status]}</span>
+                </div>
+                {r.error && <p className="text-red mt-1">{r.error}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

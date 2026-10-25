@@ -44,7 +44,7 @@ def write_outputs(plan, report, out: Path, scorecard: dict | None = None):
 
 def cmd_read(a):
     from .pipeline import run
-    plan, report = run(a.file, ai=False if a.no_ai else None)
+    plan, report = run(a.file, ai=False if a.no_ai else None, filename=a.name)
     out = Path(a.out or Path(a.file).with_suffix("").name + "-plan")
     write_outputs(plan, report, out)
     print(json.dumps(dict(out=str(out), stats=plan.stats.get(next(iter(plan.stats), ""), {}),
@@ -141,6 +141,7 @@ def main(argv=None):
     r.add_argument("file")
     r.add_argument("--out")
     r.add_argument("--no-ai", action="store_true")
+    r.add_argument("--name", help="Original file name to record on the plan (uploads are stored under another name)")
     t = sub.add_parser("test")
     t.add_argument("cases", nargs="*")
     t.add_argument("--no-ai", action="store_true")

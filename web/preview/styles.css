@@ -1,0 +1,5 @@
+@import "../src/app/globals.css";
+@source "../src";
+@source "./";
+:root { --font-chakra: "Chakra Petch"; --font-barlow: "Barlow"; color-scheme: dark; }
+html, body, #root { height: 100%; }

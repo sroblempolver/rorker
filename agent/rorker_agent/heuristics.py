@@ -63,10 +63,12 @@ def questions_from_flags(plan: Plan, limit: int = 5) -> list[Question]:
         r = idx.get(ids[0]) if ids else None
         name = getattr(r, "name", "this room")
         if fl.code == "room_split" and len(ids) == 2:
-            q = Question(id="", kind="room_split", element_ids=ids, text=f"Are {ids[0]} and {ids[1]} one room or two?",
-                         options=["Two rooms", "One room"])
+            other = getattr(idx.get(ids[1]), "name", ids[1])
+            both = f"the two {name.lower()} spaces" if other == name else f"the {name.lower()} and the {other.lower()}"
+            q = Question(id="", kind="room_split", element_ids=ids,
+                         text=f"Are {both} ({ids[0]}, {ids[1]}) one room or two?", options=["Two rooms", "One room"])
         elif fl.code in ("label_copied", "room_unknown_label", "room_multi_label", "room_no_label"):
-            q = Question(id="", kind="room_name", element_ids=ids, text=f"What is {ids[0]}? I think it is {name.lower()}.",
+            q = Question(id="", kind="room_name", element_ids=ids, text=f"What is room {ids[0]}? It looks like a {name.lower()}.",
                          options=[name, "Something else"])
         else:
             q = Question(id="", kind="label", element_ids=ids, text=fl.message, options=["OK", "Change it"])
@@ -77,3 +79,23 @@ def questions_from_flags(plan: Plan, limit: int = 5) -> list[Question]:
     for i, q in enumerate(out, 1):
         q.id = f"Q{i}"
     return out
+
+
+def apply_answers_rules(plan: Plan, answered: list[Question]) -> Plan:
+    """Apply contractor answers without the AI: merges for 'one room', names for room questions."""
+    from .interpret import merge_rooms
+    idx = plan.element_index()
+    for q in answered:
+        a = (q.answer or "").strip()
+        if q.kind == "room_split" and a.lower().startswith("one"):
+            merge_rooms(plan, q.element_ids)
+        elif q.kind == "room_name" and a and a.lower() != "something else":
+            r = idx.get(q.element_ids[0])
+            if r is None or not hasattr(r, "area_m2"):
+                continue
+            m = room_from_text(a)
+            r.type, r.name = (m[0], a if m and m[1].lower() != a.lower() else m[1]) if m else ("other", a)
+            r.label_source = "contractor"
+            r.confidence = 1.0
+    plan.flags = [fl for fl in plan.flags if not any(set(fl.element_ids) <= set(q.element_ids) for q in answered)]
+    return plan

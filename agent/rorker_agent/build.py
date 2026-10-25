@@ -138,7 +138,11 @@ class Frame:
         return (round(x - self.minx, 1), round(self.maxy - y, 1))
 
     def poly(self, fi: int, poly: Polygon) -> list[tuple[float, float]]:
-        return [self.pt(fi, c) for c in list(poly.exterior.coords)[:-1]]
+        # drop the tiny fillets the CAD linework leaves at corners
+        simple = poly.simplify(2, preserve_topology=True)
+        if simple.is_empty or simple.geom_type != "Polygon":
+            simple = poly
+        return [self.pt(fi, c) for c in list(simple.exterior.coords)[:-1]]
 
     def lines(self, fi: int, lines) -> list[list[tuple[float, float]]]:
         return [[self.pt(fi, c) for c in ln] for ln in lines]

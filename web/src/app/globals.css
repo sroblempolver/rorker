@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+/* Rorker: dark, calm, game-like but professional. Amber is the one accent. */
+:root {
+  --ink: #0e1217;
+  --panel: #161b22;
+  --panel-2: #1d242d;
+  --panel-3: #252e39;
+  --line: #2a333e;
+  --text: #e7eaee;
+  --muted: #8f9aa7;
+  --accent: #f0a83a;
+  --accent-ink: #1a1206;
+  --red: #e5534b;
+  --amber: #e9a23b;
+  --green: #4cb782;
+  --grey: #8a94a0;
+  --glass: #7cc3e6;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-panel-3: var(--panel-3);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-red: var(--red);
+  --color-amber: var(--amber);
+  --color-green: var(--green);
+  --font-display: var(--font-chakra), "Barlow", system-ui, sans-serif;
+  --font-sans: var(--font-barlow), system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+html, body { height: 100%; }
+body { background: var(--ink); color: var(--text); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+::selection { background: var(--accent); color: var(--accent-ink); }
+
+/* component classes sit in a layer so Tailwind utilities (hidden, sm:flex, ...) can override them */
+@layer components {
+.font-display { font-family: var(--font-display); letter-spacing: 0.04em; }
+.eyebrow { font-family: var(--font-display); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 9px;
+  font-family: var(--font-display); font-weight: 600; font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text); cursor: pointer; transition: background .15s, border-color .15s; white-space: nowrap; }
+.btn:hover { background: var(--panel-3); }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn-primary:hover { background: #f5b552; }
+.btn-ghost { background: transparent; border-color: transparent; }
+.btn-ghost:hover { background: var(--panel-2); }
+.btn-sm { height: 30px; padding: 0 10px; font-size: 11px; border-radius: 7px; }
+.btn:focus-visible, .input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.input { width: 100%; height: 40px; padding: 0 12px; border-radius: 9px; background: var(--ink); border: 1px solid var(--line); color: var(--text); font-size: 15px; }
+textarea.input { height: auto; padding: 10px 12px; line-height: 1.45; }
+select.input { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 32px; }
+.input::placeholder { color: #5d6875; }
+.label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 999px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }
+
+.scroll-thin { scrollbar-width: thin; scrollbar-color: var(--panel-3) transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

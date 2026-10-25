@@ -293,14 +293,20 @@ def merge_rooms(plan: Plan, ids: list[str]):
 # ---- contractor answers -------------------------------------------------------------------------
 
 
-def apply_answers(plan: Plan, answers: dict[str, str]) -> Plan:
-    """answers: question id -> the contractor's answer (an option or free text / voice transcript)."""
+def apply_answers(plan: Plan, answers: dict[str, str], ai: bool | None = None) -> Plan:
+    """answers: question id -> the contractor's answer (an option or free text / voice transcript).
+    Without the AI, the common answers (one room or two, a room's name) are applied by rules."""
     for q in plan.questions:
         if q.id in answers:
             q.answer = answers[q.id]
     answered = [q for q in plan.questions if q.answer]
     if not answered:
         return plan
+    if ai is None:
+        ai = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+    if not ai:
+        from .heuristics import apply_answers_rules
+        return apply_answers_rules(plan, [q for q in answered if q.id in answers])
     content = [{"type": "text", "text": (
         "The contractor answered your questions about this plan. Apply the answers.\n\n"
         "Current rooms and items (JSON):\n" + json.dumps(dict(rooms=_room_summary(plan), items=_fixture_summary(plan)),
