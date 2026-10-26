@@ -39,8 +39,10 @@ export function AllJobsMap({ jobs }: { jobs: JobSummary[] }) {
             const pts = fp.flat();
             const x0 = Math.min(...pts.map((p) => p[0])), x1 = Math.max(...pts.map((p) => p[0]));
             const y0 = Math.min(...pts.map((p) => p[1])), y1 = Math.max(...pts.map((p) => p[1]));
-            const s = Math.min(1, (LOT * 0.62) / Math.max(x1 - x0, y1 - y0));
-            const tx = cx - ((x0 + x1) / 2) * s, ty = cy - ((y0 + y1) / 2) * s;
+            // the building fits the lot above the name and progress bar, so nothing it draws crosses the label
+            const top = cy - LOT / 2 + 2800, bottom = cy + LOT / 2 - 6600;
+            const s = Math.min(1, (LOT - 7000) / Math.max(1, x1 - x0), (bottom - top) / Math.max(1, y1 - y0));
+            const tx = cx - ((x0 + x1) / 2) * s, ty = (top + bottom) / 2 - ((y0 + y1) / 2) * s;
             content = (
               <g transform={`translate(${tx} ${ty}) scale(${s})`} filter="url(#bshadow)">
                 {fp.map((r, k) => <path key={k} d={"M" + r.map((p) => p.join(" ")).join("L") + "Z"} fill="#3a3a3c" stroke="#e9e1d1" strokeWidth={80 / s} />)}
@@ -50,7 +52,7 @@ export function AllJobsMap({ jobs }: { jobs: JobSummary[] }) {
             );
           } else {
             content = (
-              <g transform={`translate(${cx} ${cy})`}>
+              <g transform={`translate(${cx} ${cy - 1800})`}>
                 <path d="M-6000 2500 V-2000 L0 -6500 L6000 -2000 V2500 Z" fill="none" stroke="#f0ece3" strokeOpacity={0.5} strokeWidth={120} strokeDasharray="500 400" />
                 <text y={5600} textAnchor="middle" fill="var(--muted)" fontSize={1300} fontFamily="var(--font-mono)">{j.run_status === "running" || j.run_status === "queued" ? "Reading plan…" : "No plan yet"}</text>
               </g>
