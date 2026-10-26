@@ -17,6 +17,9 @@ import { SharedJob } from "@/components/share/SharedJob";
 import { newToken, shareView } from "@/lib/share";
 import { NewProject, type NewProjectResult } from "@/components/newjob/NewProject";
 
+/** when this preview was built, so an out-of-date copy in the browser cache is easy to spot */
+declare const __BUILD__: string;
+
 const now = () => new Date().toISOString();
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const plan = housePlan as unknown as Plan;
@@ -207,7 +210,7 @@ function App() {
         <button onClick={() => setPage("jobs")} aria-label="All jobs"><Logo size={20} /></button>
         <nav className="flex items-center gap-1 ml-2">{tab("jobs", "Jobs")}{tab("team", "Team")}</nav>
         <button onClick={() => setPage("new")} className={`btn btn-sm ${page === "new" ? "btn-ghost" : "btn-primary"} ml-auto`}>+ New project</button>
-        <span className="chip hidden md:inline-flex"><span>Preview · sample data, nothing is saved</span></span>
+        <span className="chip hidden md:inline-flex"><span>Preview · sample data, nothing is saved · build {__BUILD__}</span></span>
       </header>
       {page === "new" ? (
         <NewProject onCreate={created} onCancel={() => setPage("jobs")} />

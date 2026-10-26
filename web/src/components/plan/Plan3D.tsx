@@ -852,7 +852,7 @@ export function Plan3D(p: Props) {
         const q = planeHit(e, drag.plane);
         if (!q) return;
         const d = q.clone().sub(drag.start);
-        if (!drag.moved && d.length() < 0.01) return;
+        if (!drag.moved && down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6) return;
         drag.moved = true;
         if (drag.side) drag.obj.position.set(drag.origin.x + d.x, Math.max(0.03, drag.origin.y + d.y), drag.origin.z + d.z);
         else drag.obj.position.set(drag.origin.x + d.x, drag.origin.y, drag.origin.z + d.z);

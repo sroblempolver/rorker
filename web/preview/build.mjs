@@ -12,7 +12,7 @@ fs.mkdirSync(path.join(here, "dist"), { recursive: true });
 
 const js = await esbuild.build({
   entryPoints: [path.join(here, "main.tsx")], bundle: true, minify: true, write: false, format: "iife", target: "es2020",
-  jsx: "automatic", define: { "process.env.NODE_ENV": '"production"' }, loader: { ".json": "json" },
+  jsx: "automatic", define: { "process.env.NODE_ENV": '"production"', __BUILD__: JSON.stringify(new Date().toISOString().slice(5, 16).replace("T", " ") + " UTC") }, loader: { ".json": "json" },
   alias: { "@": path.join(root, "src"), "next/navigation": path.join(here, "shims/navigation.ts"), "next/link": path.join(here, "shims/link.tsx") },
 });
 const cssFile = path.join(here, "dist", "styles.css");
