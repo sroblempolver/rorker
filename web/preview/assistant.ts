@@ -14,13 +14,14 @@ function backend(d: WorkspaceData, api: WorkspaceApi): AssistantBackend {
   return {
     me: { name: "Company owner", role: "admin", memberId: d.me, company: "Demo Builders" },
     async listJobs() { return [d.job]; },
-    async loadJob(id) { return mine(id) ? { job: d.job, plan: d.plan?.data ?? null, pins: d.pins, stages: d.stages, items: d.items, states: d.states } : null; },
+    async loadJob(id) { return mine(id) ? { job: d.job, plan: d.plan?.data ?? null, edits: d.edits, pins: d.pins, stages: d.stages, items: d.items, states: d.states } : null; },
     async members() { return d.members; },
     async createPin(id, input) { if (!mine(id)) throw new Error("Job not found."); return api.createPin(input); },
     async updatePin(id, pin, input) { if (!mine(id)) throw new Error("Job not found."); await api.updatePin(pin, input); },
     async setStageStatus(id, stage, status) { if (!mine(id)) throw new Error("Job not found."); await api.setStageStatus(stage, status); },
     async setElementState(id, el, status) { if (!mine(id)) throw new Error("Job not found."); await api.setElementState(el, status); },
     async createItem(id, input) { if (!mine(id)) throw new Error("Job not found."); return api.createItem(input); },
+    async saveEdit(id, el, data) { if (!mine(id)) throw new Error("Job not found."); await api.saveElementEdit(el, data); },
   };
 }
 

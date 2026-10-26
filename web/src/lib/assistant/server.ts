@@ -12,11 +12,11 @@ export function serverBackend(s: Session & { company: NonNullable<Session["compa
     if (cache.has(jobId)) return cache.get(jobId)!;
     const job = await repo.getJob(jobId);
     if (!job || job.company_id !== s.company.id) { cache.set(jobId, null); return null; }
-    const [plan, pins, stages, items, states] = await Promise.all([
+    const [plan, pins, stages, items, states, edits] = await Promise.all([
       job.current_plan_id ? repo.getPlan(job.current_plan_id) : Promise.resolve(null),
-      repo.listPins(jobId), repo.listStages(jobId), repo.listItems(jobId), repo.listElementStates(jobId),
+      repo.listPins(jobId), repo.listStages(jobId), repo.listItems(jobId), repo.listElementStates(jobId), repo.listElementEdits(jobId),
     ]);
-    const b: JobBundle = { job, plan: plan?.data ?? null, pins, stages, items, states };
+    const b: JobBundle = { job, plan: plan?.data ?? null, edits, pins, stages, items, states };
     cache.set(jobId, b);
     return b;
   };
@@ -47,5 +47,6 @@ export function serverBackend(s: Session & { company: NonNullable<Session["compa
     },
     async setElementState(jobId, elementId, status) { await own(jobId); await repo.setElementState(jobId, s.userId, elementId, status); },
     async createItem(jobId, input) { await own(jobId); return repo.createItem(jobId, s.userId, input); },
+    async saveEdit(jobId, elementId, data) { await own(jobId); await repo.saveElementEdit(jobId, s.userId, elementId, data); },
   };
 }

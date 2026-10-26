@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementStatus } from "@/lib/plan/types";
 import type { ElementEdit, ItemInput, JobItem, Pin, PinInput, PinKind } from "@/lib/data/types";
 import { today } from "@/lib/dates";
+import { PlanChat } from "./PlanChat";
 import { applyEdits } from "@/lib/plan/edits";
 import { findElement } from "@/lib/plan/geometry";
 import { pinLevel } from "@/components/plan/pinLevel";
@@ -241,6 +242,17 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const currentStage = stages.find((s) => s.status === "active");
   const lastRun = runs[0];
 
+  // what the assistant knows about the screen: which job, where in it, what's picked
+  const askContext = useMemo(() => {
+    const fl = view && "floorId" in level ? view.floors.find((f) => f.id === level.floorId) : null;
+    const rm = fl && "roomId" in level ? fl.rooms.find((r) => r.id === level.roomId) : null;
+    const where = level.kind === "site" ? "the job overview" : level.kind === "exterior" ? "the outside of the building"
+      : [fl?.name, rm?.name, level.kind === "wall" ? `wall ${level.sideKey}` : null].filter(Boolean).join(", ");
+    const el = view && selected ? findElement(view, selected) : null;
+    const sel = el ? `${selected} (${("name" in el.el && el.el.name) || el.kind})` : selectedPin ? `pin ${pins.find((p) => p.id === selectedPin)?.number ?? ""}`.trim() : null;
+    return { jobId: job.id, jobName: job.name, where, selected: sel };
+  }, [view, level, selected, selectedPin, pins, job.id, job.name]);
+
   const panel = useMemo(() => {
     if (tab === "pins") {
       if (draft && !draft.at) return <PinForm key={`${draft.elementId}${draft.anchor?.x}${draft.preset?.title}`} plan={view} draft={draft} preset={draft.preset} stages={stages} onCancel={() => setDraft(null)} onCreate={async (input) => { await createPin(input); }} />;
@@ -264,6 +276,11 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         onMove={(id, d) => stageOp(() => api.moveStage(id, d))} />
     );
     if (tab === "plan") return (
+      <div className="space-y-3">
+      {api.ask && view && (
+        <PlanChat send={api.ask} context={askContext} onChanged={api.afterAssistant}
+          rooms={view.floors.flatMap((f) => f.rooms.map((r) => (view.floors.length > 1 ? `${r.name} (${f.name})` : r.name)))} />
+      )}
       <PlanPanel plan={plan} runs={runs} aiAvailable={data.aiAvailable} onShow={showElements}
         onUpload={async (f) => { await api.uploadPlan(f); const r = await api.refreshPlan(); setRuns(r.runs); say("Reading the plan. This takes a minute or two."); }}
         onAnswer={async (a) => {
@@ -274,6 +291,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
           if (r.plan) setPlan(r.plan);
           say("Thanks, the plan is being updated");
         }} />
+      </div>
     );
     if (!plan || !view) return null;
     return <Inspector plan={view} level={level} selected={selected} states={states} pins={pins} stages={stages} setLevel={setLevel}
@@ -281,7 +299,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       edits={edits} onSaveEdit={saveEdit} items={items} selectedItem={selectedItem} onSelectItem={selectItem}
       onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind} />;
   }, [tab, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, say, showPin, updatePin, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
-    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter]);
+    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext]);
 
   // where the quick card sits inside the map, kept on screen
   const quick = (() => {
@@ -292,16 +310,6 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     return { left, top };
   })();
 
-  // what the assistant knows about the screen: which job, where in it, what's picked
-  const askContext = useMemo(() => {
-    const fl = view && "floorId" in level ? view.floors.find((f) => f.id === level.floorId) : null;
-    const rm = fl && "roomId" in level ? fl.rooms.find((r) => r.id === level.roomId) : null;
-    const where = level.kind === "site" ? "the job overview" : level.kind === "exterior" ? "the outside of the building"
-      : [fl?.name, rm?.name, level.kind === "wall" ? `wall ${level.sideKey}` : null].filter(Boolean).join(", ");
-    const el = view && selected ? findElement(view, selected) : null;
-    const sel = el ? `${selected} (${("name" in el.el && el.el.name) || el.kind})` : selectedPin ? `pin ${pins.find((p) => p.id === selectedPin)?.number ?? ""}`.trim() : null;
-    return { jobId: job.id, jobName: job.name, where, selected: sel };
-  }, [view, level, selected, selectedPin, pins, job.id, job.name]);
 
   const tabBtn = (t: Tab, label: string, badge?: number) => (
     <button key={t} onClick={() => { setTab(t); if (t !== "pins") setDraft(null); }} aria-selected={tab === t} role="tab"

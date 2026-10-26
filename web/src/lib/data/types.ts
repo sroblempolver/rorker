@@ -39,7 +39,15 @@ export interface PlanRow { id: string; job_id: string; version: number; data: Pl
 export interface ElementEdit {
   dx?: number; dy?: number; dz?: number; name?: string; kind?: string; type?: string; width?: number; depth?: number;
   height_mm?: number; spec?: string; product_name?: string; product_url?: string; notes?: string;
+  /** which way its front faces, degrees on the plan (0 east, 90 south, 180 west, -90 north) */
+  facing?: number;
+  /** taken out of the plan (it stays in the drawing; reset brings it back) */
+  removed?: boolean;
+  /** an object added in the app, not in the drawing: the edit's key is its new id */
+  added?: AddedObject;
 }
+/** Something added to the plan in the app (furniture, an appliance): where it stands, its size and front. */
+export interface AddedObject { floor_id: string; room_id: string | null; kind: string; name: string; center: [number, number]; width: number; depth: number; facing: number | null; height_mm?: number | null }
 
 export type ItemKind = "outlet" | "switch" | "light" | "data" | "plumbing" | "vent" | "thermostat" | "mount" | "other";
 /** A small thing placed on a wall (outlet, switch, light ...): dragged and edited in the wall view.

@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
 
   try {
     const res = await new Anthropic({ apiKey: API_KEY() }).messages.create({
-      model: MODEL, max_tokens: 4000, thinking: { type: "adaptive" },
+      model: MODEL, max_tokens: 12000, thinking: { type: "adaptive" },
       system: instructions(me, ctx), tools: TOOLS as Anthropic.Tool[], messages,
     });
     return json({ content: res.content, stop_reason: res.stop_reason });

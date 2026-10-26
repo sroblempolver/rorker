@@ -7,11 +7,13 @@
 // down to what their role may see. Employees never get client contact details or team phone numbers
 // and emails. Nothing is fetched that the person couldn't see in the app themselves.
 import type { ElementStatus, Plan } from "@/lib/plan/types";
-import type { ItemInput, ItemKind, Job, JobItem, JobStage, Member, MemberRole, Pin, PinInput, PinKind, PinStatus, StageStatus } from "@/lib/data/types";
-import { elementLabel, findElement, labelPoint, roomOf, roomSides } from "@/lib/plan/geometry";
+import type { ElementEdit, ItemInput, ItemKind, Job, JobItem, JobStage, Member, MemberRole, Pin, PinInput, PinKind, PinStatus, StageStatus } from "@/lib/data/types";
+import { bboxOf, elementLabel, findElement, labelPoint, roomOf, roomSides } from "@/lib/plan/geometry";
+import { applyEdits, fixtureSize } from "@/lib/plan/edits";
 import { today } from "@/lib/dates";
 
-export interface JobBundle { job: Job; plan: Plan | null; pins: Pin[]; stages: JobStage[]; items: JobItem[]; states: { element_id: string; status: ElementStatus }[] }
+/** `plan` is the plan as drawn; `edits` are the changes made in the app on top of it (moved, added, removed). */
+export interface JobBundle { job: Job; plan: Plan | null; edits: Record<string, ElementEdit>; pins: Pin[]; stages: JobStage[]; items: JobItem[]; states: { element_id: string; status: ElementStatus }[] }
 
 export interface AssistantBackend {
   /** who is asking: the assistant acts as them, with their role */
@@ -25,6 +27,8 @@ export interface AssistantBackend {
   setStageStatus(jobId: string, stageId: string, status: StageStatus): Promise<void>;
   setElementState(jobId: string, elementId: string, status: ElementStatus | null): Promise<void>;
   createItem(jobId: string, input: ItemInput): Promise<JobItem>;
+  /** save the whole change for one plan element (null puts it back as drawn, or deletes an added one) */
+  saveEdit(jobId: string, elementId: string, data: ElementEdit | null): Promise<void>;
 }
 
 /** Where the person is in the app when they ask, so "this job" and "here" mean something. */
@@ -35,6 +39,9 @@ export interface ToolSpec { name: string; description: string; input_schema: { t
 const JOB = { type: "string", description: "The job: its id, or its name as the person says it (\"Hadley Road\"). Leave out for the job they're looking at." };
 const PIN_KINDS = ["task", "issue", "note", "material"];
 const ITEM_KINDS = ["outlet", "switch", "light", "data", "plumbing", "vent", "thermostat", "mount", "other"];
+const OBJECT_KINDS = ["base_cabinet", "wall_cabinet", "tall_cabinet", "kitchen_sink", "dishwasher", "range", "cooktop", "oven", "range_hood", "fridge", "island", "toilet", "washbasin", "vanity", "bathtub", "shower", "bed", "sofa", "armchair", "chair", "table", "dining_table", "desk", "nightstand", "sideboard", "wardrobe", "bookshelf", "washing_machine", "dryer", "water_heater", "fireplace", "tv", "lamp", "plant", "other"];
+const SIDE = { type: "string", enum: ["north", "south", "east", "west"] };
+const FACING: Record<string, number> = { east: 0, south: 90, west: 180, north: -90 };
 
 export const TOOLS: ToolSpec[] = [
   { name: "list_jobs", description: "List the jobs this person can see: id, name, address, status, open pins and current stage.", input_schema: { type: "object", properties: {} } },
@@ -68,6 +75,21 @@ export const TOOLS: ToolSpec[] = [
     name: "whats_around", description: "What is next to an object or door/window: the things on its left and right (as seen standing in front of it, facing it, the way someone uses it), in front of it and behind it, with distances. Use it for \"the cabinet right of the stove\" or \"the outlet left of the sink\". Returns ids.",
     input_schema: { type: "object", properties: { job: JOB, element_id: { type: "string", description: "The reference object's id, from find_in_plan" } }, required: ["element_id"] },
   },
+  { name: "room_layout", description: "A room's layout for changing what's in it: its inside edges (x grows east, y grows south, in mm), its walls with the doors and windows on them, and every object in it with id, centre, size and the way it faces. Call it before adding or moving things.", input_schema: { type: "object", properties: { job: JOB, room: { type: "string", description: "Room id or name" } }, required: ["room"] } },
+  {
+    name: "add_objects", description: "Add furniture, appliances or fixtures to a room of the plan, each at a centre point in plan mm, at its real size (width across its front, depth front to back), with the way its front faces. Pieces are kept inside the room.",
+    input_schema: { type: "object", properties: { job: JOB, room: { type: "string" }, objects: { type: "array", maxItems: 30, items: { type: "object", properties: {
+      kind: { type: "string", enum: OBJECT_KINDS }, name: { type: "string", description: "e.g. \"Queen bed\"" }, x: { type: "number" }, y: { type: "number" },
+      width_mm: { type: "number" }, depth_mm: { type: "number" }, facing: { ...SIDE, description: "The way its front faces (the foot of a bed, the seat of a sofa)" }, height_mm: { type: "number" },
+    }, required: ["kind", "x", "y", "width_mm", "depth_mm"] } } }, required: ["room", "objects"] },
+  },
+  {
+    name: "change_object", description: "Move, turn, resize or rename one object in the plan. Move by mm east/south (negative for west/north), or to a new centre.",
+    input_schema: { type: "object", properties: { job: JOB, element_id: { type: "string" }, move_east_mm: { type: "number" }, move_south_mm: { type: "number" }, to_x: { type: "number" }, to_y: { type: "number" },
+      facing: SIDE, width_mm: { type: "number" }, depth_mm: { type: "number" }, height_mm: { type: "number" }, name: { type: "string" } }, required: ["element_id"] },
+  },
+  { name: "remove_objects", description: "Take objects out of the plan by id (furniture, appliances, fixtures). Ones from the drawing can be brought back with Reset.", input_schema: { type: "object", properties: { job: JOB, element_ids: { type: "array", items: { type: "string" } } }, required: ["element_ids"] } },
+  { name: "rename_room", description: "Rename a room or change its type.", input_schema: { type: "object", properties: { job: JOB, room: { type: "string" }, name: { type: "string" }, type: { type: "string", enum: ["kitchen", "bathroom", "wc", "bedroom", "living", "dining", "family", "study", "office", "hallway", "foyer", "stair_hall", "laundry", "utility", "closet", "garage", "storage", "balcony", "porch", "terrace", "other"] } }, required: ["room"] } },
   { name: "team", description: "The team: names, titles and roles (and contact details for admins).", input_schema: { type: "object", properties: {} } },
 ];
 
@@ -80,6 +102,8 @@ export function instructions(me: AssistantBackend["me"], ctx: AssistantContext):
     "Never give out information beyond what the tools return for this person. Don't reveal anything about other companies, and don't repeat personal contact details unless this person is an admin and asked for them.",
     "Never say which AI model or company powers you; you are the Rorker assistant.",
     "Where things are: left and right of an object always mean as seen standing in front of it, facing it (the way you'd use a stove, a sink or a cabinet), not as seen on the plan. \"The cabinet right of the stove\" is the one at your right hand when you face the stove. Use whats_around to find it. Above and below mean height on the wall. North, south, east and west follow the plan (north is up). If two things still fit, ask one short question naming them by where they are.",
+    "Changing the plan: you can add, move, turn, resize and remove furniture, appliances and fixtures, and rename rooms (room_layout first, then add_objects, change_object, remove_objects, rename_room). Walls, rooms' shapes, doors and windows can't be changed here yet: say so in one sentence and offer to add a task pin for it.",
+    "When adding furniture use standard sizes (width x depth, mm): double bed 1400x2000, queen 1600x2000, king 1800x2000, single 900x2000, nightstand 450x400, wardrobe 1200x600, 3-seat sofa 2100x900, 2-seat sofa 1600x900, armchair 850x850, coffee table (table) 1100x600, TV unit (sideboard) 1600x450 with a tv on it, dining table 1600x900 for 6 or 1200x800 for 4 with a chair (450x450) at each place, desk 1200x600 with a chair, bookshelf 800x300, lamp and plant 400x400; kitchen base cabinets 600 deep, fridge 700x700, range 600x600, dishwasher 600x600; toilet 400x650, basin 600x450, shower 900x900, bathtub 1700x700, washing machine and dryer 600x600. Place things the way a designer would: beds with the headboard against a solid wall, facing into the room, a nightstand each side of a double; sofas facing the TV or fireplace; tables centred with chairs around; pieces against a wall sit 20 mm off its inside edge; keep about 900 mm of walking space and never block a door or doorway. Only add what fits; leave other things as they are unless asked.",
     `Today is ${today()}.`,
     ctx.jobId ? `They are looking at the job "${ctx.jobName ?? ctx.jobId}" (id ${ctx.jobId})${ctx.where ? `, at ${ctx.where}` : ""}${ctx.selected ? `, with ${ctx.selected} selected` : ""}. "This job", "here" and "this" refer to that.` : "They are on the jobs list.",
   ].join("\n");
@@ -168,7 +192,8 @@ async function resolveJob(b: AssistantBackend, ctx: AssistantContext, ref: unkno
   if (!id) throw new Error("Which job? Use list_jobs and pass its id.");
   const bundle = await b.loadJob(id);
   if (!bundle) throw new Error("That job doesn't exist or you can't open it.");
-  return bundle;
+  // everything reads the plan as it is now, with the app's changes on top of the drawing
+  return bundle.plan ? { ...bundle, plan: applyEdits(bundle.plan, bundle.edits ?? {}) } : bundle;
 }
 
 function where(plan: Plan | null, p: Pin): string {
@@ -194,6 +219,21 @@ function matchMembers(members: Member[], names: unknown): { ids: string[]; unkno
     if (m) ids.push(m.id); else unknown.push(n);
   }
   return { ids: [...new Set(ids)], unknown };
+}
+
+/** A room by id or name ("kitchen", "Bedroom 2", "G-R04"). */
+function findRoom(plan: Plan | null, ref: unknown): { f: Plan["floors"][number]; r: Plan["floors"][number]["rooms"][number] } {
+  if (!plan) throw new Error("This job has no plan yet.");
+  const raw = str(ref);
+  if (!raw) throw new Error("Which room? Give its name or id.");
+  // "Closet (Level 1)": the room's name, then which floor
+  const m = /^(.*?)\s*\(([^)]+)\)\s*$/.exec(raw);
+  const onFloor = m ? plan.floors.filter((f) => norm(f.name) === norm(m[2])) : [];
+  const want = norm(onFloor.length ? m![1] : raw);
+  const all = (onFloor.length ? onFloor : plan.floors).flatMap((f) => f.rooms.map((r) => ({ f, r })));
+  const hit = all.find((x) => x.r.id.toLowerCase() === raw.toLowerCase()) ?? all.find((x) => norm(x.r.name) === want) ?? all.find((x) => norm(x.r.name).includes(want) || (want && want.includes(norm(x.r.name))));
+  if (!hit) throw new Error(`No room like "${raw}". Rooms: ${all.map((x) => `${x.r.name} (${x.r.id}, ${x.f.name})`).join(", ")}.`);
+  return hit;
 }
 
 const date = (v: unknown) => { const s = str(v); if (!s) return undefined; if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error("Dates are YYYY-MM-DD."); return s; };
@@ -330,6 +370,99 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
       const r = around(d.plan, str(input.element_id));
       if (!r) throw new Error("Give the id of an object, door or window from find_in_plan.");
       return r;
+    }
+    case "room_layout": {
+      const d = await resolveJob(b, ctx, input.job);
+      const { f, r } = findRoom(d.plan, input.room);
+      const [x0, y0, x1, y1] = bboxOf(r.polygon);
+      return {
+        room: `${r.name} (${r.id})`, floor: f.name, type: r.type,
+        inside_edges_mm: { west_x: x0 + 60, east_x: x1 - 60, north_y: y0 + 60, south_y: y1 - 60 },
+        corners_mm: r.polygon,
+        walls: roomSides(f, r).map((s) => ({
+          wall: s.label, runs_from: s.a.map(Math.round), to: s.b.map(Math.round), length_mm: Math.round(s.length),
+          doors_and_windows: s.segments.filter((g) => g.kind === "opening").map((g) => ({ id: g.id, what: (g.el as { kind: string }).kind.replace(/_/g, " "), from_mm: Math.round(g.from), to_mm: Math.round(g.to) })),
+        })),
+        objects: f.fixtures.filter((x) => x.room_id === r.id && x.kind !== "door_leaf" && x.kind !== "part").map((x) => {
+          const n = frontOf(f, x), sz = fixtureSize(x);
+          return { id: x.id, what: x.name, kind: x.kind, centre: x.center.map(Math.round), width_mm: Math.round(sz.width), depth_mm: Math.round(sz.depth), faces: heading(n[0], n[1]), ...(x.elevation_mm ? { up_on_wall: true } : {}) };
+        }),
+      };
+    }
+    case "add_objects": {
+      const d = await resolveJob(b, ctx, input.job);
+      const { f, r } = findRoom(d.plan, input.room);
+      const list = Array.isArray(input.objects) ? (input.objects as Record<string, unknown>[]).slice(0, 30) : [];
+      if (!list.length) throw new Error("Give at least one object.");
+      const [rx0, ry0, rx1, ry1] = bboxOf(r.polygon);
+      const taken = new Set(Object.keys(d.edits ?? {}).concat(f.fixtures.map((x) => x.id)));
+      let n = 1;
+      const added: string[] = [];
+      for (const o of list) {
+        const kind = str(o.kind);
+        if (!OBJECT_KINDS.includes(kind)) throw new Error(`kind must be one of ${OBJECT_KINDS.join(", ")}.`);
+        const width = Math.max(150, Number(o.width_mm) || 600), depth = Math.max(150, Number(o.depth_mm) || 600);
+        const facing = str(o.facing) in FACING ? FACING[str(o.facing)] : null;
+        const across = facing === 0 || facing === 180;
+        const hx = (across ? depth : width) / 2, hy = (across ? width : depth) / 2;
+        // kept inside the room, clear of the wall faces, when it fits
+        const fit = (v: number, lo: number, hi: number) => (lo <= hi ? Math.min(hi, Math.max(lo, v)) : (lo + hi) / 2);
+        const x = Math.round(fit(Number(o.x) || (rx0 + rx1) / 2, rx0 + 60 + hx, rx1 - 60 - hx));
+        const y = Math.round(fit(Number(o.y) || (ry0 + ry1) / 2, ry0 + 60 + hy, ry1 - 60 - hy));
+        while (taken.has(`${f.id}-N${String(n).padStart(2, "0")}`)) n++;
+        const id = `${f.id}-N${String(n).padStart(2, "0")}`;
+        taken.add(id);
+        const name = str(o.name) || kind.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+        await b.saveEdit(d.job.id, id, { added: { floor_id: f.id, room_id: r.id, kind, name, center: [x, y], width, depth, facing, height_mm: Number(o.height_mm) > 0 ? Number(o.height_mm) : null } });
+        added.push(`${name} (${id})`);
+      }
+      changed.any = true;
+      return { added, room: r.name };
+    }
+    case "change_object": {
+      const d = await resolveJob(b, ctx, input.job);
+      const id = str(input.element_id);
+      const hit = d.plan?.floors.flatMap((fl) => fl.fixtures).find((x) => x.id === id);
+      if (!hit) throw new Error(`No object ${id} in this plan. Use find_in_plan or room_layout.`);
+      const prev = d.edits?.[id] ?? {};
+      const next: ElementEdit = { ...prev };
+      let dx = Number(input.move_east_mm) || 0, dy = Number(input.move_south_mm) || 0;
+      if (input.to_x != null) dx = Number(input.to_x) - hit.center[0];
+      if (input.to_y != null) dy = Number(input.to_y) - hit.center[1];
+      if (dx || dy) { next.dx = Math.round((prev.dx ?? 0) + dx); next.dy = Math.round((prev.dy ?? 0) + dy); }
+      if (str(input.facing) in FACING) next.facing = FACING[str(input.facing)];
+      if (Number(input.width_mm) > 0) next.width = Math.round(Number(input.width_mm));
+      if (Number(input.depth_mm) > 0) next.depth = Math.round(Number(input.depth_mm));
+      if (Number(input.height_mm) > 0) next.height_mm = Math.round(Number(input.height_mm));
+      if (str(input.name)) next.name = str(input.name);
+      await b.saveEdit(d.job.id, id, next);
+      changed.any = true;
+      return { changed: `${hit.name} (${id})`, ...(dx || dy ? { moved_east_mm: Math.round(dx), moved_south_mm: Math.round(dy) } : {}), ...(next.facing != null && input.facing ? { faces: str(input.facing) } : {}) };
+    }
+    case "remove_objects": {
+      const d = await resolveJob(b, ctx, input.job);
+      const ids = Array.isArray(input.element_ids) ? input.element_ids.map(str).filter(Boolean) : [];
+      const all = d.plan?.floors.flatMap((fl) => fl.fixtures) ?? [];
+      const gone: string[] = [], missing: string[] = [];
+      for (const id of ids.slice(0, 60)) {
+        const x = all.find((q) => q.id === id);
+        if (!x) { missing.push(id); continue; }
+        const prev = d.edits?.[id];
+        await b.saveEdit(d.job.id, id, prev?.added ? null : { ...prev, removed: true });
+        gone.push(`${x.name} (${id})`);
+      }
+      if (gone.length) changed.any = true;
+      return { removed: gone, ...(missing.length ? { not_found: missing } : {}) };
+    }
+    case "rename_room": {
+      const d = await resolveJob(b, ctx, input.job);
+      const { r } = findRoom(d.plan, input.room);
+      const next: ElementEdit = { ...(d.edits?.[r.id] ?? {}) };
+      if (str(input.name)) next.name = str(input.name);
+      if (str(input.type)) next.type = str(input.type);
+      await b.saveEdit(d.job.id, r.id, next);
+      changed.any = true;
+      return { room: r.id, name: next.name ?? r.name, type: next.type ?? r.type };
     }
     case "team": {
       const ms = await b.members();

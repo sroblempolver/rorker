@@ -10,6 +10,7 @@ import type { Plan } from "@/lib/plan/types";
 import { JOB_TYPES } from "@/lib/data/templates";
 import { PlanViewer, type Level } from "@/components/plan/PlanViewer";
 import type { ColorMode } from "@/components/plan/FloorCanvas";
+import { FURNISH } from "@/lib/plan/furnish";
 import { MicButton, speak, stopSpeaking, useDictation } from "@/components/voice/speech";
 
 export interface NewProjectResult {
@@ -275,15 +276,6 @@ function Review({ project, source, onCreate, onRestart, check }: { project: Inta
 
 // one-tap asks for the inside of the house; none of them may move a wall, room, door or window
 const KEEP = " Don't change any walls, rooms, doors or windows.";
-const ACTIONS: { label: string; ask: (where: string) => string }[] = [
-  { label: "Furnish it", ask: (w) => `Furnish ${w} with the usual furniture for each room.` },
-  { label: "Kitchen appliances", ask: (w) => `Add the kitchen appliances that are missing${w === "the whole house" ? "" : ` in ${w}`}: fridge, range or cooktop with oven, range hood, dishwasher, sink.` },
-  { label: "Bathroom fixtures", ask: (w) => `Add the bathroom fixtures that are missing${w === "the whole house" ? " in every bathroom and WC" : ` in ${w}`}: toilet, basin or vanity, and a shower or bathtub where there's room.` },
-  { label: "Laundry", ask: (w) => `Add a washing machine and dryer${w === "the whole house" ? " in the laundry or utility room, or wherever makes sense" : ` in ${w}`}.` },
-  { label: "Home office", ask: (w) => `Set up ${w === "the whole house" ? "the study or a spare room" : w} as a home office: desk, chair, bookshelf and a lamp.` },
-  { label: "Fewer pieces", ask: (w) => `Make ${w} lighter: keep only the main furniture pieces and remove the extras.` },
-  { label: "Clear the furniture", ask: (w) => `Remove all the furniture from ${w} (beds, sofas, tables, chairs, desks, shelves, lamps, plants, TV). Keep the kitchen, bathroom and laundry fixtures.` },
-];
 
 function Check({ lines, busy, questions, plan, rooms, err, onSend, onStop }: {
   lines: Line[]; busy: boolean; questions: IntakeQuestion[] | null; plan: { text: string; options?: string[] }[]; rooms: string[]; err: string | null;
@@ -348,7 +340,7 @@ function Check({ lines, busy, questions, plan, rooms, err, onSend, onStop }: {
             </select>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {ACTIONS.map((a) => <button key={a.label} className="chip !h-7" onClick={() => onSend(a.ask(where ? `the ${where}` : "the whole house").replace("the the ", "the ") + KEEP, false)}>{a.label}</button>)}
+            {FURNISH.map((a) => <button key={a.label} className="chip !h-7" onClick={() => onSend(a.ask(where ? `the ${where}` : "the whole house").replace("the the ", "the ") + KEEP, false)}>{a.label}</button>)}
           </div>
         </div>
       )}

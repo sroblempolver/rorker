@@ -1,7 +1,28 @@
 // Changes made in the app (an object moved, resized, renamed, given a product link) applied on top of
 // the plan as read, so every view draws the job as it is now.
-import type { ElementEdit } from "@/lib/data/types";
+import type { AddedObject, ElementEdit } from "@/lib/data/types";
 import type { Fixture, Plan, Pt } from "./types";
+
+/** An object added in the app, as a plan fixture: width across its front, depth front to back. */
+export function addedFixture(id: string, a: AddedObject): Fixture {
+  const f = a.facing == null ? null : ((a.facing % 360) + 360) % 360;
+  const across = f != null && (f < 45 || f > 315 || (f > 135 && f < 225)); // facing east or west: width runs north-south
+  const hx = (across ? a.depth : a.width) / 2, hy = (across ? a.width : a.depth) / 2;
+  const [cx, cy] = a.center;
+  const bbox: [number, number, number, number] = [cx - hx, cy - hy, cx + hx, cy + hy];
+  return {
+    id, kind: a.kind, name: a.name, room_id: a.room_id, center: [cx, cy], bbox, rotation: 0, source: "app", source_ref: null, confidence: 1,
+    outline: [[[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]], [bbox[0], bbox[1]]]],
+    facing: a.facing, height_mm: a.height_mm ?? null,
+  };
+}
+
+/** Turn a fixture to face another way, keeping its centre, width and depth. */
+function turned(f: Fixture, facing: number): Fixture {
+  const { width, depth } = fixtureSize(f);
+  return { ...addedFixture(f.id, { floor_id: "", room_id: f.room_id, kind: f.kind, name: f.name, center: f.center, width, depth, facing, height_mm: f.height_mm }), ...pick(f), facing };
+}
+const pick = (f: Fixture) => ({ source: f.source, source_ref: f.source_ref, confidence: f.confidence, elevation_mm: f.elevation_mm, front: f.front, spec: f.spec, product_name: f.product_name, product_url: f.product_url, notes: f.notes });
 
 /** Which plan axis a fixture's width runs along: across its front when it faces somewhere. */
 export function widthAxis(f: Fixture): "x" | "y" {
@@ -16,7 +37,8 @@ export function fixtureSize(f: Fixture) {
   return { width: ax === "x" ? wx : wy, depth: ax === "x" ? wy : wx };
 }
 
-function editFixture(f: Fixture, e: ElementEdit): Fixture {
+function editFixture(f0: Fixture, e: ElementEdit): Fixture {
+  const f = e.facing != null && e.facing !== f0.facing ? turned(f0, e.facing) : f0;
   const out: Fixture = { ...f };
   const { width, depth } = fixtureSize(f);
   const ax = widthAxis(f);
@@ -54,7 +76,10 @@ export function applyEdits(plan: Plan, edits: Record<string, ElementEdit>): Plan
     ...plan,
     floors: plan.floors.map((fl) => ({
       ...fl,
-      fixtures: fl.fixtures.map((f) => (edits[f.id] ? editFixture(f, edits[f.id]) : f)),
+      fixtures: [
+        ...fl.fixtures.filter((f) => !edits[f.id]?.removed),
+        ...Object.entries(edits).filter(([, e]) => e.added?.floor_id === fl.id).map(([id, e]) => addedFixture(id, e.added!)),
+      ].map((f) => (edits[f.id] ? editFixture(f, edits[f.id]) : f)),
       rooms: fl.rooms.map((r) => {
         const e = edits[r.id];
         if (!e) return r;
