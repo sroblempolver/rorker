@@ -45,10 +45,12 @@ export interface WorkspaceApi {
   listShareLinks?(): Promise<ShareLink[]>;
   createShareLink?(input: ShareLinkInput): Promise<ShareLink>;
   revokeShareLink?(linkId: string): Promise<void>;
+  /** a tagged person's own link: all their tasks for this company, on every job; the same link every time */
+  personLink?(memberId: string): Promise<ShareLink>;
   /** the full address of a link, to copy */
   shareUrl?(token: string): string;
   /** the preview has no second page: show what the link shows, right here */
-  openShare?(token: string): void;
+  openShare?(token: string, pinId?: string): void;
   /** the Rorker assistant (chat + voice); left out, the Ask button is hidden */
   ask?: AssistantSend;
   /** the assistant changed something: fetch the job again (a new `data` prop follows) */

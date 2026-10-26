@@ -257,6 +257,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     if (tab === "pins") {
       if (draft && !draft.at) return <PinForm key={`${draft.elementId}${draft.anchor?.x}${draft.preset?.title}`} plan={view} draft={draft} preset={draft.preset} stages={stages} onCancel={() => setDraft(null)} onCreate={async (input) => { await createPin(input); }} />;
       if (pin) return <PinDetail pin={pin} plan={view} stages={stages} onBack={() => setSelectedPin(null)} onShow={() => showPin(pin.id)}
+        linkFor={data.canShare && api.personLink && api.shareUrl ? async (m) => `${api.shareUrl!((await api.personLink!(m)).token)}?pin=${pin.id}` : undefined}
+        openLinkFor={data.canShare && api.personLink && api.openShare ? (m) => { void api.personLink!(m).then((l) => api.openShare!(l.token, pin.id)); } : undefined}
         onUpdate={(input) => updatePin(pin.id, input)}
         onDelete={async () => { await api.deletePin(pin.id); setPins((l) => l.filter((x) => x.id !== pin.id)); setSelectedPin(null); }}
         loadComments={() => api.listComments(pin.id)}
@@ -298,7 +300,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       onSetStatus={setStatus} onSelect={select} onSelectPin={showPin} onAddPin={addPin}
       edits={edits} onSaveEdit={saveEdit} items={items} selectedItem={selectedItem} onSelectItem={selectItem}
       onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind} />;
-  }, [tab, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, say, showPin, updatePin, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
+  }, [tab, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, data.canShare, say, showPin, updatePin, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
     edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext]);
 
   // where the quick card sits inside the map, kept on screen

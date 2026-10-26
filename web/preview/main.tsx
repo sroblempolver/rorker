@@ -13,8 +13,8 @@ import { DEFAULT_TEMPLATES } from "@/lib/data/templates";
 import type { Company, JobItem, JobStage, JobSummary, Member, MemberInput, Pin, PinComment, PlanRow, ShareLink } from "@/lib/data/types";
 import type { Plan } from "@/lib/plan/types";
 import { previewAsk } from "./assistant";
-import { SharedJob } from "@/components/share/SharedJob";
-import { newToken, shareView } from "@/lib/share";
+import { SharedWorkView } from "@/components/share/SharedJob";
+import { newToken, shareWork } from "@/lib/share";
 import { NewProject, type NewProjectResult } from "@/components/newjob/NewProject";
 
 /** when this preview was built, so an out-of-date copy in the browser cache is easy to spot */
@@ -55,10 +55,13 @@ function seed(): WorkspaceData {
 
 const COMPANY: Company = { id: "demo", name: "Demo Builders", logo_url: null, brand_color: "#ff6a1f", phone: "(555) 010-2030", email: null, license_no: null, website: null, address: null };
 const shares: ShareLink[] = [];
-function sharedView(d: WorkspaceData, token: string) {
+/** What a link opens, across every job in the preview (a person's own link covers them all). */
+function sharedWork(jobs: WorkspaceData[], token: string, photos: Map<string, string[]>) {
   const l = shares.find((x) => x.token === token);
-  return l ? shareView(l, { company: COMPANY, job: d.job, plan: d.plan?.data ?? null, edits: d.edits, items: d.items, pins: d.pins, stages: d.stages, members: d.members }) : null;
+  return l ? shareWork(l, COMPANY, jobs.map((d) => ({ company: COMPANY, job: d.job, plan: d.plan?.data ?? null, edits: d.edits, items: d.items, pins: d.pins, stages: d.stages, members: d.members, photos: Object.fromEntries(d.pins.map((p) => [p.id, photos.get(p.id) ?? []])) }))) : null;
 }
+/** photos posted on pins in the preview, by pin id, so a shared link can show them */
+const pinPhotos = new Map<string, string[]>();
 
 function memoryApi(d: WorkspaceData): WorkspaceApi {
   const comments = new Map<string, PinComment[]>();
@@ -85,6 +88,7 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
     async listComments(id) { return comments.get(id) ?? []; },
     async addComment(id, body, photos) {
       const list = [...(comments.get(id) ?? []), { id: uid(), pin_id: id, author_id: null, author_name: "You", body: body || null, photos: photos.map((f) => URL.createObjectURL(f)), created_at: now() }];
+      pinPhotos.set(id, list.flatMap((c) => c.photos));
       comments.set(id, list);
       return list;
     },
@@ -116,6 +120,15 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
       return l;
     },
     async revokeShareLink(id) { const l = shares.find((x) => x.id === id); if (l) l.revoked_at = now(); },
+    async personLink(memberId) {
+      const have = shares.find((l) => !l.job_id && l.member_id === memberId && !l.revoked_at);
+      if (have) return have;
+      const m = d.members.find((x) => x.id === memberId);
+      if (!m) throw new Error("That person isn't on your team.");
+      const l: ShareLink = { id: uid(), job_id: null, company_id: COMPANY.id, token: newToken(), label: m.title ? `${m.full_name} (${m.title})` : m.full_name, member_id: memberId, pin_ids: [], expires_at: null, revoked_at: null, created_at: now() };
+      shares.unshift(l);
+      return l;
+    },
     shareUrl: (token) => `https://app.rorker.com/s/${token}`,
   };
 }
@@ -170,7 +183,7 @@ type Page = "jobs" | "job" | "team" | "shared" | "new";
 
 function App() {
   const [page, setPage] = useState<Page>("job");
-  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [share, setShare] = useState<{ token: string; pin?: string } | null>(null);
   const sample = useMemo(seed, []);
   const [jobs, setJobs] = useState<WorkspaceData[]>(() => [sample]);
   const [activeId, setActiveId] = useState(sample.job.id);
@@ -180,7 +193,7 @@ function App() {
   const current = useMemo(() => ({ ...active }), [active, ver]); // eslint-disable-line react-hooks/exhaustive-deps
   const api = useMemo(() => {
     const a = memoryApi(active);
-    return { ...a, ask: previewAsk(active, a), afterAssistant: () => setVer((n) => n + 1), openShare: (t: string) => { setShareToken(t); setPage("shared"); } };
+    return { ...a, ask: previewAsk(active, a), afterAssistant: () => setVer((n) => n + 1), openShare: (token: string, pin?: string) => { setShare({ token, pin }); setPage("shared"); } };
   }, [active]);
   const team = useMemo(() => teamApi(sample), [sample]);
   const [, bump] = useState(0);
@@ -214,9 +227,9 @@ function App() {
       </header>
       {page === "new" ? (
         <NewProject onCreate={created} onCancel={() => setPage("jobs")} />
-      ) : page === "shared" && shareToken ? (
+      ) : page === "shared" && share ? (
         <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">
-          {(() => { const v = sharedView(active, shareToken); return v ? <SharedJob view={v} onBack={() => setPage("job")} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
+          {(() => { const v = sharedWork(jobs, share.token, pinPhotos); return v ? <SharedWorkView key={share.token + share.pin} work={v} pin={share.pin} onBack={() => setPage("job")} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
         </div>
       ) : page === "team" ? (
         <div className="flex-1 overflow-y-auto">

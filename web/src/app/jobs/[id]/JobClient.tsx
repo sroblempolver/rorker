@@ -39,6 +39,7 @@ export function JobClient({ data }: { data: WorkspaceData }) {
     listShareLinks: () => unwrap(A.listShareLinks(id)),
     createShareLink: (input) => unwrap(A.createShareLink(id, input)),
     revokeShareLink: (link) => unwrap(A.revokeShareLink(id, link)),
+    personLink: (member) => unwrap(A.personLink(id, member)),
     shareUrl: (token) => `${window.location.origin}/s/${token}`,
     ask: askServer,
     afterAssistant: () => router.refresh(),

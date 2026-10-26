@@ -1,8 +1,10 @@
 "use client";
 // A job opened from a shared link: no sign-in, nothing to download. The plan (look around, step
-// inside, see their flags) and a list of only their tasks. Nothing can be changed from here.
-import { useMemo, useState } from "react";
-import type { Member, SharedView } from "@/lib/data/types";
+// inside, see their flags) and a list of only their tasks, with the photos posted on them. Nothing can
+// be changed from here. A person's own link covers every job they have tasks on, with a row of jobs to
+// switch between, and a link copied from one task opens on that task.
+import { useMemo, useState, type ReactNode } from "react";
+import type { Member, SharedView, SharedWork } from "@/lib/data/types";
 import type { ElementStatus } from "@/lib/plan/types";
 import { applyEdits } from "@/lib/plan/edits";
 import { PlanViewer, type Level } from "@/components/plan/PlanViewer";
@@ -14,10 +16,39 @@ import { PinBadge, PinRow, where } from "@/components/workspace/PinsPanel";
 
 const nothing = () => {};
 
-export function SharedJob({ view, onBack }: { view: SharedView; /** the preview's way back to the full app */ onBack?: () => void }) {
+/** Everything a link opens: one job, or the person's jobs with a row to switch between them. */
+export function SharedWorkView({ work, pin, onBack }: { work: SharedWork; /** open on this task (from a link copied off it) */ pin?: string | null; onBack?: () => void }) {
+  const start = work.jobs.find((v) => v.pins.some((p) => p.id === pin)) ?? work.jobs[0];
+  const [jobId, setJobId] = useState(start?.job.id ?? null);
+  const view = work.jobs.find((v) => v.job.id === jobId) ?? start;
+  if (!view) return (
+    <div className="h-full grid place-items-center p-6 text-center">
+      <div className="card p-8 max-w-sm">
+        <p className="font-display text-lg font-bold mb-1">Nothing for you right now</p>
+        <p className="text-muted text-sm">When {work.company.name} tags you on a task, it shows up here. Keep this link.</p>
+      </div>
+    </div>
+  );
+  const open = (v: SharedView) => v.pins.filter((p) => p.status !== "done").length;
+  const switcher = work.jobs.length > 1 ? (
+    <nav className="shrink-0 border-b border-line bg-panel-2 px-4 py-1.5 flex gap-1.5 overflow-x-auto scroll-thin" aria-label="Your jobs">
+      <span className="eyebrow !text-[11px] self-center shrink-0 mr-1">Your jobs</span>
+      {work.jobs.map((v) => (
+        <button key={v.job.id} onClick={() => setJobId(v.job.id)} aria-pressed={v.job.id === view.job.id}
+          className={`chip !h-7 shrink-0 ${v.job.id === view.job.id ? "!text-accent !border-accent" : ""}`}>
+          {v.job.name}<span className="font-mono text-[11px]">{open(v)}</span>
+        </button>
+      ))}
+    </nav>
+  ) : null;
+  return <SharedJob key={view.job.id} view={view} pin={view.job.id === start?.job.id ? pin : null} switcher={switcher} onBack={onBack} />;
+}
+
+export function SharedJob({ view, pin: firstPin, switcher, onBack }: { view: SharedView; pin?: string | null; switcher?: ReactNode; /** the preview's way back to the full app */ onBack?: () => void }) {
   const plan = useMemo(() => (view.plan ? applyEdits(view.plan, view.edits) : null), [view]);
-  const [level, setLevel] = useState<Level>({ kind: "site" });
-  const [pinId, setPinId] = useState<string | null>(null);
+  const startPin = view.pins.find((p) => p.id === firstPin) ?? null;
+  const [level, setLevel] = useState<Level>(() => (startPin && plan ? pinLevel(plan, startPin) : null) ?? { kind: "site" });
+  const [pinId, setPinId] = useState<string | null>(startPin?.id ?? null);
   const [colorMode, setColorMode] = useState<ColorMode>("type");
   const [view3d, setView3d] = useState(true);
   const [showDone, setShowDone] = useState(false);
@@ -48,6 +79,7 @@ export function SharedJob({ view, onBack }: { view: SharedView; /** the preview'
           {view.company.phone && <a href={`tel:${view.company.phone}`} className="btn btn-ghost btn-sm">Call {view.company.phone}</a>}
           {onBack && <button onClick={onBack} className="btn btn-ghost btn-sm">Back to the app</button>}
         </header>
+        {switcher}
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
           <div className="relative h-[58vh] shrink-0 lg:shrink lg:h-auto lg:flex-1 min-w-0 border-b lg:border-b-0 lg:border-r border-line">
             {plan ? (
@@ -76,6 +108,14 @@ export function SharedJob({ view, onBack }: { view: SharedView; /** the preview'
                     <div className="space-y-1">
                       <span className="eyebrow !text-[11px] block">Links</span>
                       {pin.links.map((l) => <a key={l.url} href={l.url} target="_blank" rel="noreferrer noopener" className="block text-[14px] text-accent underline truncate">{l.title || l.url}</a>)}
+                    </div>
+                  )}
+                  {!!view.photos[pin.id]?.length && (
+                    <div className="space-y-1">
+                      <span className="eyebrow !text-[11px] block">Photos</span>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {view.photos[pin.id].map((src) => <a key={src} href={src} target="_blank" rel="noreferrer noopener"><img src={src} alt="" className="w-full aspect-square object-cover rounded-[3px] border border-line" /></a>)}
+                      </div>
                     </div>
                   )}
                   {pin.tagged.length > 0 && <p className="text-[13px] text-muted">With {team.members.filter((m) => pin.tagged.includes(m.id)).map((m) => m.full_name).join(", ")}</p>}

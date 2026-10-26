@@ -85,10 +85,12 @@ export interface Member {
 }
 export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole }
 
-/** A no-sign-in link to one job for a team member or a one-time sub. It shows the plan and only the
- *  pins that are theirs: the ones tagged to `member_id` (now and later), plus any listed in `pin_ids`. */
+/** A no-sign-in link for a team member or a one-time sub. It shows the plan and only the pins that are
+ *  theirs: the ones tagged to `member_id` (now and later), plus any listed in `pin_ids`. With a `job_id`
+ *  it's one job; without, it's the person's own link: everything tagged to them on every job of this
+ *  company. Each person has one of those, kept for good, so it can be copied from any task they're on. */
 export interface ShareLink {
-  id: string; job_id: string; token: string; label: string; member_id: string | null; pin_ids: string[];
+  id: string; job_id: string | null; company_id?: string; token: string; label: string; member_id: string | null; pin_ids: string[];
   expires_at: string | null; revoked_at: string | null; created_at: string;
 }
 export interface ShareLinkInput { label: string; member_id?: string | null; pin_ids?: string[]; expires_at?: string | null }
@@ -101,6 +103,14 @@ export interface SharedView {
   pins: Pin[]; stages: { name: string; status: StageStatus }[];
   /** names only, for the people tagged on these pins */
   people: { id: string; full_name: string; title: string | null }[];
+  /** the photos posted on each of these pins, by pin id */
+  photos: Record<string, string[]>;
+}
+/** Everything one link opens: one job, or every job with something for that person. */
+export interface SharedWork {
+  label: string; expires_at: string | null;
+  company: SharedView["company"];
+  jobs: SharedView[];
 }
 
 export interface Session { userId: string; email: string | null; name: string | null; company: Company | null; role: MemberRole | null; memberId: string | null }
@@ -157,5 +167,7 @@ export interface Repo {
   createShareLink(jobId: string, userId: string, input: ShareLinkInput): Promise<ShareLink>;
   revokeShareLink(linkId: string): Promise<void>;
   /** No sign-in: the token is the key. Null when unknown, revoked or expired. */
-  getSharedView(token: string): Promise<SharedView | null>;
+  getSharedView(token: string): Promise<SharedWork | null>;
+  /** The person's own link (all their tasks for this company), made the first time it's asked for. */
+  personLink(companyId: string, userId: string, memberId: string): Promise<ShareLink>;
 }

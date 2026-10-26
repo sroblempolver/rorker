@@ -1,13 +1,15 @@
-// A shared job link: opens without signing in and shows only what the link was made for.
+// A shared link: opens without signing in and shows only what the link was made for. ?pin= opens on
+// that task (a person's link copied from a task).
 import type { Metadata } from "next";
 import { getRepo } from "@/lib/data";
-import { SharedJob } from "@/components/share/SharedJob";
+import { SharedWorkView } from "@/components/share/SharedJob";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Shared job · Rorker", robots: { index: false, follow: false } };
 
-export default async function SharedPage({ params }: { params: Promise<{ token: string }> }) {
+export default async function SharedPage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ pin?: string }> }) {
   const { token } = await params;
+  const { pin } = await searchParams;
   const view = await getRepo().getSharedView(token);
   if (!view) return (
     <main className="min-h-screen grid place-items-center p-6 bg-ink">
@@ -17,5 +19,5 @@ export default async function SharedPage({ params }: { params: Promise<{ token: 
       </div>
     </main>
   );
-  return <main className="h-screen flex flex-col bg-ink"><SharedJob view={view} /></main>;
+  return <main className="h-screen flex flex-col bg-ink"><SharedWorkView work={view} pin={pin ?? null} /></main>;
 }

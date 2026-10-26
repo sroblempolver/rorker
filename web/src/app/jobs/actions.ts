@@ -182,6 +182,14 @@ export async function revokeShareLink(jobId: string, linkId: string) {
   });
 }
 
+/** A tagged person's own link (all their tasks for this company), made the first time it's asked for. */
+export async function personLink(jobId: string, memberId: string) {
+  return attempt(async (): Promise<ShareLink> => {
+    const { session } = await requireJobAdmin(jobId);
+    return getRepo().personLink(session.company.id, session.userId, memberId);
+  });
+}
+
 async function commentsWithUrls(pinId: string): Promise<PinComment[]> {
   const repo = getRepo();
   const list = await repo.listComments(pinId);

@@ -1,6 +1,6 @@
 import "server-only";
 import { supabaseAdmin, supabaseServer, SUPABASE_URL } from "@/lib/supabase/server";
-import { newToken, shareView } from "@/lib/share";
+import { linkPins, newToken, shareWork, type ShareJobData } from "@/lib/share";
 import type { Plan } from "@/lib/plan/types";
 import type {
   Company, CompanyInput, ElementEdit, ElementState, ItemInput, Job, JobInput, JobItem, JobStage, JobSummary, Member, MemberInput, Pin, PinComment, PinInput,
@@ -310,13 +310,36 @@ export class SupabaseRepo implements Repo {
     const repo = new SupabaseRepo(true);
     const sb = await repo.db();
     const link = check(await sb.from("share_links").select("*").eq("token", token).maybeSingle()) as ShareLink | null;
-    const job = link ? await repo.getJob(link.job_id) : null;
-    if (!link || !job) return null;
-    const [company, plan, edits, items, pins, stages, members] = await Promise.all([
-      sb.from("companies").select("*").eq("id", job.company_id).single().then((r) => companyFromRow(check(r) as Row)),
-      job.current_plan_id ? repo.getPlan(job.current_plan_id) : Promise.resolve(null),
-      repo.listElementEdits(job.id), repo.listItems(job.id), repo.listPins(job.id), repo.listStages(job.id), repo.listMembers(job.company_id),
+    if (!link?.company_id) return null;
+    const jobs = (link.job_id
+      ? [await repo.getJob(link.job_id)].filter(Boolean)
+      : check(await sb.from("jobs").select("*").eq("company_id", link.company_id))) as Job[];
+    const [company, members] = await Promise.all([
+      sb.from("companies").select("*").eq("id", link.company_id).single().then((r) => companyFromRow(check(r) as Row)),
+      repo.listMembers(link.company_id),
     ]);
-    return shareView(link, { company, job, plan: plan?.data ?? null, edits, items, pins, stages, members });
+    const data: ShareJobData[] = await Promise.all(jobs.map(async (job) => {
+      const [plan, edits, items, pins, stages] = await Promise.all([
+        job.current_plan_id ? repo.getPlan(job.current_plan_id) : Promise.resolve(null),
+        repo.listElementEdits(job.id), repo.listItems(job.id), repo.listPins(job.id), repo.listStages(job.id),
+      ]);
+      // the photos posted on their pins, as short-lived links
+      const ids = linkPins(link, pins).map((p) => p.id);
+      const rows = ids.length ? (check(await sb.from("pin_comments").select("pin_id, photos").in("pin_id", ids)) as { pin_id: string; photos: string[] }[]) : [];
+      const photos: Record<string, string[]> = {};
+      for (const r of rows) for (const ph of r.photos ?? []) (photos[r.pin_id] ??= []).push(await repo.photoUrl(ph));
+      return { company, job, plan: plan?.data ?? null, edits, items, pins, stages, members, photos };
+    }));
+    return shareWork(link, company, data);
   }
+  async personLink(companyId: string, userId: string, memberId: string) {
+    const sb = await this.db();
+    const have = check(await sb.from("share_links").select("*").eq("company_id", companyId).is("job_id", null).eq("member_id", memberId).is("revoked_at", null).limit(1)) as ShareLink[];
+    if (have[0]) return have[0];
+    const m = check(await sb.from("company_members").select("full_name, title").eq("id", memberId).eq("company_id", companyId).maybeSingle()) as Row | null;
+    if (!m) throw new Error("That person isn't on your team.");
+    const label = m.title ? `${m.full_name} (${m.title})` : String(m.full_name);
+    return check(await sb.from("share_links").insert({ label, member_id: memberId, pin_ids: [], token: newToken(), job_id: null, company_id: companyId, created_by: userId }).select("*").single()) as ShareLink;
+  }
+
 }

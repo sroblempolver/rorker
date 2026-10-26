@@ -175,10 +175,14 @@ export function PinForm({ plan, draft, preset, stages, onCancel, onCreate }: {
   );
 }
 
-export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadComments, addComment, onShow }: {
+export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadComments, addComment, onShow, linkFor, openLinkFor }: {
   pin: Pin; plan: Plan | null; stages: JobStage[]; onBack: () => void;
   onUpdate: (input: Partial<PinInput> & { status?: PinStatus }) => Promise<void>; onDelete: () => Promise<void>;
   loadComments: () => Promise<PinComment[]>; addComment: (body: string, photos: File[]) => Promise<PinComment[]>; onShow: () => void;
+  /** a tagged person's own link (all their tasks, opening on this one), for admins */
+  linkFor?: (memberId: string) => Promise<string>;
+  /** the preview: open that link here, to see what they see */
+  openLinkFor?: (memberId: string) => void;
 }) {
   const [comments, setComments] = useState<PinComment[] | null>(null);
   const [body, setBody] = useState("");
@@ -245,7 +249,16 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
           <button className="ml-auto text-[13px] text-chalk hover:underline" onClick={() => setTagging(!tagging)}>{tagging ? "Done" : tagged.length ? "Change" : "Tag staff"}</button>
         </div>
         {tagging ? <StaffPicker members={members} value={pin.tagged} onChange={(ids) => run(() => onUpdate({ tagged: ids }))} />
-          : tagged.length ? <div className="flex flex-wrap gap-1.5">{tagged.map((m) => <span key={m.id} className="chip !pl-0.5 !h-7"><AvatarStack members={[m]} size={22} /><span className="text-text">{m.full_name}</span>{m.title && <span>· {m.title}</span>}</span>)}</div>
+          : tagged.length ? (
+            <div className="space-y-1.5">
+              {tagged.map((m) => (
+                <div key={m.id} className="flex flex-wrap items-center gap-2 min-w-0">
+                  <span className="chip !pl-0.5 !h-7 min-w-0"><AvatarStack members={[m]} size={22} /><span className="text-text truncate">{m.full_name}</span>{m.title && <span className="truncate">· {m.title}</span>}</span>
+                  {linkFor && <PersonLink key={m.id} name={m.full_name} get={() => linkFor(m.id)} open={openLinkFor && (() => openLinkFor(m.id))} />}
+                </div>
+              ))}
+            </div>
+          )
           : <p className="text-muted text-sm">Nobody tagged.</p>}
       </div>
 
@@ -351,5 +364,36 @@ export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel }: 
         <button type="button" className="btn btn-sm" onClick={() => onMore(kind, title, tagged)}>More…</button>
       </div>
     </form>
+  );
+}
+
+/** Copy a tagged person's own link: every task they have with you, on every job, opening on this one.
+ *  It's the same link each time, so it can be copied again from any of their tasks. Where the browser
+ *  won't copy (an embedded preview), the link shows to copy by hand. */
+function PersonLink({ name, get, open }: { name: string; get: () => Promise<string>; open?: () => void }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [state, setState] = useState<"idle" | "busy" | "copied" | "shown">("idle");
+  const [err, setErr] = useState<string | null>(null);
+  const copy = async () => {
+    setErr(null);
+    setState("busy");
+    try {
+      const u = url ?? (await get());
+      setUrl(u);
+      try { await navigator.clipboard.writeText(u); setState("copied"); setTimeout(() => setState((s) => (s === "copied" ? "idle" : s)), 2500); }
+      catch { setState("shown"); }
+    } catch (x) { setErr(x instanceof Error ? x.message : "Couldn't make the link."); setState("idle"); }
+  };
+  return (
+    <>
+      <button type="button" onClick={copy} disabled={state === "busy"} title={`${name}'s link: all their tasks with you, on every job`}
+        className={`ml-auto shrink-0 h-7 px-2.5 rounded-[3px] border text-[12.5px] inline-flex items-center gap-1.5 ${state === "copied" ? "border-green text-green" : "border-line bg-panel-2 hover:border-accent hover:text-accent"}`}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" /><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" /></svg>
+        {state === "copied" ? "Copied" : state === "busy" ? "…" : "Copy link"}
+      </button>
+      {open && <button type="button" onClick={open} className="shrink-0 text-[12.5px] text-muted hover:text-text underline">See it</button>}
+      {state === "shown" && url && <input readOnly autoFocus className="input !h-7 basis-full font-mono text-[11.5px]" value={url} onFocus={(e) => e.currentTarget.select()} aria-label={`${name}'s link`} />}
+      {err && <p className="basis-full text-[12px] text-red">{err}</p>}
+    </>
   );
 }

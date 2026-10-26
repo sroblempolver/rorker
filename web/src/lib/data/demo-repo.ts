@@ -12,7 +12,7 @@ import type {
   PlanRow, PlanRun, ShareLink, ShareLinkInput, Repo, StageStatus, StageTemplate,
 } from "./types";
 import { DEFAULT_TEMPLATES } from "./templates";
-import { newToken, shareView } from "@/lib/share";
+import { linkPins, newToken, shareWork, type ShareJobData } from "@/lib/share";
 import { DEMO_CREW, sampleItems, samplePins, sampleStates } from "@/demo/sample";
 
 const DIR = path.join(process.cwd(), ".data");
@@ -400,12 +400,36 @@ export class DemoRepo implements Repo {
   async getSharedView(token: string) {
     const db = load();
     const link = (db.shares ?? []).find((l) => l.token === token);
-    const job = link && db.jobs.find((j) => j.id === link.job_id);
-    const company = job && db.companies.find((c) => c.id === job.company_id);
-    if (!link || !job || !company) return null;
-    const plan = job.current_plan_id ? db.plans.find((p) => p.id === job.current_plan_id)?.data ?? null : null;
-    return shareView(link, { company, job, plan, edits: await this.listElementEdits(job.id), items: await this.listItems(job.id), pins: await this.listPins(job.id), stages: await this.listStages(job.id), members: await this.listMembers(job.company_id) });
+    const companyId = link && (link.company_id ?? db.jobs.find((j) => j.id === link.job_id)?.company_id);
+    const company = companyId && db.companies.find((c) => c.id === companyId);
+    if (!link || !company) return null;
+    const jobs = db.jobs.filter((j) => (link.job_id ? j.id === link.job_id : j.company_id === company.id));
+    const members = await this.listMembers(company.id);
+    const data: ShareJobData[] = [];
+    for (const job of jobs) {
+      const pins = await this.listPins(job.id);
+      const photos: Record<string, string[]> = {};
+      for (const p of linkPins(link, pins)) {
+        const paths = db.comments.filter((c) => c.pin_id === p.id).flatMap((c) => c.photos);
+        if (paths.length) photos[p.id] = await Promise.all(paths.map((x) => this.photoUrl(x)));
+      }
+      const plan = job.current_plan_id ? db.plans.find((p) => p.id === job.current_plan_id)?.data ?? null : null;
+      data.push({ company, job, plan, edits: await this.listElementEdits(job.id), items: await this.listItems(job.id), pins, stages: await this.listStages(job.id), members, photos });
+    }
+    return shareWork(link, company, data);
   }
+  async personLink(companyId: string, _userId: string, memberId: string) {
+    return tx((db) => {
+      const have = (db.shares ?? []).find((l) => l.company_id === companyId && !l.job_id && l.member_id === memberId && !l.revoked_at);
+      if (have) return have;
+      const m = db.members.find((x) => x.id === memberId && x.company_id === companyId);
+      if (!m) throw new Error("That person isn't on your team.");
+      const link: ShareLink = { id: randomUUID(), job_id: null, company_id: companyId, token: newToken(), label: m.title ? `${m.full_name} (${m.title})` : m.full_name, member_id: memberId, pin_ids: [], expires_at: null, revoked_at: null, created_at: now() };
+      (db.shares ??= []).push(link);
+      return link;
+    });
+  }
+
 
   private async saveFile(rel: string, file: File) {
     const full = path.join(FILES, rel);
