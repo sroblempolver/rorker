@@ -208,8 +208,16 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
     const across = facing === 0 || facing === 180;
     const [hx, hy] = across ? [d / 2, w / 2] : [w / 2, d / 2];
     const c: Pt = [r10(f.center[0]), r10(f.center[1])];
-    const bbox: BBox = [c[0] - hx, c[1] - hy, c[0] + hx, c[1] + hy];
     const room = (f.room ? byName(f.room) : null) ?? rooms.find((r) => { const b = bboxOf(r.polygon); return c[0] >= b[0] && c[0] <= b[2] && c[1] >= b[1] && c[1] <= b[3]; }) ?? null;
+    // keep a piece inside its room (clear of the wall faces) when it fits, so added furniture never pokes through a wall
+    if (room) {
+      const b = bboxOf(room.polygon), inset = 60;
+      for (const [k, h] of [[0, hx], [1, hy]] as const) {
+        const lo = b[k] + inset + h, hi = b[k + 2] - inset - h;
+        if (lo <= hi) c[k] = Math.min(hi, Math.max(lo, c[k]));
+      }
+    }
+    const bbox: BBox = [c[0] - hx, c[1] - hy, c[0] + hx, c[1] + hy];
     return {
       id: `${code}-F${String(i + 1).padStart(2, "0")}`, kind: f.kind, name: f.name || f.kind.replace(/_/g, " "), room_id: room?.id ?? null, center: c, bbox, rotation: 0,
       outline: [[[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]], [bbox[0], bbox[1]]]], source: "ai", source_ref: null, confidence: 0.6, facing,

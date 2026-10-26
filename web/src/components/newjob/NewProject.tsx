@@ -20,7 +20,7 @@ export interface NewProjectResult {
 
 const READING = ["Reading your files…", "Finding the rooms…", "Measuring walls…", "Placing doors and windows…", "Working out the kitchen and baths…", "Almost there…"];
 const nothing = () => {};
-const CHECK = "Did I get the house right? Tell me anything to change, by voice or typing: a room name, a wall in the wrong place, a missing door or window, the garage door side. Or skip it and create the project.";
+const CHECK = "Did I get the house right? Tell me anything to change, by voice or typing: a room name, a wall in the wrong place, a missing door or window, the garage door side. I can also add furniture (\"furnish the living room\", \"a queen bed in Bedroom 2\"). Or skip it and create the project.";
 type Line = { who: "ai" | "you"; text: string };
 
 export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: NewProjectResult) => void; onCancel: () => void; intakeUrl?: string }) {
@@ -174,7 +174,7 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
 
         {stage === "review" && project && (
           <Review project={project} source={prep?.source} onCreate={onCreate} onRestart={() => { setStage("start"); setStep(null); setProject(null); setTalk([]); setTalkQs(null); setErr(null); }}
-            check={<Check lines={talk} busy={talking} questions={talkQs} plan={project.sketch?.questions ?? []} err={err} onSend={discuss} onStop={() => ctl.current?.abort()} />} />
+            check={<Check lines={talk} busy={talking} questions={talkQs} plan={project.sketch?.questions ?? []} rooms={(project.sketch?.floors ?? []).flatMap((f) => f.rooms.map((r) => r.name))} err={err} onSend={discuss} onStop={() => ctl.current?.abort()} />} />
         )}
       </div>
     </div>
@@ -273,13 +273,26 @@ function Review({ project, source, onCreate, onRestart, check }: { project: Inta
   );
 }
 
-function Check({ lines, busy, questions, plan, err, onSend, onStop }: {
-  lines: Line[]; busy: boolean; questions: IntakeQuestion[] | null; plan: { text: string; options?: string[] }[]; err: string | null;
+// one-tap asks for the inside of the house; none of them may move a wall, room, door or window
+const KEEP = " Don't change any walls, rooms, doors or windows.";
+const ACTIONS: { label: string; ask: (where: string) => string }[] = [
+  { label: "Furnish it", ask: (w) => `Furnish ${w} with the usual furniture for each room.` },
+  { label: "Kitchen appliances", ask: (w) => `Add the kitchen appliances that are missing${w === "the whole house" ? "" : ` in ${w}`}: fridge, range or cooktop with oven, range hood, dishwasher, sink.` },
+  { label: "Bathroom fixtures", ask: (w) => `Add the bathroom fixtures that are missing${w === "the whole house" ? " in every bathroom and WC" : ` in ${w}`}: toilet, basin or vanity, and a shower or bathtub where there's room.` },
+  { label: "Laundry", ask: (w) => `Add a washing machine and dryer${w === "the whole house" ? " in the laundry or utility room, or wherever makes sense" : ` in ${w}`}.` },
+  { label: "Home office", ask: (w) => `Set up ${w === "the whole house" ? "the study or a spare room" : w} as a home office: desk, chair, bookshelf and a lamp.` },
+  { label: "Fewer pieces", ask: (w) => `Make ${w} lighter: keep only the main furniture pieces and remove the extras.` },
+  { label: "Clear the furniture", ask: (w) => `Remove all the furniture from ${w} (beds, sofas, tables, chairs, desks, shelves, lamps, plants, TV). Keep the kitchen, bathroom and laundry fixtures.` },
+];
+
+function Check({ lines, busy, questions, plan, rooms, err, onSend, onStop }: {
+  lines: Line[]; busy: boolean; questions: IntakeQuestion[] | null; plan: { text: string; options?: string[] }[]; rooms: string[]; err: string | null;
   onSend: (said: string, byVoice: boolean, answers?: Record<string, string>) => void; onStop: () => void;
 }) {
   const [text, setText] = useState("");
   const [picked, setPicked] = useState<Record<number, string>>({});
   const [qa, setQa] = useState<Record<string, string>>({});
+  const [where, setWhere] = useState("");
   const voice = useRef(false);
   const list = useRef<HTMLDivElement>(null);
   const dict = useDictation((said) => { voice.current = true; setText((t) => (t ? `${t} ${said}` : said)); });
@@ -323,6 +336,20 @@ function Check({ lines, busy, questions, plan, err, onSend, onStop }: {
               {!!q.options?.length && <div className="flex flex-wrap gap-1.5">{q.options.map((o) => <button key={o} onClick={() => setPicked({ ...picked, [i]: o })} className={`chip !h-7 ${picked[i] === o ? "!text-accent !border-accent" : ""}`}>{o}</button>)}</div>}
             </div>
           ))}
+        </div>
+      )}
+      {!busy && !questions && (
+        <div className="space-y-1.5" role="group" aria-label="Quick changes inside the house">
+          <div className="flex items-center gap-2">
+            <p className="text-[12.5px] text-muted">Inside the house, for</p>
+            <select className="input !h-7 !w-auto !py-0 text-[13px]" value={where} onChange={(e) => setWhere(e.target.value)} aria-label="Which room">
+              <option value="">The whole house</option>
+              {[...new Set(rooms)].map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {ACTIONS.map((a) => <button key={a.label} className="chip !h-7" onClick={() => onSend(a.ask(where ? `the ${where}` : "the whole house").replace("the the ", "the ") + KEEP, false)}>{a.label}</button>)}
+          </div>
         </div>
       )}
       {!busy && !questions && (
