@@ -13,7 +13,7 @@ export interface IntakeProject {
 export type IntakeStep =
   | { kind: "questions"; message?: string; questions: IntakeQuestion[]; toolId: string }
   | { kind: "message"; text: string }
-  | { kind: "project"; project: IntakeProject };
+  | { kind: "project"; project: IntakeProject; toolId: string };
 
 type Block = { type: string; id?: string; name?: string; input?: unknown; text?: string };
 type Msg = { role: "user" | "assistant"; content: unknown };
@@ -25,12 +25,15 @@ export class IntakeChat {
   private pending: IntakeStep | null = null;
   constructor(private description: string, private parts: IntakePart[], private url = INTAKE_URL) {}
 
-  /** Send the next turn: nothing for the first one, answers to the questions, or a reply to a message. */
+  /** Send the next turn: nothing for the first one, answers to the questions, a reply to a message, or what to change in the design. */
   async next(reply?: { answers?: Record<string, string>; text?: string }, signal?: AbortSignal): Promise<IntakeStep> {
     const p = this.pending;
     if (p?.kind === "questions") {
       const lines = p.questions.map((q) => `${q.text} -> ${reply?.answers?.[q.id]?.trim() || "(skipped: guess)"}`).join("\n");
       this.history.push({ role: "user", content: [{ type: "tool_result", tool_use_id: p.toolId, content: lines }] });
+    } else if (p?.kind === "project") {
+      // the contractor looked over the design: their corrections, or their OK
+      this.history.push({ role: "user", content: [{ type: "tool_result", tool_use_id: p.toolId, content: `The contractor reviewed the design and says: ${reply?.text?.trim() || "(no changes)"}` }] });
     } else if (p?.kind === "message") {
       this.history.push({ role: "user", content: reply?.text?.trim() || "Go ahead and make it with what you have." });
     }
@@ -50,7 +53,7 @@ export class IntakeChat {
       const inp = tool.input as { message?: string; questions?: IntakeQuestion[] };
       step = { kind: "questions", message: inp.message || text || undefined, questions: (inp.questions ?? []).slice(0, 4), toolId: tool.id! };
     } else if (tool?.name === "create_project") {
-      step = { kind: "project", project: tool.input as IntakeProject };
+      step = { kind: "project", project: tool.input as IntakeProject, toolId: tool.id! };
     } else step = { kind: "message", text: text || "Tell me a bit more about the job." };
     this.pending = step;
     return step;

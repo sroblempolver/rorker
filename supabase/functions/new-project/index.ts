@@ -65,6 +65,7 @@ const TOOLS: Anthropic.Tool[] = [
             rooms: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 2, description: "The two room names it joins; \"outside\" for an outside door" },
             kind: { type: "string", enum: ["door", "double_door", "sliding_door", "garage_door", "opening"] }, width_mm: { type: "number" },
             at: { type: "number", description: "Where along the shared wall, 0 to 1 (0.5 middle)" },
+            side: { ...SIDE, description: "For an outside door: which side of the house it's on" },
           }, required: ["rooms"] } },
           windows: { type: "array", items: { type: "object", properties: { room: { type: "string" }, side: SIDE, width_mm: { type: "number" }, count: { type: "integer" } }, required: ["room", "side"] } },
           fixtures: { type: "array", items: { type: "object", properties: {
@@ -88,9 +89,14 @@ The sketch (only when there's a drawing, plan, sketch or photo of a layout):
 - Coordinates are millimetres, x to the right, y down, north up the page unless the drawing says otherwise. For a DXF picture, use the scale and frame given with it and the text labels' positions. For other pictures, measure from the dimensions written on the drawing; if there are none, use typical room sizes.
 - Rooms are polygons on the wall centre lines, almost always rectangles or L-shapes with straight walls at right angles. Neighbouring rooms must share their edges exactly (same coordinates), and together the rooms should cover the whole floor, hallways and stair halls included. Use the room names written on the drawing, cleaned up ("DINING ROM" -> "Dining room").
 - Each floor is its own entry, even when several floors are drawn side by side in one picture; give each floor's coordinates in its own place in the picture (the app lines floors up).
-- Doors: every door between two rooms and every outside door, by the two room names. Windows: by room and the side of the house they're on. Open passages are kind "opening".
+- Doors: every door between two rooms and every outside door, by the two room names (and the side of the house for an outside door). Windows: by room and the side of the house they're on. Open passages are kind "opening".
 - Fixtures: the main things drawn (kitchen run as base cabinets with the sink, range and fridge; toilets, basins, tubs, showers; beds, sofas, dining table; a car in a garage). Centre in mm, real size, and which way the front faces.
-- Questions in the sketch are for later checks shown on the job, not for now.
+- Put the things you weren't sure about in the sketch's questions (at most 5, each with quick answers when there are obvious ones). The contractor sees them next to the design.
+
+After create_project the contractor looks over the design and tells you what's wrong or what to change, by voice or typing ("the garage door is on the south side", "add a powder room under the stairs", "the kitchen is bigger, about 4 by 5 metres", or answers to your questions).
+- When they ask for changes, call create_project again with the WHOLE project updated: every floor, room, door, window and fixture, not just what changed. Keep everything they didn't mention exactly as it was. Start the summary with what you changed, in one short sentence, then ask in a few words if anything else needs fixing.
+- When something they said is unclear, ask one short question with ask_questions.
+- When they say it's right or have nothing to change, reply in plain text in one short sentence (no tool), e.g. "Great, press Create the project when you're ready."
 
 Keep every text you write short and plain. Never say which AI model or company powers you; you are the Rorker assistant.`;
 
@@ -144,7 +150,7 @@ Deno.serve(async (req) => {
       parts = [{ kind: "image", name: body.test_url.split("/").pop(), media_type: body.test_url.endsWith(".png") ? "image/png" : "image/jpeg", data: btoa(s), note }];
     }
   }
-  const history = (Array.isArray(body.history) ? body.history : []).slice(0, 8);
+  const history = (Array.isArray(body.history) ? body.history : []).slice(0, 24);
   if (history.length % 2 === 1 || !history.every((m, i) => m && m.role === (i % 2 === 0 ? "assistant" : "user"))) return json({ error: "Bad request." }, 400);
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: firstTurn(String(body.description ?? ""), parts, String(body.today ?? "").slice(0, 10) || new Date().toISOString().slice(0, 10)) }, ...history];
 

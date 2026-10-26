@@ -7,7 +7,7 @@ import { bboxOf, polyArea } from "./geometry";
 
 export type Side = "north" | "south" | "east" | "west";
 export interface SketchRoom { name: string; type?: string; polygon: Pt[] }
-export interface SketchDoor { rooms: [string, string]; kind?: OpeningKind; width_mm?: number; at?: number }
+export interface SketchDoor { rooms: [string, string]; kind?: OpeningKind; width_mm?: number; at?: number; /** an outside door: which side of the house */ side?: Side }
 export interface SketchWindow { room: string; side: Side; width_mm?: number; count?: number }
 export interface SketchFixture { kind: string; name?: string; room?: string; center: Pt; width_mm?: number; depth_mm?: number; facing?: Side | null }
 export interface SketchFloor { name?: string; level: number; height_mm?: number; rooms: SketchRoom[]; doors?: SketchDoor[]; windows?: SketchWindow[]; fixtures?: SketchFixture[] }
@@ -141,6 +141,17 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
   }
   wallLines.delete("");
 
+  // which way an outside wall of a room faces
+  const faces = (w: Wall, r: Room, want: Side) => {
+    const s = wallLines.get(w.id)!;
+    const mid: Pt = [(s.a[0] + s.b[0]) / 2, (s.a[1] + s.b[1]) / 2];
+    const c = bboxOf(r.polygon);
+    const out = (Math.atan2(mid[1] - (c[1] + c[3]) / 2, mid[0] - (c[0] + c[2]) / 2) * 180) / Math.PI;
+    const horiz = Math.abs(s.b[1] - s.a[1]) < Math.abs(s.b[0] - s.a[0]);
+    const face = horiz ? (out < 0 ? -90 : 90) : Math.abs(out) > 90 ? 180 : 0;
+    return ((face - ANGLE[want] + 540) % 360) - 180 === 0;
+  };
+
   // doors between rooms, windows on a room's outside walls
   const openings: Opening[] = [];
   const used = new Map<string, number[]>();
@@ -172,7 +183,8 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
     const out = !n2 || OUTSIDE.test(n2);
     const r2 = out ? null : byName(n2);
     if (!r1 || (!out && !r2)) { notes.push(`Couldn't place the door between ${n1} and ${n2}.`); continue; }
-    const cands = walls.filter((w) => (out ? w.exterior && w.room_ids.includes(r1.id) : w.room_ids.includes(r1.id) && w.room_ids.includes(r2!.id)) || (out && r1.outdoor && w.room_ids.includes(r1.id)));
+    let cands = walls.filter((w) => (out ? w.exterior && w.room_ids.includes(r1.id) : w.room_ids.includes(r1.id) && w.room_ids.includes(r2!.id)) || (out && r1.outdoor && w.room_ids.includes(r1.id)));
+    if (out && d.side && d.side in ANGLE) { const sided = cands.filter((w) => faces(w, r1, d.side!)); if (sided.length) cands = sided; }
     const w = cands.sort((x, y) => y.length_mm - x.length_mm)[0];
     if (!w) { if (!out) notes.push(`${r1.name} and ${r2!.name} don't share a wall, so the door between them was left out.`); continue; }
     const kind = d.kind && d.kind !== "window" ? d.kind : "door";
@@ -181,16 +193,8 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
   for (const wn of sf.windows ?? []) {
     const r = byName(wn.room);
     if (!r) continue;
-    const want = ANGLE[wn.side] ?? 0;
-    const cands = walls.filter((w) => w.exterior && w.room_ids.includes(r.id)).filter((w) => {
-      const s = wallLines.get(w.id)!;
-      const mid: Pt = [(s.a[0] + s.b[0]) / 2, (s.a[1] + s.b[1]) / 2];
-      const c = bboxOf(r.polygon);
-      const out = (Math.atan2(mid[1] - (c[1] + c[3]) / 2, mid[0] - (c[0] + c[2]) / 2) * 180) / Math.PI;
-      const L = len(s.a, s.b), horiz = Math.abs(s.b[1] - s.a[1]) < Math.abs(s.b[0] - s.a[0]);
-      const face = horiz ? (out < 0 ? -90 : 90) : Math.abs(out) > 90 ? 180 : 0;
-      return L > 600 && ((face - want + 540) % 360) - 180 === 0;
-    }).sort((x, y) => y.length_mm - x.length_mm);
+    if (!(wn.side in ANGLE)) continue;
+    const cands = walls.filter((w) => w.exterior && w.room_ids.includes(r.id) && len(wallLines.get(w.id)!.a, wallLines.get(w.id)!.b) > 600 && faces(w, r, wn.side)).sort((x, y) => y.length_mm - x.length_mm);
     const w = cands[0];
     if (!w) continue;
     const count = Math.max(1, Math.min(4, wn.count ?? 1));
