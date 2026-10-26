@@ -1,15 +1,23 @@
 import Link from "next/link";
 
 export function Logo({ size = 22 }: { size?: number }) {
+  // the Talking Plan mark: a speech bubble drawn as plan walls with a doorway. Below 24 px we use its
+  // small cut (no door swing); the wordmark is the custom stencil lettering from the brand kit.
   return (
-    <span className="inline-flex items-center gap-2">
-      {/* a survey stake with its flag: the mark you put on a site */}
-      <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
-        <rect x="1" y="1" width="22" height="22" rx="2" fill="var(--accent)" />
-        <path d="M8 19V5" stroke="var(--accent-ink)" strokeWidth="2.4" strokeLinecap="square" />
-        <path d="M9 5h9l-2.5 3.2L18 11.5H9z" fill="var(--accent-ink)" />
+    <span className="inline-flex items-center gap-2" aria-label="Rorker">
+      <svg width={size} height={size} viewBox="0 0 256 256" aria-hidden>
+        <path fill="var(--accent)" d="M28 32H228V84H200V60H56V170H200V140H228V200H108L64 244V200H28Z" />
       </svg>
-      <span className="font-stencil font-extrabold leading-none tracking-[0.1em] uppercase" style={{ fontSize: size * 1.05 }}>Rorker</span>
+      <svg height={size * 0.72} width={size * 0.72 * 4.28} viewBox="0 0 428 100" aria-hidden>
+        <g fill="currentColor" fillRule="evenodd">
+          <path transform="translate(0 0)" d="M0 0H22V100H0Z M28 0H30A30 30 0 0 1 30 62H28Z M28 20H30A10 10.5 0 0 1 30 41H28Z M30 68H52L62 100H40Z" />
+          <path transform="translate(74 0)" d="M27 0A27 30 0 0 0 0 30V70A27 30 0 0 0 27 100V78A5 8 0 0 1 22 70V30A5 8 0 0 1 27 22Z M33 0A27 30 0 0 1 60 30V70A27 30 0 0 1 33 100V78A5 8 0 0 0 38 70V30A5 8 0 0 0 33 22Z" />
+          <path transform="translate(146 0)" d="M0 0H22V100H0Z M28 0H30A30 30 0 0 1 30 62H28Z M28 20H30A10 10.5 0 0 1 30 41H28Z M30 68H52L62 100H40Z" />
+          <path transform="translate(220 0)" d="M0 0H22V100H0Z M28 50L40 0H62L46 50Z M28 50H46L62 100H40Z" />
+          <path transform="translate(294 0)" d="M0 0H22V100H0Z M28 0H60V20H28Z M28 40H54V60H28Z M28 80H60V100H28Z" />
+          <path transform="translate(366 0)" d="M0 0H22V100H0Z M28 0H30A30 30 0 0 1 30 62H28Z M28 20H30A10 10.5 0 0 1 30 41H28Z M30 68H52L62 100H40Z" />
+        </g>
+      </svg>
     </span>
   );
 }
