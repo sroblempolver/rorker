@@ -23,7 +23,8 @@ export const INTAKE_URL = "https://uofdydjfwdsvaribvsfy.supabase.co/functions/v1
 export class IntakeChat {
   private history: Msg[] = [];
   private pending: IntakeStep | null = null;
-  constructor(private description: string, private parts: IntakePart[], private url = INTAKE_URL) {}
+  /** `plan`: the company's plan; paying plans get the best plan reader, the free plan a cheaper one. */
+  constructor(private description: string, private parts: IntakePart[], private url = INTAKE_URL, private plan: "paid" | "free" = "paid") {}
 
   /** Send the next turn: nothing for the first one, answers to the questions, a reply to a message, or what to change in the design. */
   async next(reply?: { answers?: Record<string, string>; text?: string }, signal?: AbortSignal): Promise<IntakeStep> {
@@ -39,7 +40,7 @@ export class IntakeChat {
     }
     const r = await fetch(this.url, {
       method: "POST", headers: { "content-type": "application/json" }, signal,
-      body: JSON.stringify({ description: this.description, parts: this.parts, history: this.history, today: new Date().toISOString().slice(0, 10) }),
+      body: JSON.stringify({ description: this.description, parts: this.parts, history: this.history, today: new Date().toISOString().slice(0, 10), plan: this.plan }),
     }).catch(() => { throw new Error("Couldn't reach the assistant. Check your connection, or open the preview at sroblempolver.github.io/rorker."); });
     const raw = await r.text();
     let res: { content?: Block[]; error?: string } | null = null;

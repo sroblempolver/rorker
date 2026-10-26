@@ -7,7 +7,7 @@ import Anthropic from "npm:@anthropic-ai/sdk@1.3.0";
 import { instructions, TOOLS } from "./core.js";
 
 const API_KEY = () => Deno.env.get("ANTHROPIC_API_KEY") || Deno.env.get("ANTHROPIC_API_KEY_rorker");
-const MODEL = Deno.env.get("RORKER_ASSISTANT_MODEL") || "claude-opus-5-5";
+const MODEL = Deno.env.get("RORKER_ASSISTANT_MODEL") || "claude-haiku-5-5";
 const MAX_BODY = 400_000;
 const MAX_MESSAGES = 40;
 const LIMIT = 40; // requests per address per 10 minutes, per running copy of the function
@@ -58,11 +58,19 @@ Deno.serve(async (req) => {
   const ctx = { jobId: str(c.jobId, 80), jobName: str(c.jobName, 120), where: str(c.where, 200), selected: str(c.selected, 200) };
 
   try {
-    const res = await new Anthropic({ apiKey: API_KEY() }).messages.create({
+    // the instructions are the same every time except the last two lines (today, where they are), so
+    // the tools and the fixed part are cached; the conversation so far is cached as it grows
+    const lines = instructions(me, ctx).split("\n");
+    const params = {
       model: MODEL, max_tokens: 12000, thinking: { type: "adaptive" },
-      system: instructions(me, ctx), tools: TOOLS as Anthropic.Tool[], messages,
-    });
-    return json({ content: res.content, stop_reason: res.stop_reason });
+      system: [
+        { type: "text", text: lines.slice(0, -2).join("\n"), cache_control: { type: "ephemeral" } },
+        { type: "text", text: lines.slice(-2).join("\n") },
+      ],
+      tools: TOOLS as Anthropic.Tool[], messages, cache_control: { type: "ephemeral" },
+    };
+    const res = await new Anthropic({ apiKey: API_KEY() }).messages.create(params as unknown as Anthropic.MessageCreateParamsNonStreaming);
+    return json({ content: res.content, stop_reason: res.stop_reason, usage: res.usage });
   } catch (e) {
     console.error("assistant", e instanceof Error ? e.message : e);
     const status = e instanceof Anthropic.APIError && e.status === 429 ? 429 : 502;

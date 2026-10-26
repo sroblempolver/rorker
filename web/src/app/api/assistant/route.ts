@@ -9,7 +9,7 @@ import { serverBackend } from "@/lib/assistant/server";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const MODEL = process.env.RORKER_ASSISTANT_MODEL || "claude-opus-5-5";
+const MODEL = process.env.RORKER_ASSISTANT_MODEL || "claude-haiku-5-5";
 const MAX_ROUNDS = 8;
 
 type Turn = { role: "user" | "assistant"; content: string };
@@ -27,12 +27,19 @@ export async function POST(req: Request) {
   const messages: Anthropic.MessageParam[] = turns.map((t) => ({ role: t.role, content: t.content.slice(0, 4000) }));
   const changed = { any: false };
   const done: string[] = [];
+  // the instructions are fixed except the last two lines (today, where they are): cache the fixed part
+  // with the tools; the conversation is cached as it grows, round by round
+  const lines = instructions(backend.me, ctx).split("\n");
+  const system: Anthropic.TextBlockParam[] = [
+    { type: "text", text: lines.slice(0, -2).join("\n"), cache_control: { type: "ephemeral" } },
+    { type: "text", text: lines.slice(-2).join("\n") },
+  ];
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const res = await client.messages.create({
-        model: MODEL, max_tokens: 4000, thinking: { type: "adaptive" },
-        system: instructions(backend.me, ctx), tools: TOOLS as Anthropic.Tool[], messages,
-      });
+        model: MODEL, max_tokens: 12000, thinking: { type: "adaptive" },
+        system, tools: TOOLS as Anthropic.Tool[], messages, cache_control: { type: "ephemeral" },
+      } as unknown as Anthropic.MessageCreateParamsNonStreaming);
       if (res.stop_reason !== "tool_use") {
         const text = res.content.filter((c): c is Anthropic.TextBlock => c.type === "text").map((c) => c.text).join("\n").trim();
         return NextResponse.json({ text: text || "Done.", changed: changed.any, actions: done });

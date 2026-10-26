@@ -5,7 +5,11 @@
 import Anthropic from "npm:@anthropic-ai/sdk@1.3.0";
 
 const API_KEY = () => Deno.env.get("ANTHROPIC_API_KEY") || Deno.env.get("ANTHROPIC_API_KEY_rorker");
-const MODEL = Deno.env.get("RORKER_INTAKE_MODEL") || "claude-opus-5-5";
+// reading plans: the best model for paying plans, a cheaper one for the free plan
+const MODELS = {
+  paid: Deno.env.get("RORKER_INTAKE_MODEL") || "claude-opus-5-5",
+  free: Deno.env.get("RORKER_INTAKE_MODEL_FREE") || "claude-sonnet-5-5",
+};
 const MAX_BODY = 14 * 1024 * 1024;
 const LIMIT = 20; // requests per address per 10 minutes, per running copy of the function
 const WINDOW = 10 * 60_000;
@@ -136,7 +140,7 @@ Deno.serve(async (req) => {
 
   const raw = await req.text();
   if (raw.length > MAX_BODY) return json({ error: "Those files are too big to send at once. Try fewer pages or smaller photos." }, 413);
-  let body: { description?: string; parts?: Part[]; history?: Anthropic.MessageParam[]; today?: string; test_url?: string };
+  let body: { description?: string; parts?: Part[]; history?: Anthropic.MessageParam[]; today?: string; test_url?: string; plan?: string };
   try { body = JSON.parse(raw); } catch { return json({ error: "Bad request." }, 400); }
 
   // for checking the function itself: a picture from the preview's own site
@@ -155,19 +159,27 @@ Deno.serve(async (req) => {
   if (history.length % 2 === 1 || !history.every((m, i) => m && m.role === (i % 2 === 0 ? "assistant" : "user"))) return json({ error: "Bad request." }, 400);
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: firstTurn(String(body.description ?? ""), parts, String(body.today ?? "").slice(0, 10) || new Date().toISOString().slice(0, 10)) }, ...history];
 
+  // asking for the free plan's model only ever makes it cheaper; anything else gets the paid one
+  const MODEL = body.plan === "free" ? MODELS.free : MODELS.paid;
+
   // the reply can take a while: keep the connection alive with spaces, then send the answer
   const enc = new TextEncoder();
   const stream = new ReadableStream({
     async start(ctl) {
       const beat = setInterval(() => ctl.enqueue(enc.encode(" ")), 4000);
       try {
-        const s = new Anthropic({ apiKey: API_KEY() }).messages.stream({
-          model: MODEL, max_tokens: 32000, thinking: { type: "adaptive" },
-          system: SYSTEM, tools: TOOLS, messages,
-        });
+        // the instructions and the drawing (the first turn) are cached, so each "check it with me"
+        // round pays for them at the cheap cached rate
+        const params = {
+          // Sonnet 5.5 thinks at "high" unless told; "medium" keeps a read inside the function's time limit
+          model: MODEL, max_tokens: 32000, thinking: { type: "adaptive" }, output_config: { effort: "medium" },
+          system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }], tools: TOOLS, messages,
+          cache_control: { type: "ephemeral" },
+        };
+        const s = new Anthropic({ apiKey: API_KEY() }).messages.stream(params as unknown as Anthropic.MessageStreamParams);
         const res = await s.finalMessage();
         if (res.stop_reason === "max_tokens") throw new Error("too long");
-        ctl.enqueue(enc.encode(JSON.stringify({ content: res.content, stop_reason: res.stop_reason })));
+        ctl.enqueue(enc.encode(JSON.stringify({ content: res.content, stop_reason: res.stop_reason, usage: res.usage })));
       } catch (e) {
         console.error("new-project", e instanceof Error ? e.message : e);
         ctl.enqueue(enc.encode(JSON.stringify({ error: e instanceof Anthropic.APIError && e.status === 429 ? "Too many at once. Give it a minute." : "I couldn't read that just now. Try again in a moment." })));
