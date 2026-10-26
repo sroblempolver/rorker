@@ -555,6 +555,10 @@ export function Plan3D(p: Props) {
     sel.visible = false;
     (sel.material as THREE.Material).depthTest = false;
     sel.renderOrder = 20;
+    // a see-through glow inside the outline, so what's selected (and so draggable) is easy to spot
+    const glow = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial({ color: CHALK, transparent: true, opacity: 0.18, depthWrite: false, depthTest: false }));
+    glow.renderOrder = 19;
+    sel.add(glow);
     scene.add(sel);
     const mt = new Materials();
     three.current = { renderer, scene, camera, controls, built: null, mt, sel, focus: 0, hoverFloor: null, sun, lockUntil: 0 };
@@ -827,8 +831,8 @@ export function Plan3D(p: Props) {
       const h = cast(e);
       if (!h) return;
       const { pick } = h;
-      // anything can be picked up and dragged straight away; a click without moving still just selects it
-    const movable = !P.locked && (pick.type === "fixture" || pick.type === "item" || pick.type === "pin");
+      // click once to select, then drag: a drag over something not selected just moves the view
+    const movable = !P.locked && ((pick.type === "fixture" && pick.id === P.selected) || (pick.type === "item" && pick.id === P.selectedItem) || (pick.type === "pin" && pick.id === P.selectedPin));
       if (!movable) return;
       const base = floorBase(pick.floorId);
       const side = h.obj.userData.side as WallSide | undefined;

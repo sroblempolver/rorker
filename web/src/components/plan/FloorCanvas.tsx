@@ -281,9 +281,9 @@ export function FloorCanvas(props: Props) {
           const h = fixtureTop(f);
           const live = drag?.id === `f:${f.id}` ? { dx: drag.x - f.center[0], dy: drag.y - f.center[1] } : null;
           return (
-            <g key={f.id} onClick={(e) => click(f.id, e)} onPointerEnter={hov(f.id)} onPointerLeave={hov(null)} className={pinMode ? "cursor-crosshair" : live ? "cursor-grabbing" : (sel || room) && !props.locked ? "cursor-grab" : "cursor-pointer"} opacity={inRoom(f.room_id) ? 1 : 0.3}
+            <g key={f.id} onClick={(e) => click(f.id, e)} onPointerEnter={hov(f.id)} onPointerLeave={hov(null)} className={pinMode ? "cursor-crosshair" : live ? "cursor-grabbing" : sel && !props.locked ? "cursor-grab" : "cursor-pointer"} opacity={inRoom(f.room_id) ? 1 : 0.3}
               transform={live ? `translate(${live.dx} ${live.dy})` : undefined}
-              onPointerDown={(sel || room) && !pinMode && !props.locked ? (e) => start(`f:${f.id}`, e, { x: f.center[0], y: f.center[1] }, (nx, ny) => props.onMoveFixture(f.id, Math.round(nx - f.center[0]), Math.round(ny - f.center[1])), (q, free) => (free ? q : { x: Math.round(q.x / 10) * 10, y: Math.round(q.y / 10) * 10 })) : undefined}>
+              onPointerDown={sel && !pinMode && !props.locked ? (e) => start(`f:${f.id}`, e, { x: f.center[0], y: f.center[1] }, (nx, ny) => props.onMoveFixture(f.id, Math.round(nx - f.center[0]), Math.round(ny - f.center[1])), (q, free) => (free ? q : { x: Math.round(q.x / 10) * 10, y: Math.round(q.y / 10) * 10 })) : undefined}>
               {fill && <path d={pathD(shape)} fill="#000" fillOpacity={0.35} transform={`translate(${Math.min(h, 2200) * 0.08} ${Math.min(h, 2200) * 0.14})`} pointerEvents="none" />}
               {fill && <path d={pathD(shape)} fill={fill} fillOpacity={colorMode === "progress" && st ? 0.85 : 1} />}
               <rect x={b[0]} y={b[1]} width={b[2] - b[0]} height={b[3] - b[1]} rx={40} fill={sel ? CHALK : hot ? "#fff" : "transparent"} fillOpacity={sel ? 0.16 : 0.1}
@@ -429,7 +429,7 @@ export function FloorCanvas(props: Props) {
           const e = pin.element_id ? findElement(plan, pin.element_id) : null;
           if (room && e && roomOf(e) !== room.id && !pointInPoly(pt, room.polygon)) return null;
           const live = drag?.id === `p:${pin.id}` ? drag : null;
-          const movable = !pin.anchor && !pinMode;
+          const movable = !pin.anchor && !pinMode && !props.locked && pin.id === selectedPin;
           return <PinFlag key={pin.id} pin={pin} x={live ? live.x : pt[0]} y={live ? live.y : pt[1]} px={lw} selected={selectedPin === pin.id} lifted={!!live}
             onClick={(ev) => { ev.stopPropagation(); props.onSelectPin(pin.id); }}
             onPointerDown={movable ? (ev) => start(`p:${pin.id}`, ev, { x: pt[0], y: pt[1] }, (nx, ny) => props.onMovePin(pin.id, { floor_id: floor.id, x: Math.round(nx), y: Math.round(ny), element_id: hitTest(floor, [nx, ny]) ?? pin.element_id })) : undefined} />;

@@ -290,9 +290,9 @@ export function WallView(p: WallProps) {
         const origin = { x: (a.from + a.to) / 2, y: -bot };
         const live = drag?.id === `f:${a.f.id}` ? { dx: drag.x - origin.x, dy: drag.y - origin.y } : null;
         return (
-          <g key={a.f.id} className={p.pinMode ? "cursor-crosshair" : live ? "cursor-grabbing" : p.locked ? "cursor-pointer" : "cursor-grab"} onClick={click(a.f.id)} onPointerEnter={() => setHover(a.f.id)} onPointerLeave={() => setHover(null)}
+          <g key={a.f.id} className={p.pinMode ? "cursor-crosshair" : live ? "cursor-grabbing" : sel && !p.locked ? "cursor-grab" : "cursor-pointer"} onClick={click(a.f.id)} onPointerEnter={() => setHover(a.f.id)} onPointerLeave={() => setHover(null)}
             transform={live ? `translate(${live.dx} ${live.dy})` : undefined}
-            onPointerDown={p.pinMode || p.locked ? undefined : (e) => start(`f:${a.f.id}`, e, origin, (nx, ny) => p.onMoveFixture(a.f.id, Math.round(nx - origin.x), mounted ? Math.round(origin.y - ny) : 0),
+            onPointerDown={p.pinMode || p.locked || !sel ? undefined : (e) => start(`f:${a.f.id}`, e, origin, (nx, ny) => p.onMoveFixture(a.f.id, Math.round(nx - origin.x), mounted ? Math.round(origin.y - ny) : 0),
               (q, free) => ({ x: snap(q.x, free), y: mounted ? snap(Math.max(-H + (top - bot), Math.min(-300, q.y)), free) : origin.y }))}>
             <FixtureElevation f={a.f} x0={a.from} x1={a.to} lw={lw} tint={tint(a.f.id)} />
             <rect x={a.from - 30} y={-top - 30} width={a.to - a.from + 60} height={top - bot + 60} fill={sel ? CHALK : "#fff"} fillOpacity={sel ? 0.14 : hot ? 0.1 : 0} stroke={sel ? CHALK : hot ? "#fff" : "transparent"} strokeWidth={2 * lw} strokeDasharray={sel ? `${8 * lw} ${4 * lw}` : undefined} />
@@ -322,8 +322,8 @@ export function WallView(p: WallProps) {
                 <text x={x + 8 * lw} y={y / 2}>{mmIn(-y)} up</text>
               </g>
             )}
-            <g transform={`translate(${x} ${y})`} className={live ? "cursor-grabbing" : "cursor-grab"}
-              onPointerDown={(e) => start(`i:${it.id}`, e, { x: it.x, y: -it.y }, (nx, ny) => p.onMoveItem(it.id, Math.round(nx), Math.round(-ny)), onWall)}
+            <g transform={`translate(${x} ${y})`} className={live ? "cursor-grabbing" : sel && !p.locked ? "cursor-grab" : "cursor-pointer"}
+              onPointerDown={!sel || p.locked ? undefined : (e) => start(`i:${it.id}`, e, { x: it.x, y: -it.y }, (nx, ny) => p.onMoveItem(it.id, Math.round(nx), Math.round(-ny)), onWall)}
               onClick={(e) => { e.stopPropagation(); p.onSelectItem(it.id); }} onPointerEnter={() => setHover(it.id)} onPointerLeave={() => setHover(null)}>
               <ItemGlyph kind={it.kind} min={22 * lw} selected={sel} hot={hover === it.id} />
             </g>
@@ -334,7 +334,7 @@ export function WallView(p: WallProps) {
         const live = drag?.id === `p:${pin.id}` ? drag : null;
         return <PinFlag key={pin.id} pin={pin} x={live ? live.x : x} y={live ? live.y : y} px={lw} selected={p.selectedPin === pin.id} lifted={!!live}
           onClick={(e) => { e.stopPropagation(); p.onSelectPin(pin.id); }}
-          onPointerDown={(e) => start(`p:${pin.id}`, e, { x, y }, (nx, ny) => p.onMovePin(pin.id, { anchor: { view: "wall", side: side.key, x: Math.round(nx), y: Math.round(ny) } }), onWall)} />;
+          onPointerDown={p.selectedPin !== pin.id || p.locked ? undefined : (e) => start(`p:${pin.id}`, e, { x, y }, (nx, ny) => p.onMovePin(pin.id, { anchor: { view: "wall", side: side.key, x: Math.round(nx), y: Math.round(ny) } }), onWall)} />;
       })}
       {draft && <DraftFlag x={draft.x} y={draft.y} px={lw} />}
       {!side.segments.length && <text x={L / 2} y={-H / 2} textAnchor="middle" fontSize={13 * lw} fill="#77736a">No walls or openings matched to this side yet</text>}
