@@ -21,6 +21,15 @@ export function fixtureHeight(kind: string): number {
 }
 
 /** Kinds that are linework of something else: never drawn as objects. */
+/** Top-view fill per kind: the object's real colour, so the plan reads like a model from above. */
+export const TOP_FILL: Record<string, string> = {
+  base_cabinet: "#5b5750", kitchen_sink: "#5b5750", dishwasher: "#5b5750", filler: "#5b5750", range: "#232426", fridge: "#b9bec4", oven: "#232426", cooktop: "#232426",
+  island: "#5b5750", tall_cabinet: "#d9d2c4", toilet: "#f4efe6", washbasin: "#f4efe6", bathtub: "#f4efe6", shower: "#cfe6ee", vanity: "#a07850",
+  washing_machine: "#f4efe6", dryer: "#f4efe6", water_heater: "#e6e1d6", bed: "#e9e3d6", nightstand: "#8a6a48", wardrobe: "#8a6a48", sofa: "#6f7486",
+  armchair: "#6f7486", chair: "#a07850", dining_table: "#a07850", table: "#a07850", desk: "#a07850", bookshelf: "#8a6a48", sideboard: "#8a6a48",
+  tv: "#151618", lamp: "#f3c56b", plant: "#3f7a4a", car: "#55606b", fireplace: "#8d8a83",
+};
+
 export const HIDDEN_KINDS = new Set(["door_leaf", "part"]);
 
 export const fixtureBottom = (f: Fixture) => f.elevation_mm || (f.kind === "wall_cabinet" ? 1450 : f.kind === "range_hood" ? 1600 : 0);

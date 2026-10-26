@@ -74,8 +74,12 @@ export function PlanViewer(p: Props) {
   const [empty, setEmpty] = useState(false);
   const [gl, setGl] = useState(true);
   useEffect(() => setGl(webglAvailable()), []);
-  // a room always opens as its own top view, where every wall and object is a click away
-  const in3d = p.view3d && p.can3d && gl && (level.kind === "exterior" || level.kind === "floor");
+  // a room opens as its own top view: in 3D when 3D is on, with buttons to face each wall
+  const in3d = p.view3d && p.can3d && gl && (level.kind === "exterior" || level.kind === "floor" || level.kind === "room");
+  const faces = useMemo(() => (floor && room && in3d ? roomSides(floor, room) : []), [floor, room, in3d]);
+  // seen from above, a room reads best over low walls; back out to the floor and the walls come back up
+  const inRoom = level.kind === "room";
+  useEffect(() => { setWallMode((m) => (inRoom ? (m === "full" ? "low" : m) : m === "low" ? "full" : m)); }, [inRoom]);
   // the wall view slides objects along its own wall: turn that into a move on the plan
   const moveOnWall = useCallback((id: string, along: number, up: number) => {
     if (!side) return;
@@ -113,12 +117,13 @@ export function PlanViewer(p: Props) {
   const hint = p.pinMode ? "Click anywhere to drop the pin · Esc to cancel" :
     in3d && level.kind === "exterior" ? "Drag to look around · zoom in to open the building, keep zooming to step into a floor · right-click or Pin to flag the roof or a wall" :
     in3d && p.readOnly ? "Drag to look around · right-drag to slide · click a flag to see the task" :
+    in3d && level.kind === "room" ? "Drag any object to move it · drag empty space to look around · Face a wall at the top for its wall view · right-click to pin" :
     in3d ? "Drag to look around · click a room to see it from above · click an object to select, drag it to move · right-click to pin" :
     level.kind === "site" ? "The whole job · click the building or zoom in to go inside" :
     level.kind === "exterior" ? "Click a floor to go inside · zoom out for the whole site" :
     level.kind === "floor" ? "Click a room to step in · zoom out for the outside" :
-    level.kind === "room" ? "Click anything to see it · pick a wall tag to face that wall" :
-    "Click a wall piece, door, window or fixture · zoom out to go back";
+    level.kind === "room" ? "Drag any object to move it · click to see it · pick a wall tag to face that wall" :
+    "Drag a cabinet or object to move it · click to see it · zoom out to go back";
 
   return (
     <div className={`relative w-full h-full overflow-hidden bg-ink ${p.pinMode ? "pin-cursor" : ""}`}>
@@ -132,7 +137,7 @@ export function PlanViewer(p: Props) {
       )}
       {in3d && (
         <Plan3D plan={plan} mode={level.kind === "exterior" ? "building" : "floor"} floor={floor} room={room} selected={p.selected} selectedPin={p.selectedPin} selectedItem={p.selectedItem}
-          states={p.states} colorMode={p.colorMode} pins={p.pins} items={p.items} pinMode={p.pinMode} draft={p.draft} wallMode={wallMode} empty={empty} controls={controls}
+          states={p.states} colorMode={p.colorMode} pins={p.pins} items={p.items} pinMode={p.pinMode} draft={p.draft} wallMode={wallMode} empty={empty} locked={p.readOnly} controls={controls}
           onSelect={(id) => { const r = floor && id ? floor.rooms.find((x) => x.id === id) : null; if (r && floor) p.setLevel({ kind: "room", floorId: floor.id, roomId: r.id }); p.onSelect(id); }}
           onSelectPin={p.onSelectPin} onSelectItem={p.onSelectItem} onPlacePin={p.onPlacePin}
           onMoveFixture={(id, dx, dy) => p.onMoveFixture(id, dx, dy, 0)} onMoveItem={p.onMoveItem} onMovePin={p.onMovePin}
@@ -147,7 +152,7 @@ export function PlanViewer(p: Props) {
           onOpenSide={(s) => p.setLevel({ kind: "wall", floorId: floor.id, roomId: s.roomId, sideKey: s.key })}
           onPlacePin={p.onPlacePin}
           items={p.items} showItems={showItems} selectedItem={p.selectedItem} onSelectItem={p.onSelectItem} onMovePin={p.onMovePin}
-          onMoveFixture={(id, dx, dy) => p.onMoveFixture(id, dx, dy, 0)}
+          onMoveFixture={(id, dx, dy) => p.onMoveFixture(id, dx, dy, 0)} locked={p.readOnly}
         />
       )}
       {floor && room && side && level.kind === "wall" && (
@@ -155,7 +160,7 @@ export function PlanViewer(p: Props) {
           floor={floor} room={room} side={side} selected={p.selected} selectedPin={p.selectedPin} states={p.states} pins={p.pins} colorMode={p.colorMode}
           pinMode={p.pinMode} draft={p.draft} controls={controls} onSelect={p.onSelect} onSelectPin={p.onSelectPin} onUp={up} onPlacePin={p.onPlacePin}
           items={p.items.filter((i) => i.side === side.key)} selectedItem={p.selectedItem} onSelectItem={p.onSelectItem} onMoveItem={p.onMoveItem} onMovePin={p.onMovePin}
-          onMoveFixture={moveOnWall}
+          onMoveFixture={moveOnWall} locked={p.readOnly}
         />
       )}
 
@@ -236,6 +241,17 @@ export function PlanViewer(p: Props) {
           </button>
         )}
       </div>
+
+      {/* in the room's 3D view, step up to any wall */}
+      {in3d && room && floor && faces.length > 0 && (
+        <div className={`absolute left-3 top-14 md:left-1/2 md:-translate-x-1/2 md:top-3 flex flex-wrap gap-1 p-1 rounded-[4px] ${glass}`} role="group" aria-label="Face a wall">
+          <span className="h-7 px-1.5 inline-flex items-center text-[11.5px] text-muted font-display font-bold tracking-[0.1em] uppercase">Face</span>
+          {faces.map((s) => (
+            <button key={s.key} onClick={() => p.setLevel({ kind: "wall", floorId: floor.id, roomId: room.id, sideKey: s.key })}
+              className="h-7 px-2.5 rounded-[3px] text-[12.5px] font-display font-bold tracking-[0.06em] uppercase text-muted hover:text-text hover:bg-panel-3">{s.label}</button>
+          ))}
+        </div>
+      )}
 
       {p.hud && level.kind === "site" && <div className="absolute left-3 top-14 md:left-28 hidden sm:block">{p.hud}</div>}
 

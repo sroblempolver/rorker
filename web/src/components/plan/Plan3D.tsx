@@ -11,14 +11,14 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { JobItem, Pin, PinInput } from "@/lib/data/types";
-import { floorBBox, frontView, labelPoint, roomSides, sidePoint, unionBBox, type WallSide } from "@/lib/plan/geometry";
+import { floorBBox, frontView, labelPoint, pointInPoly, roomSides, sidePoint, unionBBox, type WallSide } from "@/lib/plan/geometry";
 import type { ElementStatus, Floor, Opening, Plan, Pt, Room } from "@/lib/plan/types";
 import type { ColorMode } from "./FloorCanvas";
 import { hitTest } from "./FloorCanvas";
-import { HIDDEN_KINDS } from "./fixtures";
+import { HIDDEN_KINDS, TOP_FILL, isWallMounted } from "./fixtures";
 import { ITEM_SIZE } from "./items";
 import { fixtureObject, Materials, SHARED_GEOMETRY } from "./models3d";
-import { CHALK, GLASS, MATERIAL_BASE, PIN_COLOR, ROOM_MATERIAL, STATUS_COLOR } from "./style";
+import { CHALK, GLASS, MATERIAL_BASE, PIN_COLOR, ROOM_MATERIAL, STATUS_COLOR, type Material } from "./style";
 import type { Controls, PinTarget, ScreenPoint } from "./target";
 
 const S = 0.001;
@@ -43,6 +43,8 @@ interface Props {
   wallMode: WallMode;
   /** leave out the objects and wall items: just the rooms, walls and floors */
   empty?: boolean;
+  /** look but don't move anything (shared links, the new-project review) */
+  locked?: boolean;
   controls: Controls;
   onSelect: (id: string | null) => void;
   onSelectPin: (id: string) => void;
@@ -102,6 +104,48 @@ function label(text: string, opts: { color?: string; bg?: string; size?: number 
 const openTop = (o: Opening) => (o.kind === "garage_door" ? 2300 : o.kind === "opening" ? 2400 : 2100);
 const openBottom = (o: Opening) => (o.kind === "window" ? 900 : 0);
 
+// the 2D plan's floor patterns (boards, tiles, carpet), drawn once to a canvas and laid at true size
+const PATTERN: Record<Material, { w: number; h: number; draw: (g: CanvasRenderingContext2D, k: number) => void }> = {
+  oak: { w: 1800, h: 480, draw: (g, k) => { g.fillStyle = MATERIAL_BASE.oak; g.fillRect(0, 0, 1800 * k, 480 * k); g.fillStyle = "#a5835d"; g.fillRect(0, 160 * k, 1800 * k, 160 * k); lines(g, k, "#6f5338", 9, "M0 0H1800M0 160H1800M0 320H1800M420 0V160M1260 0V160M0 160V320M900 160V320M600 320V480M1500 320V480"); } },
+  walnut: { w: 1500, h: 420, draw: (g, k) => { g.fillStyle = MATERIAL_BASE.walnut; g.fillRect(0, 0, 1500 * k, 420 * k); g.fillStyle = "#76563c"; g.fillRect(0, 140 * k, 1500 * k, 140 * k); lines(g, k, "#4a3424", 9, "M0 0H1500M0 140H1500M0 280H1500M300 0V140M1100 0V140M700 140V280M0 280V420M1300 280V420"); } },
+  tile: { w: 600, h: 600, draw: (g, k) => { g.fillStyle = MATERIAL_BASE.tile; g.fillRect(0, 0, 600 * k, 600 * k); g.fillStyle = "#96a2a5"; g.fillRect(0, 0, 300 * k, 300 * k); g.fillRect(300 * k, 300 * k, 300 * k, 300 * k); lines(g, k, "#6e797c", 14, "M0 0H600M0 300H600M0 0V600M300 0V600"); } },
+  bathtile: { w: 200, h: 200, draw: (g, k) => { g.fillStyle = MATERIAL_BASE.bathtile; g.fillRect(0, 0, 200 * k, 200 * k); lines(g, k, "#7f9599", 8, "M0 0H200M0 100H200M0 0V200M100 0V200"); } },
+  concrete: { w: 900, h: 900, draw: (g, k) => { g.fillStyle = MATERIAL_BASE.concrete; g.fillRect(0, 0, 900 * k, 900 * k); g.fillStyle = "#5f5d58"; for (const [x, y, rr] of [[120, 200, 18], [420, 520, 22], [260, 780, 10], [610, 90, 12], [760, 700, 14]]) { g.beginPath(); g.arc(x * k, y * k, rr * k, 0, 7); g.fill(); } lines(g, k, "#5a5853", 10, "M0 0H900M0 0V900"); } },
+  carpet: { w: 120, h: 120, draw: (g, k) => { g.fillStyle = MATERIAL_BASE.carpet; g.fillRect(0, 0, 120 * k, 120 * k); g.fillStyle = "#777c8f"; g.beginPath(); g.arc(30 * k, 30 * k, 9 * k, 0, 7); g.fill(); g.fillStyle = "#686d7f"; g.beginPath(); g.arc(90 * k, 90 * k, 9 * k, 0, 7); g.fill(); } },
+  deck: { w: 1200, h: 300, draw: (g, k) => { g.fillStyle = MATERIAL_BASE.deck; g.fillRect(0, 0, 1200 * k, 300 * k); lines(g, k, "#4d3a2a", 20, "M0 0H1200M0 150H1200"); } },
+};
+/** Strokes an SVG-style path of M, H and V commands (the 2D patterns' grout and board lines), in mm. */
+function lines(g: CanvasRenderingContext2D, k: number, color: string, width: number, d: string) {
+  g.strokeStyle = color;
+  g.lineWidth = width * k;
+  g.beginPath();
+  let x = 0, y = 0;
+  for (const [, cmd, a, b] of d.matchAll(/([MHV])(-?\d+)(?:\s+(-?\d+))?/g)) {
+    if (cmd === "M") { x = +a; y = +b; g.moveTo(x * k, y * k); continue; }
+    if (cmd === "H") x = +a; else y = +a;
+    g.lineTo(x * k, y * k);
+  }
+  g.stroke();
+}
+const patternCanvas = new Map<Material, HTMLCanvasElement>();
+function floorTexture(mat: Material): THREE.Texture {
+  const pt = PATTERN[mat];
+  let c = patternCanvas.get(mat);
+  if (!c) {
+    const k = 512 / Math.max(pt.w, pt.h);
+    c = document.createElement("canvas");
+    c.width = Math.round(pt.w * k); c.height = Math.round(pt.h * k);
+    pt.draw(c.getContext("2d")!, k);
+    patternCanvas.set(mat, c);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(1 / (pt.w * S), 1 / (pt.h * S)); // the floor's UVs are in metres
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
 function dispose(o: THREE.Object3D) {
   o.traverse((x) => {
     const m = x as THREE.Mesh;
@@ -148,9 +192,13 @@ function buildScene(p: Props, mt: Materials): Built {
   const floorsMeta: Built["floors"] = [];
   const pick = (o: THREE.Object3D, data: Pick) => { o.userData.pick = data; picks.push(o); byId.set(data.id, o); };
 
+  const roomBox = p.room ? p.room.polygon.reduce((a, q) => [Math.min(a[0], q[0] - 300), Math.min(a[1], q[1] - 300), Math.max(a[2], q[0] + 300), Math.max(a[3], q[1] + 300)], [Infinity, Infinity, -Infinity, -Infinity]) : [0, 0, 0, 0];
+  // a room seen from above in the 2D plan's colours: each object in its top-view colour
+  const roomTint = new Map<string, Materials>();
   shown.forEach((fl) => {
     const fi = floorsAll.indexOf(fl);
-    const base = p.mode === "building" ? fl.elevation_mm || fi * (p.plan.building.exterior.storey_height_mm || 3000) : 0;
+    // a floor sits at its real height in both views, so an upper floor never looks like the ground floor
+    const base = fl.elevation_mm || fi * (p.plan.building.exterior.storey_height_mm || 3000);
     const H = fl.height_mm || 2700;
     const wallH = p.wallMode === "low" ? 1100 : H;
     const walls = p.wallMode !== "none";
@@ -164,8 +212,22 @@ function buildScene(p: Props, mt: Materials): Built {
       fades.push({ mats, centre, floorIndex: fi, role: "thing" });
     };
 
+    // an upper floor on its own stands on the floors below it, drawn as plain blocks
+    if (p.mode === "floor") {
+      const below = floorsAll.slice(0, fi);
+      below.forEach((lf, li) => {
+        const lb = lf.elevation_mm || li * (p.plan.building.exterior.storey_height_mm || 3000);
+        const lh = Math.max(200, base - lb);
+        const rings = lf.footprint.length ? lf.footprint : [[[lf.bounds[0], lf.bounds[1]], [lf.bounds[2], lf.bounds[1]], [lf.bounds[2], lf.bounds[3]], [lf.bounds[0], lf.bounds[3]]] as Pt[]];
+        for (const ring of rings) {
+          const block = new THREE.Mesh(extrude(ring, lb - base, lb - base + lh - 20), wallMaterial(li % 2 ? "#3b3a36" : "#45433e"));
+          block.receiveShadow = true;
+          g.add(block);
+        }
+      });
+    }
     // slab under the floor, so stacked floors read as storeys
-    if (p.mode === "building") {
+    if (p.mode === "building" || fi > 0) {
       for (const ring of fl.footprint.length ? fl.footprint : [[[fl.bounds[0], fl.bounds[1]], [fl.bounds[2], fl.bounds[1]], [fl.bounds[2], fl.bounds[3]], [fl.bounds[0], fl.bounds[3]]] as Pt[]]) {
         const m = wallMaterial("#8e877a");
         const slab = new THREE.Mesh(extrude(ring, -200, 0), m);
@@ -174,7 +236,7 @@ function buildScene(p: Props, mt: Materials): Built {
         const b = floorBBox(fl);
         fades.push({ mats: [m], centre: new THREE.Vector3(((b[0] + b[2]) / 2) * S, base * S, ((b[1] + b[3]) / 2) * S), floorIndex: fi, role: "slab" });
         // a flat roof over this floor wherever the floor above doesn't cover it (a garage, a porch)
-        if (fi < floorsAll.length - 1 && p.wallMode === "full") {
+        if (p.mode === "building" && fi < floorsAll.length - 1 && p.wallMode === "full") {
           const rm = wallMaterial("#4a4844");
           const roofSlab = new THREE.Mesh(extrude(ring, H, H + 160), rm);
           roofSlab.castShadow = true;
@@ -186,7 +248,10 @@ function buildScene(p: Props, mt: Materials): Built {
 
     // room floors in their material
     for (const r of fl.rooms) {
-      const m = new THREE.MeshStandardMaterial({ color: statusTint(r.id, MATERIAL_BASE[ROOM_MATERIAL[r.type] ?? "concrete"]), roughness: 0.85, transparent: true });
+      const mat = ROOM_MATERIAL[r.type] ?? "concrete";
+      const patterned = p.mode === "floor" && !prog;
+      const m = new THREE.MeshStandardMaterial({ color: patterned ? "#ffffff" : statusTint(r.id, MATERIAL_BASE[mat]), map: patterned ? floorTexture(mat) : null, roughness: 0.85, transparent: true });
+      if (p.room && r.id !== p.room.id) { m.opacity = 0.35; }
       const mesh = new THREE.Mesh(flat(r.polygon, 2), m);
       mesh.receiveShadow = true;
       g.add(mesh);
@@ -202,7 +267,8 @@ function buildScene(p: Props, mt: Materials): Built {
     }
 
     // walls
-    for (const w of walls ? fl.walls : []) {
+    const near = (poly: Pt[]) => !p.room || poly.some((q) => q[0] >= roomBox[0] && q[0] <= roomBox[2] && q[1] >= roomBox[1] && q[1] <= roomBox[3]);
+    for (const w of walls ? fl.walls.filter((x) => near(x.polygon)) : []) {
       const color = statusTint(w.id, w.exterior && p.mode === "building" ? "#d6ccb9" : "#efe8da");
       const m = wallMaterial(color);
       const mesh = new THREE.Mesh(extrude(w.polygon, 0, wallH), m);
@@ -214,7 +280,7 @@ function buildScene(p: Props, mt: Materials): Built {
     }
 
     // doors and windows: header above, sill below, glass in a window
-    for (const o of walls ? fl.openings : []) {
+    for (const o of walls ? fl.openings.filter((x) => near(x.polygon)) : []) {
       const og = new THREE.Group();
       const m = wallMaterial(statusTint(o.id, o.exterior && p.mode === "building" ? "#d6ccb9" : "#efe8da"));
       const top = openTop(o), bot = openBottom(o);
@@ -261,11 +327,22 @@ function buildScene(p: Props, mt: Materials): Built {
     // each storey gets its own materials in the building, so the floors above can fade on their own
     const fm = prog ? null : p.mode === "building" ? new Materials() : mt;
     if (fm && fm !== mt) g.userData.ownMaterials = fm;
-    for (const f of p.empty ? [] : fl.fixtures) {
+    // a room's own view shows just that room's things
+    for (const f of p.empty ? [] : p.room ? fl.fixtures.filter((x) => x.room_id ? x.room_id === p.room!.id : pointInPoly(x.center, p.room!.polygon)) : fl.fixtures) {
       if (HIDDEN_KINDS.has(f.kind)) continue;
-      const tintMt = prog ? new Materials(p.states.get(f.id) ? STATUS_COLOR[p.states.get(f.id)!] : "#77736a") : fm!;
+      let tintMt = prog ? new Materials(p.states.get(f.id) ? STATUS_COLOR[p.states.get(f.id)!] : "#77736a") : fm!;
+      if (!prog && p.room && TOP_FILL[f.kind]) {
+        if (!roomTint.has(f.kind)) roomTint.set(f.kind, new Materials(TOP_FILL[f.kind]));
+        tintMt = roomTint.get(f.kind)!;
+      }
       const o = fixtureObject(f, tintMt, 0);
       if (prog) o.userData.ownMaterials = tintMt;
+      // from above, wall cabinets and hoods would hide the counter: see through them, like the 2D plan
+      if (!prog && p.room && isWallMounted(f)) {
+        if (!roomTint.has("ghost")) roomTint.set("ghost", new Materials());
+        const ghost = roomTint.get("ghost")!.get("#d9d2c4", { opacity: 0.12 });
+        o.traverse((x) => { if ((x as THREE.Mesh).isMesh) { (x as THREE.Mesh).material = ghost; x.castShadow = false; } });
+      }
       g.add(o);
       pick(o, { type: "fixture", id: f.id, floorId: fl.id });
       thing(o, new THREE.Vector3(f.center[0] * S, base * S, f.center[1] * S));
@@ -370,8 +447,10 @@ function buildScene(p: Props, mt: Materials): Built {
   let bb = p.mode === "building" ? unionBBox(floorsAll.map(floorBBox)) : p.floor ? floorBBox(p.floor) : [0, 0, 10000, 10000];
   if (p.mode === "floor" && p.room) bb = p.room.polygon.reduce((a, q) => [Math.min(a[0], q[0]), Math.min(a[1], q[1]), Math.max(a[2], q[0]), Math.max(a[3], q[1])], [Infinity, Infinity, -Infinity, -Infinity]);
   const totalH = p.mode === "building" ? floorsMeta.length ? floorsMeta[floorsMeta.length - 1].y1 : 3 : 0;
-  const centre = new THREE.Vector3(((bb[0] + bb[2]) / 2) * S, p.mode === "building" ? totalH * 0.3 : 0, ((bb[1] + bb[3]) / 2) * S);
+  const centre = new THREE.Vector3(((bb[0] + bb[2]) / 2) * S, p.mode === "building" ? totalH * 0.3 : floorsMeta[0]?.y0 ?? 0, ((bb[1] + bb[3]) / 2) * S);
   const radius = Math.max(2, (Math.max(bb[2] - bb[0], bb[3] - bb[1]) / 2) * S, totalH / 2);
+  // the room view's colour sets are freed with the scene
+  roomTint.forEach((m) => { const holder = new THREE.Object3D(); holder.userData.ownMaterials = m; root.add(holder); });
   const pinLabels: THREE.Sprite[] = [];
   root.traverse((o) => { if (o.userData.pinLabel) pinLabels.push(o as THREE.Sprite); });
   return { root, picks, byId, fades, floors: floorsMeta, centre, radius, pinLabels };
@@ -612,9 +691,9 @@ export function Plan3D(p: Props) {
     const fv = building ? frontView(cb.current.plan) : null;
     // look at the front of the house from a little above, or at a floor from a high corner
     const az = building ? (fv?.side === "top" ? Math.PI : 0) + 0.55 : 0.6;
-    const pol = building ? 1.12 : cb.current.room ? 0.8 : 0.75;
+    const pol = building ? 1.12 : cb.current.room ? 0.3 : 0.75;
     // a room is small next to its own walls: stand back far enough to see all of it over them
-    const r = building ? R * 3.3 : cb.current.room ? Math.max(R, 2.6) * 3 : R * 2.3;
+    const r = building ? R * 3.3 : cb.current.room ? Math.max(R, 2.6) * 3.4 : R * 2.3;
     camera.position.set(built.centre.x + r * Math.sin(pol) * Math.sin(az), built.centre.y + r * Math.cos(pol), built.centre.z + r * Math.sin(pol) * Math.cos(az));
     controls.update();
   }
@@ -627,7 +706,7 @@ export function Plan3D(p: Props) {
     if (o && (o.userData.pick as Pick).type !== "room") {
       t.sel.box.setFromObject(o);
       t.sel.visible = true;
-    } else if (o) {
+    } else if (o && id !== cb.current.room?.id) {
       t.sel.box.setFromObject(o);
       t.sel.box.max.y += 0.02;
       t.sel.visible = true;
@@ -748,7 +827,8 @@ export function Plan3D(p: Props) {
       const h = cast(e);
       if (!h) return;
       const { pick } = h;
-      const movable = (pick.type === "fixture" && pick.id === P.selected) || pick.type === "item" || pick.type === "pin";
+      // anything can be picked up and dragged straight away; a click without moving still just selects it
+    const movable = !P.locked && (pick.type === "fixture" || pick.type === "item" || pick.type === "pin");
       if (!movable) return;
       const base = floorBase(pick.floorId);
       const side = h.obj.userData.side as WallSide | undefined;

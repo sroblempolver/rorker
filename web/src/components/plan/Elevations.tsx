@@ -190,6 +190,8 @@ interface WallProps {
   onMovePin: (id: string, input: Partial<PinInput>) => void;
   /** slide an object along the wall (mm) and, for wall-mounted ones, up or down */
   onMoveFixture: (id: string, along: number, up: number) => void;
+  /** look only: nothing can be dragged */
+  locked?: boolean;
 }
 
 const openTop = (o: Opening) => (o.kind === "window" ? 2100 : o.kind === "garage_door" ? 2300 : o.kind === "opening" ? 2400 : 2100);
@@ -288,9 +290,9 @@ export function WallView(p: WallProps) {
         const origin = { x: (a.from + a.to) / 2, y: -bot };
         const live = drag?.id === `f:${a.f.id}` ? { dx: drag.x - origin.x, dy: drag.y - origin.y } : null;
         return (
-          <g key={a.f.id} className={p.pinMode ? "cursor-crosshair" : live ? "cursor-grabbing" : sel ? "cursor-grab" : "cursor-pointer"} onClick={click(a.f.id)} onPointerEnter={() => setHover(a.f.id)} onPointerLeave={() => setHover(null)}
+          <g key={a.f.id} className={p.pinMode ? "cursor-crosshair" : live ? "cursor-grabbing" : p.locked ? "cursor-pointer" : "cursor-grab"} onClick={click(a.f.id)} onPointerEnter={() => setHover(a.f.id)} onPointerLeave={() => setHover(null)}
             transform={live ? `translate(${live.dx} ${live.dy})` : undefined}
-            onPointerDown={p.pinMode || !sel ? undefined : (e) => start(`f:${a.f.id}`, e, origin, (nx, ny) => p.onMoveFixture(a.f.id, Math.round(nx - origin.x), mounted ? Math.round(origin.y - ny) : 0),
+            onPointerDown={p.pinMode || p.locked ? undefined : (e) => start(`f:${a.f.id}`, e, origin, (nx, ny) => p.onMoveFixture(a.f.id, Math.round(nx - origin.x), mounted ? Math.round(origin.y - ny) : 0),
               (q, free) => ({ x: snap(q.x, free), y: mounted ? snap(Math.max(-H + (top - bot), Math.min(-300, q.y)), free) : origin.y }))}>
             <FixtureElevation f={a.f} x0={a.from} x1={a.to} lw={lw} tint={tint(a.f.id)} />
             <rect x={a.from - 30} y={-top - 30} width={a.to - a.from + 60} height={top - bot + 60} fill={sel ? CHALK : "#fff"} fillOpacity={sel ? 0.14 : hot ? 0.1 : 0} stroke={sel ? CHALK : hot ? "#fff" : "transparent"} strokeWidth={2 * lw} strokeDasharray={sel ? `${8 * lw} ${4 * lw}` : undefined} />

@@ -8,7 +8,7 @@ import { bboxOf, centroid, unionBBox, edgeDistance, elementCenter, findElement, 
 import type { BBox, ElementStatus, Fixture, Floor, Opening, Plan, Pt, Room } from "@/lib/plan/types";
 import { CHALK, FIXTURE_STROKE, GLASS, GROUND, ROOM_MATERIAL, STATUS_COLOR, WALL_EXT_TOP, WALL_SIDE, WALL_TOP } from "./style";
 import { DraftFlag, PinFlag, PlanDefs, useHoldToPin, useWorldDrag } from "./svg";
-import { HIDDEN_KINDS, fixtureTop, isWallMounted } from "./fixtures";
+import { HIDDEN_KINDS, TOP_FILL, fixtureTop, isWallMounted } from "./fixtures";
 import { ITEM_ICON } from "./items";
 import type { Controls, PinTarget, ScreenPoint } from "./target";
 import { usePanZoom } from "./usePanZoom";
@@ -42,16 +42,10 @@ interface Props {
   onSelectItem: (id: string) => void;
   onMovePin: (id: string, input: Partial<PinInput>) => void;
   onMoveFixture: (id: string, dx: number, dy: number) => void;
+  /** look only: nothing can be dragged */
+  locked?: boolean;
 }
 
-/** Top-view fill per kind: the object's real colour, so the plan reads like a model from above. */
-const TOP_FILL: Record<string, string> = {
-  base_cabinet: "#5b5750", kitchen_sink: "#5b5750", dishwasher: "#5b5750", filler: "#5b5750", range: "#232426", fridge: "#b9bec4", oven: "#232426", cooktop: "#232426",
-  island: "#5b5750", tall_cabinet: "#d9d2c4", toilet: "#f4efe6", washbasin: "#f4efe6", bathtub: "#f4efe6", shower: "#cfe6ee", vanity: "#a07850",
-  washing_machine: "#f4efe6", dryer: "#f4efe6", water_heater: "#e6e1d6", bed: "#e9e3d6", nightstand: "#8a6a48", wardrobe: "#8a6a48", sofa: "#6f7486",
-  armchair: "#6f7486", chair: "#a07850", dining_table: "#a07850", table: "#a07850", desk: "#a07850", bookshelf: "#8a6a48", sideboard: "#8a6a48",
-  tv: "#151618", lamp: "#f3c56b", plant: "#3f7a4a", car: "#55606b", fireplace: "#8d8a83",
-};
 /** Fixtures that can't be picked or moved in the top view: linework of something else, and things up
  *  on the wall (wall cabinets, hoods) that sit over the counter. */
 const inert = (f: Fixture) => HIDDEN_KINDS.has(f.kind) || isWallMounted(f);
@@ -287,9 +281,9 @@ export function FloorCanvas(props: Props) {
           const h = fixtureTop(f);
           const live = drag?.id === `f:${f.id}` ? { dx: drag.x - f.center[0], dy: drag.y - f.center[1] } : null;
           return (
-            <g key={f.id} onClick={(e) => click(f.id, e)} onPointerEnter={hov(f.id)} onPointerLeave={hov(null)} className={pinMode ? "cursor-crosshair" : live ? "cursor-grabbing" : sel ? "cursor-grab" : "cursor-pointer"} opacity={inRoom(f.room_id) ? 1 : 0.3}
+            <g key={f.id} onClick={(e) => click(f.id, e)} onPointerEnter={hov(f.id)} onPointerLeave={hov(null)} className={pinMode ? "cursor-crosshair" : live ? "cursor-grabbing" : (sel || room) && !props.locked ? "cursor-grab" : "cursor-pointer"} opacity={inRoom(f.room_id) ? 1 : 0.3}
               transform={live ? `translate(${live.dx} ${live.dy})` : undefined}
-              onPointerDown={sel && !pinMode ? (e) => start(`f:${f.id}`, e, { x: f.center[0], y: f.center[1] }, (nx, ny) => props.onMoveFixture(f.id, Math.round(nx - f.center[0]), Math.round(ny - f.center[1])), (q, free) => (free ? q : { x: Math.round(q.x / 10) * 10, y: Math.round(q.y / 10) * 10 })) : undefined}>
+              onPointerDown={(sel || room) && !pinMode && !props.locked ? (e) => start(`f:${f.id}`, e, { x: f.center[0], y: f.center[1] }, (nx, ny) => props.onMoveFixture(f.id, Math.round(nx - f.center[0]), Math.round(ny - f.center[1])), (q, free) => (free ? q : { x: Math.round(q.x / 10) * 10, y: Math.round(q.y / 10) * 10 })) : undefined}>
               {fill && <path d={pathD(shape)} fill="#000" fillOpacity={0.35} transform={`translate(${Math.min(h, 2200) * 0.08} ${Math.min(h, 2200) * 0.14})`} pointerEvents="none" />}
               {fill && <path d={pathD(shape)} fill={fill} fillOpacity={colorMode === "progress" && st ? 0.85 : 1} />}
               <rect x={b[0]} y={b[1]} width={b[2] - b[0]} height={b[3] - b[1]} rx={40} fill={sel ? CHALK : hot ? "#fff" : "transparent"} fillOpacity={sel ? 0.16 : 0.1}
