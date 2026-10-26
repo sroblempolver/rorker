@@ -170,4 +170,7 @@ export interface Repo {
   getSharedView(token: string): Promise<SharedWork | null>;
   /** The person's own link (all their tasks for this company), made the first time it's asked for. */
   personLink(companyId: string, userId: string, memberId: string): Promise<ShareLink>;
+  /** A photo sent from a shared link onto one of that link's pins; returns the pin's photos. Null when
+   *  the link is off or the pin isn't one it shows. */
+  addSharedPhoto(token: string, pinId: string, file: File): Promise<string[] | null>;
 }

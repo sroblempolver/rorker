@@ -41,7 +41,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const [colorMode, setColorMode] = useState<ColorMode>("type");
   const [pinMode, setPinMode] = useState(false);
   // a pin being made: `at` set means the quick card at that screen point, otherwise the full form
-  const [draft, setDraft] = useState<(PinTarget & { at?: ScreenPoint; preset?: { kind: PinKind; title: string; tagged?: string[] } }) | null>(null);
+  const [draft, setDraft] = useState<(PinTarget & { at?: ScreenPoint; preset?: { kind: PinKind; title: string; tagged?: string[]; photo?: boolean } }) | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab>(data.plan ? "details" : "plan");
   const [flyTo, setFlyTo] = useState<{ ids: string[]; n: number } | null>(null);
@@ -371,8 +371,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
           )}
           {quick && draft?.at && (
             <QuickPin key={`${draft.at.x},${draft.at.y}`} plan={view} target={draft} left={quick.left} top={quick.top} onCancel={() => setDraft(null)}
-              onSave={async (kind, title, tagged) => { await guard(() => createPin({ kind, title, tagged, due_date: today(), element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, anchor: draft.anchor, priority: kind === "issue" ? 2 : 1 })); }}
-              onMore={(kind, title, tagged) => { setDraft({ ...draft, at: undefined, preset: { kind, title, tagged } }); setTab("pins"); }} />
+              onSave={async (kind, title, tagged, photo) => { await guard(() => createPin({ kind, title, tagged, due_date: today(), close_requirement: photo ? "photo" : "confirm", element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, anchor: draft.anchor, priority: kind === "issue" ? 2 : 1 })); }}
+              onMore={(kind, title, tagged, photo) => { setDraft({ ...draft, at: undefined, preset: { kind, title, tagged, photo } }); setTab("pins"); }} />
           )}
           {toast && <div role="status" className="absolute left-1/2 -translate-x-1/2 top-14 z-10 px-4 py-2 rounded-[3px] bg-panel-2 border border-line border-l-[3px] border-l-accent shadow-lg text-[14px]">{toast}</div>}
           {plan && questions > 0 && tab !== "plan" && (

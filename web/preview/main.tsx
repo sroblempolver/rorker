@@ -63,8 +63,17 @@ function sharedWork(jobs: WorkspaceData[], token: string, photos: Map<string, st
 /** photos posted on pins in the preview, by pin id, so a shared link can show them */
 const pinPhotos = new Map<string, string[]>();
 
+/** pin threads in the preview, by pin id */
+const comments = new Map<string, PinComment[]>();
+/** a photo sent from a shared link: it lands in the pin's thread, as it would in the app */
+async function sendSharedPhoto(label: string, pinId: string, file: File) {
+  const list = [...(comments.get(pinId) ?? []), { id: uid(), pin_id: pinId, author_id: null, author_name: label, body: `Photo from ${label}`, photos: [URL.createObjectURL(file)], created_at: now() }];
+  comments.set(pinId, list);
+  pinPhotos.set(pinId, list.flatMap((c) => c.photos));
+  return pinPhotos.get(pinId)!;
+}
+
 function memoryApi(d: WorkspaceData): WorkspaceApi {
-  const comments = new Map<string, PinComment[]>();
   const renumber = () => { d.stages = d.stages.map((s, i) => ({ ...s, position: i + 1 })); return d.stages; };
   return {
     backHref: "/jobs",
@@ -229,7 +238,7 @@ function App() {
         <NewProject onCreate={created} onCancel={() => setPage("jobs")} />
       ) : page === "shared" && share ? (
         <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">
-          {(() => { const v = sharedWork(jobs, share.token, pinPhotos); return v ? <SharedWorkView key={share.token + share.pin} work={v} pin={share.pin} onBack={() => setPage("job")} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
+          {(() => { const v = sharedWork(jobs, share.token, pinPhotos); return v ? <SharedWorkView key={share.token + share.pin} work={v} pin={share.pin} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} onBack={() => { setVer((n) => n + 1); setPage("job"); }} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
         </div>
       ) : page === "team" ? (
         <div className="flex-1 overflow-y-auto">

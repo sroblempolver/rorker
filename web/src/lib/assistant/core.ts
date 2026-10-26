@@ -53,6 +53,7 @@ export const TOOLS: ToolSpec[] = [
       job: JOB, kind: { type: "string", enum: PIN_KINDS }, title: { type: "string" }, details: { type: "string" },
       element_id: { type: "string", description: "Room, wall, door, window or object id from find_in_plan or job_overview" },
       due_date: { type: "string", description: "YYYY-MM-DD" }, tag: { type: "array", items: { type: "string" }, description: "Team members' names" }, high_priority: { type: "boolean" },
+      photo_request: { type: "boolean", description: "Asking the tagged person for a photo of this spot (\"get Marco to send a photo of the sink\"): a task they close with a photo, sent from their link" },
     }, required: ["kind", "title"] },
   },
   {
@@ -294,7 +295,7 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
       const { ids, unknown } = matchMembers(await b.members(), input.tag);
       const pin = await b.createPin(d.job.id, {
         kind, title, body: str(input.details) || null, element_id: elementId, floor_id: e?.floor.id ?? null,
-        due_date: date(input.due_date) ?? today(), tagged: ids, priority: input.high_priority ? 2 : 1,
+        due_date: date(input.due_date) ?? today(), tagged: ids, priority: input.high_priority ? 2 : 1, close_requirement: input.photo_request ? "photo" : "confirm",
       });
       changed.any = true;
       return { added: `#${pin.number}`, where: where(d.plan, pin), due: pin.due_date, tagged: ids.length, ...(unknown.length ? { not_on_team: unknown } : {}) };

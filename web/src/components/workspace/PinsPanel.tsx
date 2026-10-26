@@ -91,7 +91,7 @@ export function PinsList({ pins, plan, onSelect, onNew, initialFilter = "open" }
 }
 
 export function PinForm({ plan, draft, preset, stages, onCancel, onCreate }: {
-  plan: Plan | null; draft: PinTarget; preset?: { kind: PinKind; title: string; body?: string; tagged?: string[] }; stages: JobStage[];
+  plan: Plan | null; draft: PinTarget; preset?: { kind: PinKind; title: string; body?: string; tagged?: string[]; photo?: boolean }; stages: JobStage[];
   onCancel: () => void; onCreate: (input: PinInput) => Promise<void>;
 }) {
   const [kind, setKind] = useState<PinKind>(preset?.kind ?? "task");
@@ -100,7 +100,7 @@ export function PinForm({ plan, draft, preset, stages, onCancel, onCreate }: {
   const [due, setDue] = useState(today); // one date it has to be done by, today unless changed
   const { members } = useTeam();
   const [tagged, setTagged] = useState<string[]>(preset?.tagged ?? []);
-  const [photo, setPhoto] = useState(false);
+  const [photo, setPhoto] = useState(!!preset?.photo);
   const [stage, setStage] = useState(stages.find((s) => s.status === "active")?.id ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -164,7 +164,7 @@ export function PinForm({ plan, draft, preset, stages, onCancel, onCreate }: {
       </div>
       <label className="flex items-center gap-2.5 text-[14px] cursor-pointer">
         <input type="checkbox" checked={photo} onChange={(x) => setPhoto(x.target.checked)} className="w-4 h-4 accent-[var(--accent)]" />
-        Needs a photo before it can be closed
+        Needs a photo before it can be closed (asks whoever is tagged for one)
       </label>
       {err && <p className="text-red text-sm">{err}</p>}
       <div className="flex gap-2">
@@ -321,20 +321,26 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
  *  moves to the full form in the side panel with what you typed. */
 export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel }: {
   plan: Plan | null; target: PinTarget; left: number; top: number;
-  onSave: (kind: PinKind, title: string, tagged: string[]) => Promise<void>; onMore: (kind: PinKind, title: string, tagged: string[]) => void; onCancel: () => void;
+  onSave: (kind: PinKind, title: string, tagged: string[], photo: boolean) => Promise<void>; onMore: (kind: PinKind, title: string, tagged: string[], photo: boolean) => void; onCancel: () => void;
 }) {
   const { members } = useTeam();
   const [tagged, setTagged] = useState<string[]>([]);
-  const [kind, setKind] = useState<PinKind>("note");
+  // "Photo" asks someone for a photo of this spot: a task that needs a photo to close
+  const [choice, setChoice] = useState<PinKind | "photo">("note");
+  const photo = choice === "photo";
+  const kind: PinKind = photo ? "task" : choice;
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
+  const [needWho, setNeedWho] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => ref.current?.focus(), []);
   const save = async (ev: React.FormEvent) => {
     ev.preventDefault();
-    if (!title.trim()) return onMore(kind, "", tagged);
+    const t = title.trim() || (photo ? "Photo of this spot" : "");
+    if (!t) return onMore(kind, "", tagged, photo);
+    if (photo && !tagged.length) return setNeedWho(true);
     setBusy(true);
-    try { await onSave(kind, title.trim(), tagged); } finally { setBusy(false); }
+    try { await onSave(kind, t, tagged, photo); } finally { setBusy(false); }
   };
   return (
     <form onSubmit={save} onKeyDown={(e) => e.key === "Escape" && onCancel()} style={{ left, top }}
@@ -344,24 +350,26 @@ export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel }: 
         <span className="eyebrow !text-[12px] truncate">{where(plan, target)}</span>
         <button type="button" onClick={onCancel} className="ml-auto text-muted hover:text-text text-lg leading-none" aria-label="Cancel">×</button>
       </div>
-      <div className="grid grid-cols-4 gap-1">
+      <div className="grid grid-cols-5 gap-1">
         {KINDS.map((k) => (
-          <button type="button" key={k} onClick={() => setKind(k)} aria-pressed={kind === k}
-            className={`h-7 rounded-[3px] border text-[12px] ${kind === k ? "border-transparent text-[#111] font-semibold" : "border-line bg-panel-2 hover:bg-panel-3"}`}
-            style={kind === k ? { background: PIN_COLOR[k] } : undefined}>{PIN_LABEL[k]}</button>
+          <button type="button" key={k} onClick={() => setChoice(k)} aria-pressed={choice === k}
+            className={`h-7 rounded-[3px] border text-[12px] ${choice === k ? "border-transparent text-[#111] font-semibold" : "border-line bg-panel-2 hover:bg-panel-3"}`}
+            style={choice === k ? { background: PIN_COLOR[k] } : undefined}>{PIN_LABEL[k]}</button>
         ))}
+        <button type="button" onClick={() => setChoice("photo")} aria-pressed={photo} title="Ask someone for a photo of this spot"
+          className={`h-7 rounded-[3px] border text-[12px] ${photo ? "border-transparent text-[#111] font-semibold bg-chalk" : "border-line bg-panel-2 hover:bg-panel-3"}`}>Photo</button>
       </div>
       <input ref={ref} className="input !h-9" value={title} onChange={(e) => setTitle(e.target.value)}
-        placeholder={kind === "note" ? "Note for this spot" : kind === "issue" ? "What is wrong here?" : kind === "material" ? "What goes here?" : "What needs doing here?"} />
+        placeholder={photo ? "Photo of this spot (what to show)" : kind === "note" ? "Note for this spot" : kind === "issue" ? "What is wrong here?" : kind === "material" ? "What goes here?" : "What needs doing here?"} />
       {members.length > 0 && (
         <div>
-          <p className="text-[11.5px] text-muted mb-1">Tag staff</p>
+          <p className={`text-[11.5px] mb-1 ${needWho && !tagged.length ? "text-amber" : "text-muted"}`}>{photo ? "Who takes it?" : "Tag staff"}</p>
           <div className="max-h-[96px] overflow-y-auto scroll-thin"><StaffPicker compact members={members} value={tagged} onChange={setTagged} /></div>
         </div>
       )}
       <div className="flex gap-1.5">
         <button className="btn btn-primary btn-sm flex-1" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
-        <button type="button" className="btn btn-sm" onClick={() => onMore(kind, title, tagged)}>More…</button>
+        <button type="button" className="btn btn-sm" onClick={() => onMore(kind, title, tagged, photo)}>More…</button>
       </div>
     </form>
   );

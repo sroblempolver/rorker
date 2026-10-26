@@ -1,6 +1,6 @@
 import "server-only";
 import { supabaseAdmin, supabaseServer, SUPABASE_URL } from "@/lib/supabase/server";
-import { linkPins, newToken, shareWork, type ShareJobData } from "@/lib/share";
+import { linkLive, linkPins, newToken, shareWork, type ShareJobData } from "@/lib/share";
 import type { Plan } from "@/lib/plan/types";
 import type {
   Company, CompanyInput, ElementEdit, ElementState, ItemInput, Job, JobInput, JobItem, JobStage, JobSummary, Member, MemberInput, Pin, PinComment, PinInput,
@@ -331,6 +331,20 @@ export class SupabaseRepo implements Repo {
       return { company, job, plan: plan?.data ?? null, edits, items, pins, stages, members, photos };
     }));
     return shareWork(link, company, data);
+  }
+  async addSharedPhoto(token: string, pinId: string, file: File) {
+    if (!/^[\w-]{20,64}$/.test(token) || !/^[\w-]{1,64}$/.test(pinId)) return null;
+    // no one is signed in: check the link covers this pin, then write with the service client
+    const repo = new SupabaseRepo(true);
+    const sb = await repo.db();
+    const link = check(await sb.from("share_links").select("*").eq("token", token).maybeSingle()) as ShareLink | null;
+    const pin = check(await sb.from("pins").select("*").eq("id", pinId).maybeSingle()) as (Pin & { company_id: string }) | null;
+    if (!link || !pin || !linkLive(link) || pin.company_id !== link.company_id || (link.job_id && link.job_id !== pin.job_id) || !linkPins(link, [pin]).length) return null;
+    const path = `${pin.company_id}/pins/${pinId}/${Date.now()}-${safeName(file.name)}`;
+    check(await sb.storage.from("pin-photos").upload(path, file, { contentType: file.type }));
+    check(await sb.from("pin_comments").insert({ pin_id: pinId, company_id: pin.company_id, author_id: null, body: `Photo from ${link.label}`, photos: [path] }));
+    const rows = check(await sb.from("pin_comments").select("photos").eq("pin_id", pinId).order("created_at")) as { photos: string[] }[];
+    return Promise.all(rows.flatMap((r) => r.photos ?? []).map((ph) => repo.photoUrl(ph)));
   }
   async personLink(companyId: string, userId: string, memberId: string) {
     const sb = await this.db();

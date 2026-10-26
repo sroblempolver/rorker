@@ -27,7 +27,8 @@ var TOOLS = [
       element_id: { type: "string", description: "Room, wall, door, window or object id from find_in_plan or job_overview" },
       due_date: { type: "string", description: "YYYY-MM-DD" },
       tag: { type: "array", items: { type: "string" }, description: "Team members' names" },
-      high_priority: { type: "boolean" }
+      high_priority: { type: "boolean" },
+      photo_request: { type: "boolean", description: 'Asking the tagged person for a photo of this spot ("get Marco to send a photo of the sink"): a task they close with a photo, sent from their link' }
     }, required: ["kind", "title"] }
   },
   {

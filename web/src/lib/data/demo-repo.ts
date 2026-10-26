@@ -12,7 +12,7 @@ import type {
   PlanRow, PlanRun, ShareLink, ShareLinkInput, Repo, StageStatus, StageTemplate,
 } from "./types";
 import { DEFAULT_TEMPLATES } from "./templates";
-import { linkPins, newToken, shareWork, type ShareJobData } from "@/lib/share";
+import { linkLive, linkPins, newToken, shareWork, type ShareJobData } from "@/lib/share";
 import { DEMO_CREW, sampleItems, samplePins, sampleStates } from "@/demo/sample";
 
 const DIR = path.join(process.cwd(), ".data");
@@ -417,6 +417,17 @@ export class DemoRepo implements Repo {
       data.push({ company, job, plan, edits: await this.listElementEdits(job.id), items: await this.listItems(job.id), pins, stages: await this.listStages(job.id), members, photos });
     }
     return shareWork(link, company, data);
+  }
+  async addSharedPhoto(token: string, pinId: string, file: File) {
+    const db = load();
+    const link = (db.shares ?? []).find((l) => l.token === token);
+    const pin = db.pins.find((p) => p.id === pinId);
+    const job = pin && db.jobs.find((j) => j.id === pin.job_id);
+    if (!link || !pin || !job || !linkLive(link) || (link.job_id ? link.job_id !== job.id : link.company_id !== job.company_id) || !linkPins(link, [pin]).length) return null;
+    const rel = await this.saveFile(`${job.company_id}/pins/${pinId}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`, file);
+    tx((d) => d.comments.push({ id: randomUUID(), pin_id: pinId, author_id: null, body: `Photo from ${link.label}`, photos: [rel], created_at: now() }));
+    const paths = load().comments.filter((c) => c.pin_id === pinId).flatMap((c) => c.photos);
+    return Promise.all(paths.map((x) => this.photoUrl(x)));
   }
   async personLink(companyId: string, _userId: string, memberId: string) {
     return tx((db) => {

@@ -19,5 +19,5 @@ export default async function SharedPage({ params, searchParams }: { params: Pro
       </div>
     </main>
   );
-  return <main className="h-screen flex flex-col bg-ink"><SharedWorkView work={view} pin={pin ?? null} /></main>;
+  return <main className="h-screen flex flex-col bg-ink"><SharedWorkView work={view} pin={pin ?? null} token={token} /></main>;
 }

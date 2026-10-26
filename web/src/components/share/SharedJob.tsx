@@ -1,9 +1,10 @@
 "use client";
 // A job opened from a shared link: no sign-in, nothing to download. The plan (look around, step
-// inside, see their flags) and a list of only their tasks, with the photos posted on them. Nothing can
-// be changed from here. A person's own link covers every job they have tasks on, with a row of jobs to
+// inside, see their flags) and a list of only their tasks, with the photos posted on them. The one thing
+// they can do from here is send a photo onto one of their tasks (a photo the contractor asked for, or
+// their work). A person's own link covers every job they have tasks on, with a row of jobs to
 // switch between, and a link copied from one task opens on that task.
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import type { Member, SharedView, SharedWork } from "@/lib/data/types";
 import type { ElementStatus } from "@/lib/plan/types";
 import { applyEdits } from "@/lib/plan/edits";
@@ -16,8 +17,22 @@ import { PinBadge, PinRow, where } from "@/components/workspace/PinsPanel";
 
 const nothing = () => {};
 
+/** Send a photo onto a pin: returns that pin's photos. The real app posts to the link's own address. */
+export type SendPhoto = (pinId: string, file: File) => Promise<string[]>;
+export const postPhoto = (token: string): SendPhoto => async (pinId, file) => {
+  const f = new FormData();
+  f.set("pin", pinId);
+  f.set("photo", file);
+  const r = await fetch(`/s/${encodeURIComponent(token)}/photo`, { method: "POST", body: f }).catch(() => null);
+  const j = r ? ((await r.json().catch(() => null)) as { photos?: string[]; error?: string } | null) : null;
+  if (!r?.ok || !j?.photos) throw new Error(j?.error ?? "Couldn't send the photo. Check your connection and try again.");
+  return j.photos;
+};
+
 /** Everything a link opens: one job, or the person's jobs with a row to switch between them. */
-export function SharedWorkView({ work, pin, onBack }: { work: SharedWork; /** open on this task (from a link copied off it) */ pin?: string | null; onBack?: () => void }) {
+export function SharedWorkView({ work, pin, token, send: sendProp, onBack }: { work: SharedWork; /** open on this task (from a link copied off it) */ pin?: string | null;
+  /** the link's token, for sending photos; or `send` to handle them another way (the preview) */ token?: string; send?: SendPhoto; onBack?: () => void }) {
+  const send = sendProp ?? (token ? postPhoto(token) : undefined);
   const start = work.jobs.find((v) => v.pins.some((p) => p.id === pin)) ?? work.jobs[0];
   const [jobId, setJobId] = useState(start?.job.id ?? null);
   const view = work.jobs.find((v) => v.job.id === jobId) ?? start;
@@ -41,10 +56,11 @@ export function SharedWorkView({ work, pin, onBack }: { work: SharedWork; /** op
       ))}
     </nav>
   ) : null;
-  return <SharedJob key={view.job.id} view={view} pin={view.job.id === start?.job.id ? pin : null} switcher={switcher} onBack={onBack} />;
+  return <SharedJob key={view.job.id} view={view} pin={view.job.id === start?.job.id ? pin : null} switcher={switcher} send={send} onBack={onBack} />;
 }
 
-export function SharedJob({ view, pin: firstPin, switcher, onBack }: { view: SharedView; pin?: string | null; switcher?: ReactNode; /** the preview's way back to the full app */ onBack?: () => void }) {
+export function SharedJob({ view, pin: firstPin, switcher, send, onBack }: { view: SharedView; pin?: string | null; switcher?: ReactNode; send?: SendPhoto; /** the preview's way back to the full app */ onBack?: () => void }) {
+  const [photos, setPhotos] = useState(view.photos);
   const plan = useMemo(() => (view.plan ? applyEdits(view.plan, view.edits) : null), [view]);
   const startPin = view.pins.find((p) => p.id === firstPin) ?? null;
   const [level, setLevel] = useState<Level>(() => (startPin && plan ? pinLevel(plan, startPin) : null) ?? { kind: "site" });
@@ -103,18 +119,19 @@ export function SharedJob({ view, pin: firstPin, switcher, onBack }: { view: Sha
                   </div>
                   <p className="text-[13.5px]"><span className="eyebrow !text-[11px] block">Where</span>{where(plan, pin)}</p>
                   {pin.body && <p className="text-[14px] whitespace-pre-wrap leading-relaxed">{pin.body}</p>}
-                  {pin.close_requirement === "photo" && <p className="chip">Needs a photo when it&apos;s done</p>}
+                  {pin.close_requirement === "photo" && !photos[pin.id]?.length && <p className="chip !text-amber !border-amber">Photo requested: take one of this spot</p>}
+                  {send && <PhotoButton key={pin.id} requested={pin.close_requirement === "photo" && !photos[pin.id]?.length} send={(f) => send(pin.id, f).then((ph) => setPhotos((m) => ({ ...m, [pin.id]: ph })))} />}
                   {pin.links.length > 0 && (
                     <div className="space-y-1">
                       <span className="eyebrow !text-[11px] block">Links</span>
                       {pin.links.map((l) => <a key={l.url} href={l.url} target="_blank" rel="noreferrer noopener" className="block text-[14px] text-accent underline truncate">{l.title || l.url}</a>)}
                     </div>
                   )}
-                  {!!view.photos[pin.id]?.length && (
+                  {!!photos[pin.id]?.length && (
                     <div className="space-y-1">
                       <span className="eyebrow !text-[11px] block">Photos</span>
                       <div className="grid grid-cols-3 gap-1.5">
-                        {view.photos[pin.id].map((src) => <a key={src} href={src} target="_blank" rel="noreferrer noopener"><img src={src} alt="" className="w-full aspect-square object-cover rounded-[3px] border border-line" /></a>)}
+                        {photos[pin.id].map((src) => <a key={src} href={src} target="_blank" rel="noreferrer noopener"><img src={src} alt="" className="w-full aspect-square object-cover rounded-[3px] border border-line" /></a>)}
                       </div>
                     </div>
                   )}
@@ -141,5 +158,28 @@ export function SharedJob({ view, pin: firstPin, switcher, onBack }: { view: Sha
         </div>
       </div>
     </TeamContext.Provider>
+  );
+}
+
+/** Take or pick a photo and send it onto the task. On a phone it opens the camera. */
+function PhotoButton({ requested, send }: { requested: boolean; send: (f: File) => Promise<void> }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [state, setState] = useState<"idle" | "busy" | "sent">("idle");
+  const [err, setErr] = useState<string | null>(null);
+  const pick = async (f: File | undefined) => {
+    if (!f) return;
+    setErr(null);
+    setState("busy");
+    try { await send(f); setState("sent"); } catch (x) { setErr(x instanceof Error ? x.message : "Couldn't send the photo."); setState("idle"); }
+    if (ref.current) ref.current.value = "";
+  };
+  return (
+    <div className="space-y-1">
+      <input ref={ref} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => void pick(e.target.files?.[0])} aria-label="Photo" />
+      <button type="button" onClick={() => ref.current?.click()} disabled={state === "busy"} className={`btn w-full ${requested ? "btn-primary" : ""}`}>
+        {state === "busy" ? "Sending…" : state === "sent" ? "Sent. Add another photo" : requested ? "Take the photo" : "Add a photo"}
+      </button>
+      {err && <p className="text-[12.5px] text-red">{err}</p>}
+    </div>
   );
 }
