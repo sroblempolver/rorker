@@ -3,6 +3,7 @@
 import type { AssistantSend } from "@/components/assistant/Assistant";
 import type { ClientStart } from "@/components/billing/MoneyPanel";
 import type { Billing, Brand } from "@/lib/billing/types";
+import type { MaterialLine, MaterialsApi, MaterialsJob } from "@/lib/materials/types";
 import type { ElementEdit, ElementState, ItemInput, Job, JobItem, JobStage, Member, Pin, PinComment, PinInput, PinStatus, PlanRow, PlanRun, ShareLink, ShareLinkInput, StageStatus } from "@/lib/data/types";
 
 export interface WorkspaceData {
@@ -30,6 +31,8 @@ export interface WorkspaceData {
   payoutsConnected?: boolean;
   /** open on the Money tab (coming back from the client's page) */
   startOnMoney?: boolean;
+  /** the materials list: lines on every job this person can see, and those jobs (to split an add) */
+  materials?: { lines: MaterialLine[]; jobs: MaterialsJob[] };
 }
 
 export interface WorkspaceApi {
@@ -72,4 +75,8 @@ export interface WorkspaceApi {
     openClient?(start: ClientStart): void;
     connectPayouts(): Promise<void>;
   };
+  /** the materials list; left out, the Buy tab is hidden */
+  materials?: MaterialsApi;
+  /** open the shopping run across every job */
+  openShopping?: () => void;
 }

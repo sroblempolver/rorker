@@ -18,15 +18,18 @@ import type { PinTarget, ScreenPoint } from "@/components/plan/target";
 import { TeamContext } from "@/components/team/context";
 import type { WorkspaceApi, WorkspaceData } from "./api";
 import { Inspector, ProjectSummary, type AddPin } from "./Inspector";
-import { PinDetail, PinForm, PinsList, QuickPin } from "./PinsPanel";
+import { PinDetail, PinForm, PinsList, QuickPin, where } from "./PinsPanel";
 import { PlanPanel, UploadBox } from "./PlanPanel";
 import { ShareDialog } from "./ShareDialog";
 import { useFollowMarks } from "./useFollowMarks";
 import { StagesPanel, StageStrip } from "./StagesPanel";
 import { MoneyPanel } from "@/components/billing/MoneyPanel";
+import { AddMaterial, MaterialsPanel, blankLine, type BuyTarget } from "@/components/materials/MaterialsPanel";
+import { parseQty, type Suggestion } from "@/lib/materials/suggest";
+import { NEXT_STATUS, pinSummary, qtyText, type MaterialInput, type MaterialLine } from "@/lib/materials/types";
 
-type Tab = "details" | "pins" | "stages" | "plan" | "money";
 
+type Tab = "details" | "pins" | "buy" | "stages" | "plan" | "money";
 export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; api: WorkspaceApi; onAllJobs: () => void }) {
   const [plan, setPlan] = useState(data.plan);
   const [runs, setRuns] = useState(data.runs);
@@ -53,6 +56,16 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const [billing, setBilling] = useState(data.billing);
   const [payouts, setPayouts] = useState(!!data.payoutsConnected);
   const [moneyKey, setMoneyKey] = useState(0);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // materials: lines on every job (so one add can split across jobs), the add sheet, the line to open
+  const [mlines, setMlines] = useState<MaterialLine[]>(data.materials?.lines ?? []);
+  const [buyDraft, setBuyDraft] = useState<{ target: BuyTarget | null; preset?: Partial<Suggestion> & { name?: string } } | null>(null);
+  const [buyFocus, setBuyFocus] = useState<{ id: string | null; n: number }>({ id: null, n: 0 });
+  const [lastBuyer, setLastBuyer] = useState<string | null>(null);
+  const mjobs = useMemo(() => data.materials?.jobs ?? [{ id: data.job.id, name: data.job.name, address: data.job.address }], [data.materials?.jobs, data.job]);
+  useEffect(() => { void api.materials?.list().then(setMlines).catch(() => {}); }, [api]);
+  // opening the add sheet or the list starts at the top
+  useEffect(() => { if (tab === "buy") panelRef.current?.scrollTo(0, 0); }, [tab, buyDraft]);
 
   const say = useCallback((m: string) => { setToast(m); setTimeout(() => setToast((t) => (t === m ? null : t)), 3200); }, []);
   const guard = useCallback(async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
@@ -85,6 +98,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     firstData.current = data;
     setPlan(data.plan); setRuns(data.runs); setStages(data.stages); setPins(data.pins); setItems(data.items); setEdits(data.edits);
     setBilling(data.billing); setMoneyKey((k) => k + 1);
+    if (data.materials) setMlines(data.materials.lines);
     setStates(new Map(data.states.map((s) => [s.element_id, s.status] as [string, ElementStatus])));
   }, [data]);
   const [askOpen, setAskOpen] = useState(false);
@@ -236,6 +250,72 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     await guard(() => api.deleteItem(id));
   }, [api, guard]);
 
+  /** Add lines to the list; the ones for this job with a spot get a material pin on the map. Lines
+   *  added together at one spot (a whole room's list, a kit) share one pin, so the map stays readable. */
+  const addMaterials = useCallback(async (inputs: MaterialInput[], together = false) => {
+    const m = api.materials;
+    if (!m || !inputs.length) return;
+    const here = (i: MaterialInput) => i.job_id === job.id && !!(i.element_id || i.anchor || i.x != null);
+    const newPin = async (ls: MaterialInput[]) => {
+      const i = ls[0];
+      const { status: _s, ...sum } = pinSummary(ls); void _s;
+      const p = await guard(() => api.createPin({ kind: "material", ...sum, element_id: i.element_id, floor_id: i.floor_id, x: i.x, y: i.y, anchor: i.anchor, stage_id: i.stage_id, priority: 1 }));
+      if (p) setPins((l) => [...l, p]);
+      return p?.id ?? null;
+    };
+    let withPins: MaterialInput[];
+    if (together) {
+      const pid = inputs.some(here) ? await newPin(inputs.filter(here)) : null;
+      withPins = inputs.map((i) => (here(i) ? { ...i, pin_id: pid } : i));
+    } else withPins = await Promise.all(inputs.map(async (i) => (here(i) ? { ...i, pin_id: await newPin([i]) } : i)));
+    const made = await guard(() => m.create(withPins));
+    if (!made) return;
+    setMlines((l) => [...l, ...made]);
+    if (inputs[0]?.buyer) setLastBuyer(inputs[0].buyer);
+    const first = made[0];
+    const jobsN = new Set(made.map((x) => x.job_id)).size;
+    say(together ? `Added ${made.length} items to the list` : made.length > 1 ? `Added ${first.name} for ${jobsN} jobs` : `On the list: ${qtyText(first.qty, first.unit)} ${first.name}`);
+  }, [api, guard, job.id, say]);
+
+  /** Keep a material pin in step with every line on it. */
+  const syncPin = useCallback(async (pinId: string | null, all: MaterialLine[]) => {
+    if (!pinId || !pins.some((p) => p.id === pinId)) return;
+    const on = all.filter((l) => l.pin_id === pinId);
+    if (!on.length) { setPins((ps) => ps.filter((p) => p.id !== pinId)); await guard(() => api.deletePin(pinId)); return; }
+    const sum = pinSummary(on);
+    setPins((ps) => ps.map((p) => (p.id === pinId ? { ...p, ...sum } : p)));
+    await guard(() => api.updatePin(pinId, sum));
+  }, [api, guard, pins]);
+
+  const updateMaterial = useCallback(async (id: string, patch: Partial<MaterialInput>) => {
+    const before = mlines.find((l) => l.id === id);
+    if (!before || !api.materials) return;
+    const next = { ...before, ...patch } as MaterialLine;
+    const all = mlines.map((x) => (x.id === id ? next : x));
+    setMlines(all);
+    await guard(() => api.materials!.update(id, patch));
+    await syncPin(before.pin_id, all);
+  }, [api, guard, mlines, syncPin]);
+
+  const removeMaterial = useCallback(async (id: string) => {
+    const l = mlines.find((x) => x.id === id);
+    const all = mlines.filter((x) => x.id !== id);
+    setMlines(all);
+    await guard(() => api.materials!.remove(id));
+    await syncPin(l?.pin_id ?? null, all);
+  }, [api, guard, mlines, syncPin]);
+
+  /** One tap on a suggestion: straight onto the list, for whoever was picked last time. */
+  const quickBuy = useCallback((t: BuyTarget, s: Suggestion) => { void addMaterials([blankLine(job.id, t, s, lastBuyer)]); }, [addMaterials, job.id, lastBuyer]);
+  /** Everything picked for a spot at once (a whole room's list): one pin for the lot. */
+  const quickBuyAll = useCallback((t: BuyTarget, list: Suggestion[]) => { void addMaterials(list.map((s) => blankLine(job.id, t, s, lastBuyer)), true); }, [addMaterials, job.id, lastBuyer]);
+  const openBuy = useCallback((target: BuyTarget | null, preset?: Partial<Suggestion> & { name?: string }) => {
+    setBuyDraft({ target, preset });
+    setDraft(null);
+    setTab("buy");
+  }, []);
+  const openLine = useCallback((id: string) => { setBuyDraft(null); setBuyFocus({ id, n: Date.now() }); setTab("buy"); }, []);
+
   const movePin = useCallback((id: string, input: Partial<PinInput>) => { void guard(() => updatePin(id, input)); }, [guard, updatePin]);
 
   /** A count chip (3 tasks, 1 issue): the pins list, showing just those. */
@@ -284,6 +364,14 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         }} />;
       return <PinsList key={pinFilter.n} initialFilter={pinFilter.kind} pins={pins} plan={view} onSelect={showPin} onNew={() => { setPinMode(true); say("Click the map where the pin goes"); }} />;
     }
+    if (tab === "buy") {
+      if (buyDraft) return <AddMaterial key={`${buyDraft.target?.where}${buyDraft.preset?.name}`} target={buyDraft.target} preset={buyDraft.preset} jobs={mjobs} stages={stages} existing={mlines}
+        defaults={{ jobId: job.id, buyer: lastBuyer }} onCancel={() => setBuyDraft(null)} onAdd={async (ls, together) => { await addMaterials(ls, together); setBuyDraft(null); }} />;
+      return <MaterialsPanel key={buyFocus.n} jobId={job.id} lines={mlines} jobs={mjobs} plan={view} stages={stages} focus={buyFocus.id}
+        onAdd={() => openBuy(null)} onUpdate={updateMaterial} onRemove={removeMaterial} onShoppingRun={api.openShopping}
+        onShow={(l) => (l.element_id ? showElements([l.element_id]) : l.pin_id && showPin(l.pin_id))}
+        onSplit={(l, j, q) => void addMaterials([{ ...blankLine(j, null, { name: l.name, unit: l.unit, qty: q }, l.buyer), store: l.store, link: l.link, unit_cost: l.unit_cost, fulfil: l.fulfil, installer: l.installer, note: l.note, group_id: l.group_id }])} />;
+    }
     if (tab === "stages") return (
       <StagesPanel stages={stages}
         onStatus={(id, s) => stageOp(() => api.setStageStatus(id, s))}
@@ -323,8 +411,9 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     return <Inspector plan={view} level={level} selected={selected} states={states} pins={pins} stages={stages} setLevel={setLevel}
       onSetStatus={setStatus} onSelect={select} onSelectPin={showPin} onAddPin={addPin}
       edits={edits} onSaveEdit={saveEdit} items={items} selectedItem={selectedItem} onSelectItem={selectItem}
-      onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind} />;
-  }, [tab, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, data.canShare, say, showPin, updatePin, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
+      onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind}
+      buy={api.materials ? { lines: mlines.filter((l) => l.job_id === job.id && l.status !== "returned"), onQuick: quickBuy, onAll: quickBuyAll, onMore: (t) => openBuy(t), onOpen: openLine, onTick: (id) => { const l = mlines.find((x) => x.id === id); if (l) void updateMaterial(id, { status: NEXT_STATUS[l.status] }); } } : undefined} />;
+  }, [tab, buyDraft, buyFocus, mlines, mjobs, lastBuyer, job.id, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, data.canShare, say, showPin, updatePin, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
     edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext, billing, payouts, moneyKey, data.brand, job, guard]);
 
   // where the quick card sits inside the map, kept on screen
@@ -338,7 +427,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
 
 
   const tabBtn = (t: Tab, label: string, badge?: number) => (
-    <button key={t} onClick={() => { setTab(t); if (t !== "pins") setDraft(null); }} aria-selected={tab === t} role="tab"
+    <button key={t} onClick={() => { if (t === "buy" && tab === "buy") setBuyDraft(null); setTab(t); if (t !== "pins") setDraft(null); }} aria-selected={tab === t} role="tab"
       className={`flex-1 h-12 text-[14px] font-display font-bold tracking-[0.1em] uppercase border-b-[3px] inline-flex items-center justify-center gap-1.5 ${tab === t ? "border-accent text-text" : "border-transparent text-muted hover:text-text"}`}>
       {label}{badge ? <span className={`font-mono text-[11px] rounded-[2px] px-1.5 min-w-[18px] ${t === "plan" ? "bg-accent text-accent-ink" : "bg-panel-3 text-text"}`}>{badge}</span> : null}
     </button>
@@ -396,7 +485,14 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
           {quick && draft?.at && (
             <QuickPin key={`${draft.at.x},${draft.at.y}`} plan={view} target={draft} left={quick.left} top={quick.top} onCancel={() => setDraft(null)}
               onSave={async (kind, title, tagged, photo) => { await guard(() => createPin({ kind, title, tagged, due_date: today(), close_requirement: photo ? "photo" : "confirm", element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, anchor: draft.anchor, priority: kind === "issue" ? 2 : 1 })); }}
-              onMore={(kind, title, tagged, photo) => { setDraft({ ...draft, at: undefined, preset: { kind, title, tagged, photo } }); setTab("pins"); }} />
+              onMore={(kind, title, tagged, photo) => { setDraft({ ...draft, at: undefined, preset: { kind, title, tagged, photo } }); setTab("pins"); }}
+              onBuy={api.materials ? async (title, tagged, more) => {
+                const t: BuyTarget = { element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, anchor: draft.anchor ?? null, where: where(view, draft), suggestions: [] };
+                const q = parseQty(title);
+                if (more || !q.name) return openBuy(t, q.name ? { name: q.name, qty: q.qty } : undefined);
+                await addMaterials([blankLine(job.id, t, q, tagged[0] ?? lastBuyer)]);
+                setDraft(null);
+              } : undefined} />
           )}
           {toast && <div role="status" className="absolute left-1/2 -translate-x-1/2 top-14 z-10 px-4 py-2 rounded-[3px] bg-panel-2 border border-line border-l-[3px] border-l-accent shadow-lg text-[14px]">{toast}</div>}
           {plan && questions > 0 && tab !== "plan" && (
@@ -409,12 +505,13 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
           <div role="tablist" className="flex border-b border-line shrink-0 px-2">
             {tabBtn("details", "Details")}
             {tabBtn("pins", "Pins", openPins)}
+            {api.materials && tabBtn("buy", "Buy", mlines.filter((l) => l.job_id === job.id && l.status === "to_buy").length)}
             {tabBtn("stages", "Stages")}
             {tabBtn("plan", "Plan", questions)}
             {billing && api.money && tabBtn("money", "Money", billing.quotes.filter((q) => q.status === "approved")
               .flatMap((q) => q.schedule).filter((d) => !d.invoice_id && stages.some((s) => s.status === "done" && s.name === d.stage_name)).length)}
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto scroll-thin">{panel}</div>
+          <div ref={panelRef} className="flex-1 min-h-0 overflow-y-auto scroll-thin">{panel}</div>
         </aside>
       </div>
       {sharing && <ShareDialog api={api} members={data.members} pins={pins} plan={view} onClose={() => setSharing(false)} />}
