@@ -117,12 +117,76 @@ function byGroup(list: Suggestion[]) {
   return [...m];
 }
 
-/** On the Details panel of anything picked on the plan: what this room or item needs, by trade.
- *  Tap a chip and it's on the list; "Add all" takes the whole list (after one confirm). */
-export function BuyHere({ target, lines, members, onQuick, onAll, onMore, onOpen }: {
+/** Suggestions per room and item are off for now: the user wants this spot small. The rules stay in
+ *  lib/materials/suggest.ts; set this to true to bring the chips back. */
+const SHOW_SUGGESTIONS = false;
+
+type BuyHereProps = {
   target: BuyTarget; lines: MaterialLine[]; members: Member[];
-  onQuick: (s: Suggestion) => void; onAll: (list: Suggestion[]) => void; onMore: () => void; onOpen: (id: string) => void;
-}) {
+  onQuick: (s: Suggestion) => void; onAll: (list: Suggestion[]) => void; onMore: () => void; onOpen: (id: string) => void; onTick?: (id: string) => void;
+};
+
+/** On the Details panel of anything picked on the plan: what's on the list for this spot, with a
+ *  tick to move each line along, and one line to add something ("2 outlets", Enter). */
+export function BuyHere(props: BuyHereProps) {
+  if (SHOW_SUGGESTIONS) return <BuySuggestions {...props} />;
+  const { lines, members, onQuick, onMore, onOpen, onTick } = props;
+  return <MaterialsHere lines={lines} members={members} onQuick={onQuick} onMore={onMore} onOpen={onOpen} onTick={onTick} />;
+}
+
+function MaterialsHere({ lines, members, onQuick, onMore, onOpen, onTick }: Pick<BuyHereProps, "lines" | "members" | "onQuick" | "onMore" | "onOpen" | "onTick">) {
+  const [text, setText] = useState("");
+  const toBuy = lines.filter((l) => l.status === "to_buy").length;
+  const ordered = lines.filter((l) => l.status === "ordered").length;
+  const urgent = lines.filter((l) => orderNow(l, today(), 2)).length;
+  const add = () => { const q = parseQty(text); if (!q.name) return; onQuick({ name: q.name, qty: q.qty, unit: "ea", unit_cost: 0 }); setText(""); };
+  return (
+    <div>
+      <div className="flex items-baseline gap-2 mb-2">
+        <p className="eyebrow whitespace-nowrap">Materials here</p>
+        <span className="ml-auto font-mono text-[12.5px] text-muted">
+          {lines.length ? [toBuy && `${toBuy} to buy`, ordered && `${ordered} on order`].filter(Boolean).join(" · ") || "all in" : "none yet"}
+          {urgent > 0 && <span className="text-red"> · {urgent} order today</span>}
+        </span>
+      </div>
+      <form className="flex gap-1.5" onSubmit={(e) => { e.preventDefault(); add(); }}>
+        <input className="input !h-[30px] !text-[13.5px] flex-1 min-w-0" value={text} onChange={(e) => setText(e.target.value)} placeholder="Add: 2 outlets" aria-label="Add material for this spot" />
+        <button type="submit" className="btn btn-primary btn-sm" disabled={!text.trim()}>Add</button>
+        <button type="button" className="btn btn-sm" onClick={onMore} title="Price, store, buyer, lead time, other jobs">More</button>
+      </form>
+      {lines.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {lines.map((l) => {
+            const b = members.find((m) => m.id === l.buyer);
+            const done = l.status === "installed" || l.status === "returned";
+            return (
+              <div key={l.id} className="card !rounded-[3px] pl-1.5 pr-2 flex items-center gap-2">
+                {onTick && (
+                  <button type="button" onClick={() => onTick(l.id)} disabled={done} aria-label={`Mark ${l.name} ${STATUS_LABEL[NEXT_STATUS[l.status]].toLowerCase()}`}
+                    className="w-7 h-8 shrink-0 grid place-items-center">
+                    <span className="w-5 h-5 rounded-[3px] border-2 grid place-items-center text-[11px] font-bold" style={{ borderColor: STATUS_COLOR[l.status], background: l.status === "to_buy" || l.status === "ordered" ? "transparent" : STATUS_COLOR[l.status], color: "#141310" }}>
+                      {l.status === "got" ? "✓" : l.status === "installed" ? "✓✓" : ""}
+                    </span>
+                  </button>
+                )}
+                <button type="button" onClick={() => onOpen(l.id)} className="flex-1 min-w-0 text-left flex items-center gap-2 py-1.5 text-[13px]">
+                  <span className="font-mono text-[12px] font-semibold shrink-0">{qtyText(l.qty, l.unit)}</span>
+                  <span className={`truncate flex-1 ${done ? "line-through text-muted" : ""}`}>{l.name}</span>
+                  {orderNow(l, today(), 2) && <span className="text-red text-[12px] shrink-0">order today</span>}
+                  {b && <Avatar m={b} size={18} />}
+                  <StatusChip s={l.status} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The suggestion chips by trade, with "Add all" (after one confirm). Off for now, see SHOW_SUGGESTIONS. */
+function BuySuggestions({ target, lines, members, onQuick, onAll, onMore, onOpen }: BuyHereProps) {
   const [added, setAdded] = useState<string[]>([]);
   const [confirm, setConfirm] = useState(false);
   const left = target.suggestions.filter((x) => !added.includes(x.name) && !lines.some((l) => l.name === x.name && l.status !== "returned"));
@@ -161,7 +225,7 @@ export function BuyHere({ target, lines, members, onQuick, onAll, onMore, onOpen
           </div>
         ))}
       </div>
-      <button className="btn btn-sm w-full mt-2" onClick={onMore}>Something else, a kit, or for more than one job…</button>
+      <button className="btn btn-sm w-full mt-2" onClick={onMore}>Other item, kit, or more jobs</button>
       {lines.length > 0 && (
         <div className="mt-3 space-y-1">
           <p className="text-[12px] text-muted">On the list for here ({lines.length})</p>
@@ -249,7 +313,7 @@ export function AddMaterial({ target, preset, jobs, defaults, stages, existing, 
       <div>
         <p className="eyebrow">Add to the list</p>
         <h2 className="font-display text-[23px] font-extrabold uppercase leading-tight">{target?.where ?? "Not tied to a spot"}</h2>
-        {!target && <p className="text-[12.5px] text-muted">Tip: pick the spot on the plan first and it shows on the map.</p>}
+        {!target && <p className="text-[12.5px] text-muted">Pick the spot on the plan first to pin it on the map.</p>}
       </div>
       {target && target.suggestions.length > 0 && !name && (
         <div className="flex flex-wrap gap-1.5">
@@ -262,7 +326,7 @@ export function AddMaterial({ target, preset, jobs, defaults, stages, existing, 
       )}
       {!name && (
         <div>
-          <p className="text-[12px] text-muted mb-1">Kits: add a whole set in one go</p>
+          <p className="text-[12px] text-muted mb-1">Kits</p>
           <div className="flex flex-wrap gap-1.5">
             {KITS.map((k) => (
               <button type="button" key={k.name} disabled={busy} onClick={() => addKit(k.items)} title={k.items.map((x) => `${qtyText(x.qty, x.unit)} ${x.name}`).join("\n")}
@@ -307,18 +371,18 @@ export function AddMaterial({ target, preset, jobs, defaults, stages, existing, 
       </div>
       <div><label className="label">Product link</label><input className="input !h-9" value={link} onChange={(e) => setLink(e.target.value)} placeholder="optional" /></div>
 
-      <div><label className="label">Who gets it</label><PersonPick value={buyer} onChange={setBuyer} /></div>
-      <div><label className="label">Who it&apos;s for (installs it)</label><PersonPick value={installer} onChange={setInstaller} none="Not set" /></div>
+      <div><label className="label">Buyer</label><PersonPick value={buyer} onChange={setBuyer} /></div>
+      <div><label className="label">Installer</label><PersonPick value={installer} onChange={setInstaller} none="Not set" /></div>
       <div>
-        <label className="label">How it gets there</label>
+        <label className="label">Pick up or delivery</label>
         <Seg value={fulfil} onChange={setFulfil} options={[["pickup", "Pick up"], ["delivery", "Delivery"], ["stock", "From stock"]]} />
         {fulfil === "delivery" && <input className="input !h-9 mt-1.5" value={deliverTo} onChange={(e) => setDeliverTo(e.target.value)} placeholder={`Deliver to ${jobs.find((j) => j.id === defaults.jobId)?.address ?? "the job"} (or type another address)`} />}
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div><label className="label">Needed by</label><input type="date" className="input !h-9" min={today()} value={needed} onChange={(e) => setNeeded(e.target.value)} /></div>
-        <div><label className="label">Takes (days to get)</label><input className="input !h-9 font-mono" inputMode="numeric" value={lead} onChange={(e) => setLead(e.target.value.replace(/\D/g, ""))} placeholder="in stock" /></div>
+        <div><label className="label">Lead time (days)</label><input className="input !h-9 font-mono" inputMode="numeric" value={lead} onChange={(e) => setLead(e.target.value.replace(/\D/g, ""))} placeholder="in stock" /></div>
       </div>
-      {by && <p className={`text-[12.5px] -mt-2 ${by <= today() ? "text-red" : "text-amber"}`}>{by <= today() ? "Order today: it won't arrive in time otherwise." : `Order by ${day(by)} to have it by ${day(needed)}.`}</p>}
+      {by && <p className={`text-[12.5px] -mt-2 ${by <= today() ? "text-red" : "text-amber"}`}>{by <= today() ? "Order today. The lead time runs past the needed-by date." : `Order by ${day(by)} to have it by ${day(needed)}.`}</p>}
       <div><label className="label">For stage</label>
         <select className="input !h-9" value={stage} onChange={(e) => setStage(e.target.value)}><option value="">Any</option>{stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
       </div>
@@ -364,16 +428,16 @@ function LineDetail({ line, all, plan, jobs, stages, onUpdate, onRemove, onShow,
         <StorePick compact value={store} onChange={setStore} onCommit={(v) => v.trim() !== (line.store ?? "") && onUpdate({ store: v.trim() || null })} used={[...new Set(all.map((l) => l.store).filter(Boolean) as string[])]} itemName={line.name} trade={line.trade} existing={all} />
       </div>
       <input className="input !h-8 !text-[13px]" defaultValue={line.link ?? ""} placeholder="Product link" onBlur={(e) => onUpdate({ link: e.target.value.trim() || null })} aria-label="Product link" />
-      <div><p className="text-[12px] text-muted mb-1">Who gets it</p><PersonPick value={line.buyer} onChange={(id) => onUpdate({ buyer: id })} /></div>
-      <div><p className="text-[12px] text-muted mb-1">Who it&apos;s for</p><PersonPick value={line.installer} onChange={(id) => onUpdate({ installer: id })} none="Not set" /></div>
+      <div><p className="text-[12px] text-muted mb-1">Buyer</p><PersonPick value={line.buyer} onChange={(id) => onUpdate({ buyer: id })} /></div>
+      <div><p className="text-[12px] text-muted mb-1">Installer</p><PersonPick value={line.installer} onChange={(id) => onUpdate({ installer: id })} none="Not set" /></div>
       <Seg value={line.fulfil} onChange={(f) => onUpdate({ fulfil: f })} options={[["pickup", "Pick up"], ["delivery", "Delivery"], ["stock", "From stock"]]} />
       {line.fulfil === "delivery" && <input className="input !h-8 !text-[13px]" defaultValue={line.deliver_to ?? ""} placeholder={jobs.find((j) => j.id === line.job_id)?.address ?? "Delivery address"} onBlur={(e) => onUpdate({ deliver_to: e.target.value.trim() || null })} aria-label="Delivery address" />}
       <div className="grid grid-cols-2 gap-1.5">
         <input type="date" className="input !h-8 !text-[13px]" value={line.needed_by ?? ""} onChange={(e) => onUpdate({ needed_by: e.target.value || null })} aria-label="Needed by" title="Needed by" />
-        <input className="input !h-8 !text-[13px] font-mono" inputMode="numeric" defaultValue={line.lead_days ?? ""} placeholder="days to get" aria-label="Days to get it"
+        <input className="input !h-8 !text-[13px] font-mono" inputMode="numeric" defaultValue={line.lead_days ?? ""} placeholder="lead days" aria-label="Lead time in days"
           onBlur={(e) => { const n = Number(e.target.value) || null; if (n !== line.lead_days) onUpdate({ lead_days: n }); }} />
       </div>
-      {orderBy(line) && line.status === "to_buy" && <p className={`text-[12px] -mt-1 ${orderNow(line, today()) ? "text-red" : "text-amber"}`}>{orderNow(line, today()) ? `Order now: it takes ${line.lead_days} days and is needed ${day(line.needed_by!)}.` : `Order by ${day(orderBy(line)!)} (takes ${line.lead_days} days).`}</p>}
+      {orderBy(line) && line.status === "to_buy" && <p className={`text-[12px] -mt-1 ${orderNow(line, today()) ? "text-red" : "text-amber"}`}>{orderNow(line, today()) ? `Order today. ${line.lead_days}-day lead time, needed ${day(line.needed_by!)}.` : `Order by ${day(orderBy(line)!)} (${line.lead_days}-day lead time).`}</p>}
       <select className="input !h-8 !text-[13px]" value={line.stage_id ?? ""} onChange={(e) => onUpdate({ stage_id: e.target.value || null })} aria-label="For stage"><option value="">Any stage</option>{stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
       {plan && (
         <select className="input !h-8 !text-[13px]" value={line.element_id ?? ""} aria-label="Where it goes"
@@ -418,17 +482,17 @@ export function LineRow({ line, plan, jobs, open, onToggle, onTick, sub, childre
           {line.status === "got" ? "✓" : line.status === "installed" ? "✓✓" : line.status === "returned" ? "↩" : ""}
         </button>
         <span className="min-w-0 flex-1">
-          <span className={`block text-[14px] truncate ${done ? "line-through text-muted" : ""}`}><span className="font-mono text-[12.5px] text-muted mr-1.5">{qtyText(line.qty, line.unit)}</span>{line.name}</span>
+          <span className={`block text-[14px] truncate ${done ? "line-through text-muted" : ""}`}><span className="font-mono text-[14px] font-semibold text-text mr-1.5">{qtyText(line.qty, line.unit)}</span>{line.name}</span>
           <span className="block text-[12px] text-muted truncate">
-            {sub ?? ([otherJob, placed(line) ? where(plan, line) : null, line.store, line.fulfil !== "pickup" ? FULFIL_LABEL[line.fulfil] : null].filter(Boolean).join(" · ") || "No spot or store yet")}
+            {sub ?? ([otherJob, placed(line) ? where(plan, line) : null, line.store, line.fulfil !== "pickup" ? FULFIL_LABEL[line.fulfil] : null].filter(Boolean).join(" · ") || "No spot, no store")}
             {line.status !== "to_buy" && <span style={{ color: STATUS_COLOR[line.status] }}> · {STATUS_LABEL[line.status]}</span>}
             {late && <span className="text-red"> · late</span>}
-            {!late && orderNow(line, today()) && <span className="text-red"> · order now ({line.lead_days}-day wait)</span>}
+            {!late && orderNow(line, today()) && <span className="text-red"> · order today ({line.lead_days}-day lead)</span>}
             {!late && !orderNow(line, today()) && line.status === "to_buy" && orderBy(line) && <span className="text-amber"> · order by {day(orderBy(line)!)}</span>}
           </span>
         </span>
         {line.unit_cost ? <span className="font-mono text-[12px] text-muted shrink-0">{money(lineTotal(line))}</span> : null}
-        {buyer ? <Avatar m={buyer} size={22} /> : <span className="w-[22px] h-[22px] rounded-[3px] border border-dashed border-line shrink-0" title="Nobody's getting it yet" />}
+        {buyer ? <Avatar m={buyer} size={22} /> : <span className="w-[22px] h-[22px] rounded-[3px] border border-dashed border-line shrink-0" title="No buyer" />}
       </div>
       {open && children}
     </div>
@@ -496,17 +560,17 @@ export function MaterialsPanel({ jobId, lines, jobs, plan, stages, focus, onAdd,
           <p className="font-semibold text-red mb-1">Order today ({urgent.length})</p>
           {urgent.map((l) => (
             <button key={l.id} className="block w-full text-left truncate hover:underline" onClick={() => setOpen(l.id)}>
-              {qtyText(l.qty, l.unit)} {l.name} <span className="text-muted">· takes {l.lead_days} days, needed {day(l.needed_by!)}{l.store ? ` · ${l.store}` : ""}</span>
+              {qtyText(l.qty, l.unit)} {l.name} <span className="text-muted">· {l.lead_days}-day lead, needed {day(l.needed_by!)}{l.store ? ` · ${l.store}` : ""}</span>
             </button>
           ))}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-1.5">
         {(["open", "mine", "all"] as const).map((f) => (
-          <button key={f} onClick={() => setFilter(f)} className={`chip ${filter === f ? "!text-accent-ink !bg-accent !border-accent" : "hover:text-text"}`}>{f === "open" ? "Still to get" : f === "mine" ? "I'm getting" : "All"}</button>
+          <button key={f} onClick={() => setFilter(f)} className={`chip ${filter === f ? "!text-accent-ink !bg-accent !border-accent" : "hover:text-text"}`}>{f === "open" ? "Still to get" : f === "mine" ? "Mine" : "All"}</button>
         ))}
         <select className="input !h-7 !w-auto !text-[12.5px] !py-0 ml-auto" value={group} onChange={(e) => setGroup(e.target.value as Group)} aria-label="Group by">
-          <option value="where">By where it goes</option><option value="who">By who gets it</option><option value="store">By store</option><option value="trade">By trade</option><option value="status">By status</option>
+          <option value="where">By where it goes</option><option value="who">By buyer</option><option value="store">By store</option><option value="trade">By trade</option><option value="status">By status</option>
         </select>
       </div>
       {shown.length ? [...groups].map(([k, ls]) => (
@@ -522,10 +586,10 @@ export function MaterialsPanel({ jobId, lines, jobs, plan, stages, focus, onAdd,
             ))}
           </div>
         </div>
-      )) : <p className="text-muted text-sm py-6 text-center">{mine.length ? "Nothing here." : "Nothing on the list yet. Pick anything on the plan (a room, a wall, a door, the sink) and tap what it needs, or press and hold a spot and choose Material."}</p>}
+      )) : <p className="text-muted text-sm py-6 text-center">{mine.length ? "Nothing in this view." : "Nothing on the list. Tap a room, wall, door or fixture on the plan and pick what it needs, or press and hold a spot and choose Buy."}</p>}
       <div className="flex gap-1.5 pt-1">
         <button className="btn btn-sm flex-1" onClick={copy}>{copied ? "Copied" : "Copy list"}</button>
-        {onShoppingRun && <button className="btn btn-sm flex-1" onClick={onShoppingRun}>Shopping run, all jobs ›</button>}
+        {onShoppingRun && <button className="btn btn-sm flex-1" onClick={onShoppingRun}>Shopping run, all jobs</button>}
       </div>
     </div>
   );

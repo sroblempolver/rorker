@@ -371,7 +371,7 @@ export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel, on
         placeholder={buy ? "What to buy? e.g. 2 outlets" : photo ? "Photo of this spot (what to show)" : kind === "note" ? "Note for this spot" : kind === "issue" ? "What is wrong here?" : kind === "material" ? "What goes here?" : "What needs doing here?"} />
       {members.length > 0 && (
         <div>
-          <p className={`text-[11.5px] mb-1 ${needWho && !tagged.length ? "text-amber" : "text-muted"}`}>{photo ? "Who takes it?" : buy ? "Who gets it?" : "Tag staff"}</p>
+          <p className={`text-[11.5px] mb-1 ${needWho && !tagged.length ? "text-amber" : "text-muted"}`}>{photo ? "Who takes it?" : buy ? "Who buys it?" : "Tag staff"}</p>
           <div className="max-h-[96px] overflow-y-auto scroll-thin"><StaffPicker compact members={members} value={tagged} onChange={setTagged} /></div>
         </div>
       )}

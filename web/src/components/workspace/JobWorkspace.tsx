@@ -23,7 +23,7 @@ import { ShareDialog } from "./ShareDialog";
 import { StagesPanel, StageStrip } from "./StagesPanel";
 import { AddMaterial, MaterialsPanel, blankLine, type BuyTarget } from "@/components/materials/MaterialsPanel";
 import { parseQty, type Suggestion } from "@/lib/materials/suggest";
-import { pinSummary, qtyText, type MaterialInput, type MaterialLine } from "@/lib/materials/types";
+import { NEXT_STATUS, pinSummary, qtyText, type MaterialInput, type MaterialLine } from "@/lib/materials/types";
 
 type Tab = "details" | "pins" | "buy" | "stages" | "plan";
 
@@ -390,7 +390,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       onSetStatus={setStatus} onSelect={select} onSelectPin={showPin} onAddPin={addPin}
       edits={edits} onSaveEdit={saveEdit} items={items} selectedItem={selectedItem} onSelectItem={selectItem}
       onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind}
-      buy={api.materials ? { lines: mlines.filter((l) => l.job_id === job.id && l.status !== "returned"), onQuick: quickBuy, onAll: quickBuyAll, onMore: (t) => openBuy(t), onOpen: openLine } : undefined} />;
+      buy={api.materials ? { lines: mlines.filter((l) => l.job_id === job.id && l.status !== "returned"), onQuick: quickBuy, onAll: quickBuyAll, onMore: (t) => openBuy(t), onOpen: openLine, onTick: (id) => { const l = mlines.find((x) => x.id === id); if (l) void updateMaterial(id, { status: NEXT_STATUS[l.status] }); } } : undefined} />;
   }, [tab, buyDraft, buyFocus, mlines, mjobs, lastBuyer, job.id, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, data.canShare, say, showPin, updatePin, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
     edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext]);
 

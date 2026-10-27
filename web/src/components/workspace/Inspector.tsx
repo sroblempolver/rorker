@@ -131,7 +131,7 @@ interface Props {
   onDeleteItem: (id: string) => Promise<void>;
   onPinKind: (k: PinKind) => void;
   /** the materials list: this job's lines, one-tap add, the full add sheet, open a line */
-  buy?: { lines: MaterialLine[]; onQuick: (t: BuyTarget, s: Suggestion) => void; onAll: (t: BuyTarget, list: Suggestion[]) => void; onMore: (t: BuyTarget) => void; onOpen: (id: string) => void };
+  buy?: { lines: MaterialLine[]; onQuick: (t: BuyTarget, s: Suggestion) => void; onAll: (t: BuyTarget, list: Suggestion[]) => void; onMore: (t: BuyTarget) => void; onOpen: (id: string) => void; onTick?: (id: string) => void };
 }
 
 /** "Buy for this" on any picked spot, with the lines already on the list for it. */
@@ -139,7 +139,7 @@ function Buy({ p, target, here }: { p: Props; target: BuyTarget; here: (l: Mater
   const { members } = useTeam();
   if (!p.buy) return null;
   const b = p.buy;
-  return <BuyHere target={target} lines={b.lines.filter(here)} members={members} onQuick={(s) => b.onQuick(target, s)} onAll={(list) => b.onAll(target, list)} onMore={() => b.onMore(target)} onOpen={b.onOpen} />;
+  return <BuyHere target={target} lines={b.lines.filter(here)} members={members} onQuick={(s) => b.onQuick(target, s)} onAll={(list) => b.onAll(target, list)} onMore={() => b.onMore(target)} onOpen={b.onOpen} onTick={b.onTick} />;
 }
 
 function pinsFor(plan: Plan, pins: Pin[], e: Element) {

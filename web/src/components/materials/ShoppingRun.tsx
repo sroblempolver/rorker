@@ -56,7 +56,7 @@ export function ShoppingRun({ lines, jobs, members, me, onUpdate, onOpenJob }: {
       <div>
         <p className="eyebrow">All jobs</p>
         <h1 className="font-display text-[34px] font-extrabold uppercase leading-none tracking-[0.01em]">Shopping run</h1>
-        <p className="text-muted text-sm">Everything to get, store by store. The same thing for several jobs is bought once and kept apart per job.</p>
+        <p className="text-muted text-sm">Everything to buy across all jobs, by store. Shared items are bought once and split per job.</p>
       </div>
 
       {perJob.length > 0 && (
@@ -73,7 +73,7 @@ export function ShoppingRun({ lines, jobs, members, me, onUpdate, onOpenJob }: {
 
       <div className="flex flex-wrap items-center gap-1.5">
         {(["to_buy", "ordered"] as const).map((s) => (
-          <button key={s} onClick={() => setShow(s)} className={`chip ${show === s ? "!text-accent-ink !bg-accent !border-accent" : "hover:text-text"}`}>{s === "to_buy" ? "To buy" : "Ordered, on the way"}</button>
+          <button key={s} onClick={() => setShow(s)} className={`chip ${show === s ? "!text-accent-ink !bg-accent !border-accent" : "hover:text-text"}`}>{s === "to_buy" ? "To buy" : "On order"}</button>
         ))}
         <span className="w-px h-5 bg-line mx-1" />
         <button onClick={() => setWho("all")} className={`chip ${who === "all" ? "!text-text !border-chalk" : "hover:text-text"}`}>Everyone</button>
@@ -87,8 +87,10 @@ export function ShoppingRun({ lines, jobs, members, me, onUpdate, onOpenJob }: {
           <div className="px-3 py-2 bg-panel-2 border-b border-line flex flex-wrap items-center gap-x-2 gap-y-1">
             <h2 className="font-display text-[19px] font-bold uppercase tracking-[0.04em] truncate min-w-0">{store}</h2>
             <span className="font-mono text-[12px] text-muted shrink-0">{bundles.length} item{bundles.length === 1 ? "" : "s"} · {money(bundles.reduce((a, b) => a + b.cost, 0))}</span>
-            <button className="btn btn-ghost btn-sm ml-auto" onClick={() => copyOrder(store, bundles)}>{copied === store ? "Copied" : "Copy order"}</button>
-            {show === "to_buy" && <button className="btn btn-sm" title="Mark everything here as ordered" onClick={() => onUpdate(bundles.flatMap((b) => b.lines.map((l) => l.id)), { status: "ordered" })}>Ordered</button>}
+            <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
+              <button className="btn btn-sm flex-1 sm:flex-none" onClick={() => copyOrder(store, bundles)}>{copied === store ? "Copied" : "Copy order"}</button>
+              {show === "to_buy" && <button className="btn btn-sm flex-1 sm:flex-none" title="Mark everything here as ordered" onClick={() => onUpdate(bundles.flatMap((b) => b.lines.map((l) => l.id)), { status: "ordered" })}>Mark ordered</button>}
+            </div>
           </div>
           <div className="divide-y divide-line">
             {bundles.map((b) => {
@@ -130,7 +132,7 @@ export function ShoppingRun({ lines, jobs, members, me, onUpdate, onOpenJob }: {
             })}
           </div>
         </section>
-      )) : <p className="text-muted text-sm py-10 text-center">{show === "to_buy" ? "Nothing left to buy. Nice." : "Nothing on order."}</p>}
+      )) : <p className="text-muted text-sm py-10 text-center">{show === "to_buy" ? "Nothing left to buy." : "Nothing on order."}</p>}
     </div>
   );
 }
