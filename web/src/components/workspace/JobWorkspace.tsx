@@ -23,15 +23,11 @@ import { ShareDialog } from "./ShareDialog";
 import { StagesPanel, StageStrip } from "./StagesPanel";
 import { AddMaterial, MaterialsPanel, blankLine, type BuyTarget } from "@/components/materials/MaterialsPanel";
 import { parseQty, type Suggestion } from "@/lib/materials/suggest";
-import { qtyText, type BuyStatus, type MaterialInput, type MaterialLine } from "@/lib/materials/types";
+import { pinSummary, qtyText, type MaterialInput, type MaterialLine } from "@/lib/materials/types";
 
 type Tab = "details" | "pins" | "buy" | "stages" | "plan";
 
-/** A material line's pin on the map: teal flag, tagged to whoever gets it and whoever uses it. */
-const PIN_STATUS: Record<BuyStatus, Pin["status"]> = { to_buy: "open", ordered: "open", got: "in_progress", installed: "done", returned: "done" };
-const pinFields = (l: Pick<MaterialLine, "qty" | "unit" | "name" | "buyer" | "installer" | "needed_by">) => ({
-  title: `Buy ${qtyText(l.qty, l.unit)} ${l.name}`, tagged: [...new Set([l.buyer, l.installer].filter(Boolean) as string[])], due_date: l.needed_by,
-});
+
 
 export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; api: WorkspaceApi; onAllJobs: () => void }) {
   const [plan, setPlan] = useState(data.plan);
@@ -241,46 +237,65 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     await guard(() => api.deleteItem(id));
   }, [api, guard]);
 
-  /** Add lines to the list; the ones for this job with a spot get a material pin on the map. */
-  const addMaterials = useCallback(async (inputs: MaterialInput[]) => {
+  /** Add lines to the list; the ones for this job with a spot get a material pin on the map. Lines
+   *  added together at one spot (a whole room's list, a kit) share one pin, so the map stays readable. */
+  const addMaterials = useCallback(async (inputs: MaterialInput[], together = false) => {
     const m = api.materials;
-    if (!m) return;
-    const withPins = await Promise.all(inputs.map(async (i) => {
-      if (i.job_id !== job.id || !(i.element_id || i.anchor || i.x != null)) return i;
-      const p = await guard(() => api.createPin({ kind: "material", ...pinFields(i), element_id: i.element_id, floor_id: i.floor_id, x: i.x, y: i.y, anchor: i.anchor, stage_id: i.stage_id, priority: 1 }));
+    if (!m || !inputs.length) return;
+    const here = (i: MaterialInput) => i.job_id === job.id && !!(i.element_id || i.anchor || i.x != null);
+    const newPin = async (ls: MaterialInput[]) => {
+      const i = ls[0];
+      const { status: _s, ...sum } = pinSummary(ls); void _s;
+      const p = await guard(() => api.createPin({ kind: "material", ...sum, element_id: i.element_id, floor_id: i.floor_id, x: i.x, y: i.y, anchor: i.anchor, stage_id: i.stage_id, priority: 1 }));
       if (p) setPins((l) => [...l, p]);
-      return { ...i, pin_id: p?.id ?? null };
-    }));
+      return p?.id ?? null;
+    };
+    let withPins: MaterialInput[];
+    if (together) {
+      const pid = inputs.some(here) ? await newPin(inputs.filter(here)) : null;
+      withPins = inputs.map((i) => (here(i) ? { ...i, pin_id: pid } : i));
+    } else withPins = await Promise.all(inputs.map(async (i) => (here(i) ? { ...i, pin_id: await newPin([i]) } : i)));
     const made = await guard(() => m.create(withPins));
     if (!made) return;
     setMlines((l) => [...l, ...made]);
     if (inputs[0]?.buyer) setLastBuyer(inputs[0].buyer);
     const first = made[0];
-    say(made.length > 1 ? `Added ${first.name} for ${new Set(made.map((x) => x.job_id)).size} jobs` : `On the list: ${qtyText(first.qty, first.unit)} ${first.name}`);
+    const jobsN = new Set(made.map((x) => x.job_id)).size;
+    say(together ? `Added ${made.length} items to the list` : made.length > 1 ? `Added ${first.name} for ${jobsN} jobs` : `On the list: ${qtyText(first.qty, first.unit)} ${first.name}`);
   }, [api, guard, job.id, say]);
+
+  /** Keep a material pin in step with every line on it. */
+  const syncPin = useCallback(async (pinId: string | null, all: MaterialLine[]) => {
+    if (!pinId || !pins.some((p) => p.id === pinId)) return;
+    const on = all.filter((l) => l.pin_id === pinId);
+    if (!on.length) { setPins((ps) => ps.filter((p) => p.id !== pinId)); await guard(() => api.deletePin(pinId)); return; }
+    const sum = pinSummary(on);
+    setPins((ps) => ps.map((p) => (p.id === pinId ? { ...p, ...sum } : p)));
+    await guard(() => api.updatePin(pinId, sum));
+  }, [api, guard, pins]);
 
   const updateMaterial = useCallback(async (id: string, patch: Partial<MaterialInput>) => {
     const before = mlines.find((l) => l.id === id);
     if (!before || !api.materials) return;
     const next = { ...before, ...patch } as MaterialLine;
-    setMlines((l) => l.map((x) => (x.id === id ? next : x)));
+    const all = mlines.map((x) => (x.id === id ? next : x));
+    setMlines(all);
     await guard(() => api.materials!.update(id, patch));
-    if (before.pin_id && pins.some((p) => p.id === before.pin_id)) {
-      const pp = { ...pinFields(next), status: PIN_STATUS[next.status] };
-      setPins((l) => l.map((p) => (p.id === before.pin_id ? { ...p, ...pp } : p)));
-      await guard(() => api.updatePin(before.pin_id!, pp));
-    }
-  }, [api, guard, mlines, pins]);
+    await syncPin(before.pin_id, all);
+  }, [api, guard, mlines, syncPin]);
 
   const removeMaterial = useCallback(async (id: string) => {
     const l = mlines.find((x) => x.id === id);
-    setMlines((all) => all.filter((x) => x.id !== id));
+    const all = mlines.filter((x) => x.id !== id);
+    setMlines(all);
     await guard(() => api.materials!.remove(id));
-    if (l?.pin_id && pins.some((p) => p.id === l.pin_id)) { setPins((all) => all.filter((p) => p.id !== l.pin_id)); await guard(() => api.deletePin(l.pin_id!)); }
-  }, [api, guard, mlines, pins]);
+    await syncPin(l?.pin_id ?? null, all);
+  }, [api, guard, mlines, syncPin]);
 
   /** One tap on a suggestion: straight onto the list, for whoever was picked last time. */
   const quickBuy = useCallback((t: BuyTarget, s: Suggestion) => { void addMaterials([blankLine(job.id, t, s, lastBuyer)]); }, [addMaterials, job.id, lastBuyer]);
+  /** Everything picked for a spot at once (a whole room's list): one pin for the lot. */
+  const quickBuyAll = useCallback((t: BuyTarget, list: Suggestion[]) => { void addMaterials(list.map((s) => blankLine(job.id, t, s, lastBuyer)), true); }, [addMaterials, job.id, lastBuyer]);
   const openBuy = useCallback((target: BuyTarget | null, preset?: Partial<Suggestion> & { name?: string }) => {
     setBuyDraft({ target, preset });
     setDraft(null);
@@ -338,7 +353,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     }
     if (tab === "buy") {
       if (buyDraft) return <AddMaterial key={`${buyDraft.target?.where}${buyDraft.preset?.name}`} target={buyDraft.target} preset={buyDraft.preset} jobs={mjobs} stages={stages} existing={mlines}
-        defaults={{ jobId: job.id, buyer: lastBuyer }} onCancel={() => setBuyDraft(null)} onAdd={async (ls) => { await addMaterials(ls); setBuyDraft(null); }} />;
+        defaults={{ jobId: job.id, buyer: lastBuyer }} onCancel={() => setBuyDraft(null)} onAdd={async (ls, together) => { await addMaterials(ls, together); setBuyDraft(null); }} />;
       return <MaterialsPanel key={buyFocus.n} jobId={job.id} lines={mlines} jobs={mjobs} plan={view} stages={stages} focus={buyFocus.id}
         onAdd={() => openBuy(null)} onUpdate={updateMaterial} onRemove={removeMaterial} onShoppingRun={api.openShopping}
         onShow={(l) => (l.element_id ? showElements([l.element_id]) : l.pin_id && showPin(l.pin_id))}
@@ -375,8 +390,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       onSetStatus={setStatus} onSelect={select} onSelectPin={showPin} onAddPin={addPin}
       edits={edits} onSaveEdit={saveEdit} items={items} selectedItem={selectedItem} onSelectItem={selectItem}
       onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind}
-      buy={api.materials ? { lines: mlines.filter((l) => l.job_id === job.id && l.status !== "returned"), onQuick: quickBuy, onMore: (t) => openBuy(t), onOpen: openLine } : undefined} />;
-  }, [tab, buyDraft, buyFocus, mlines, mjobs, lastBuyer, job.id, addMaterials, updateMaterial, removeMaterial, quickBuy, openBuy, openLine, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, data.canShare, say, showPin, updatePin, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
+      buy={api.materials ? { lines: mlines.filter((l) => l.job_id === job.id && l.status !== "returned"), onQuick: quickBuy, onAll: quickBuyAll, onMore: (t) => openBuy(t), onOpen: openLine } : undefined} />;
+  }, [tab, buyDraft, buyFocus, mlines, mjobs, lastBuyer, job.id, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, data.canShare, say, showPin, updatePin, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
     edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext]);
 
   // where the quick card sits inside the map, kept on screen

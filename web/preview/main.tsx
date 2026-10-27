@@ -18,7 +18,7 @@ import { newToken, shareWork } from "@/lib/share";
 import { NewProject, type NewProjectResult } from "@/components/newjob/NewProject";
 import { ShoppingRun } from "@/components/materials/ShoppingRun";
 import { EXTRA_JOBS, sampleMaterials } from "@/demo/materials-sample";
-import { qtyText, type MaterialLine, type MaterialsApi, type MaterialsJob } from "@/lib/materials/types";
+import { pinSummary, qtyText, type MaterialLine, type MaterialsApi, type MaterialsJob } from "@/lib/materials/types";
 import { TeamContext } from "@/components/team/context";
 
 /** when this preview was built, so an out-of-date copy in the browser cache is easy to spot */
@@ -72,7 +72,6 @@ function seed(): WorkspaceData {
 /** The materials list across every job in the preview. */
 const materials: { lines: MaterialLine[] } = { lines: [] };
 function materialsApi(all: () => WorkspaceData[]): MaterialsApi {
-  const PIN_STATUS = { to_buy: "open", ordered: "open", got: "in_progress", installed: "done", returned: "done" } as const;
   return {
     async list() { return [...materials.lines]; },
     async create(input) {
@@ -85,7 +84,7 @@ function materialsApi(all: () => WorkspaceData[]): MaterialsApi {
       const l = materials.lines.find((x) => x.id === id)!;
       // keep the line's pin in step, also when it's ticked off from the shopping run
       const d = all().find((j) => j.job.id === l.job_id);
-      if (d && l.pin_id) d.pins = d.pins.map((p) => (p.id === l.pin_id ? { ...p, status: PIN_STATUS[l.status], title: `Buy ${qtyText(l.qty, l.unit)} ${l.name}` } : p));
+      if (d && l.pin_id) d.pins = d.pins.map((p) => (p.id === l.pin_id ? { ...p, ...pinSummary(materials.lines.filter((x) => x.pin_id === l.pin_id)) } : p));
       return l;
     },
     async remove(id) { materials.lines = materials.lines.filter((l) => l.id !== id); },

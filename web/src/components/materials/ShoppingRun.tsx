@@ -4,8 +4,9 @@
 // one go and still lands on the right job. Tick it at the store and every job's line is marked got.
 import { useMemo, useState } from "react";
 import type { Member } from "@/lib/data/types";
+import { today } from "@/lib/dates";
 import { Avatar } from "@/components/team/Avatar";
-import { FULFIL_LABEL, lineTotal, money, qtyText, type MaterialInput, type MaterialLine, type MaterialsJob } from "@/lib/materials/types";
+import { FULFIL_LABEL, lineTotal, money, orderNow, qtyText, type MaterialInput, type MaterialLine, type MaterialsJob } from "@/lib/materials/types";
 
 interface Bundle { key: string; name: string; unit: MaterialLine["unit"]; lines: MaterialLine[]; qty: number; cost: number; needed: string | null }
 
@@ -105,6 +106,7 @@ export function ShoppingRun({ lines, jobs, members, me, onUpdate, onOpenJob }: {
                         {jobsHere.length > 1 ? b.lines.map((l) => `${short(l.job_id)} ${+l.qty.toFixed(2)}`).join(" · ") : jobName(jobsHere[0])}
                         {b.needed && <> · by {b.needed.slice(5)}</>}
                         {b.lines.some((l) => l.fulfil === "delivery") && <> · {FULFIL_LABEL.delivery}</>}
+                        {b.lines.some((l) => orderNow(l, today(), 2)) && <span className="text-red"> · order today</span>}
                       </span>
                     </span>
                     {b.cost > 0 && <span className="font-mono text-[12px] text-muted shrink-0">{money(b.cost)}</span>}

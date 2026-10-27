@@ -2,7 +2,7 @@
 // The job's materials list (the "Buy" tab) and the ways into it: one-tap suggestions on whatever is
 // picked on the plan, and the add sheet that can split one add across several jobs. Every line knows
 // where it goes on the plan, who gets it and who uses it.
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import type { JobStage, Member, PinAnchor } from "@/lib/data/types";
 import type { Plan } from "@/lib/plan/types";
 import { today } from "@/lib/dates";
@@ -10,9 +10,10 @@ import { Avatar } from "@/components/team/Avatar";
 import { useTeam } from "@/components/team/context";
 import { where } from "@/components/workspace/PinsPanel";
 import { elementLabel, findElement, roomOf } from "@/lib/plan/geometry";
-import { parseQty, type Suggestion } from "@/lib/materials/suggest";
+import { GROUP_ORDER, KITS, parseQty, type SuggestGroup, type Suggestion } from "@/lib/materials/suggest";
+import { saveStore, storeOptions } from "@/lib/materials/stores";
 import {
-  FULFIL_LABEL, NEXT_STATUS, STATUS_COLOR, STATUS_LABEL, UNITS, lineTotal, money, qtyText,
+  FULFIL_LABEL, NEXT_STATUS, STATUS_COLOR, STATUS_LABEL, UNITS, lineTotal, money, orderBy, orderNow, qtyText,
   type BuyStatus, type Fulfil, type MaterialInput, type MaterialLine, type MaterialsJob, type Unit,
 } from "@/lib/materials/types";
 
@@ -28,12 +29,55 @@ export function blankLine(jobId: string, t: Partial<BuyTarget> | null, s: Partia
   return {
     job_id: jobId, group_id: null, name: s.name, qty: s.qty ?? 1, unit: s.unit ?? "ea", unit_cost: s.unit_cost || null, store: null, link: s.link ?? null, sku: null,
     status: "to_buy", fulfil: "pickup", deliver_to: null, buyer, installer: null, needed_by: null, stage_id: null, note: s.why ?? null,
+    lead_days: s.lead ?? null, trade: s.group ?? null,
     element_id: t?.element_id ?? null, floor_id: t?.floor_id ?? null, x: t?.x ?? null, y: t?.y ?? null, anchor: t?.anchor ?? null,
   };
 }
 
+const day = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
 function StatusChip({ s }: { s: BuyStatus }) {
   return <span className="chip !h-[22px] !px-1.5 !text-[11.5px] !text-text shrink-0"><span className="w-2 h-2 rounded-[1px]" style={{ background: STATUS_COLOR[s] }} />{STATUS_LABEL[s]}</span>;
+}
+
+/** "Order from": type and pick. Suggests the store used last time for this item, the company's
+ *  own stores, supply houses for the trade, then every big box, supply house and online store. */
+export function StorePick({ value, onChange, onCommit, used, itemName, trade, existing, compact }: {
+  value: string; onChange: (v: string) => void; onCommit?: (v: string) => void; used: string[]; itemName?: string; trade?: SuggestGroup | null; existing?: MaterialLine[]; compact?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);
+  const listId = useId();
+  const lastFor = itemName ? [...(existing ?? [])].reverse().find((l) => l.store && l.name.toLowerCase() === itemName.trim().toLowerCase())?.store ?? null : null;
+  const options = storeOptions(value, { used, lastFor, group: trade ?? null, isPaint: /paint|primer|stain/i.test(itemName ?? "") }).slice(0, 40);
+  const typedNew = value.trim() && !options.some((o) => o.name.toLowerCase() === value.trim().toLowerCase());
+  const pick = (v: string) => { onChange(v); saveStore(v); onCommit?.(v); setOpen(false); };
+  return (
+    <div className="relative">
+      <input className={`input ${compact ? "!h-8 !text-[13px]" : "!h-9"}`} value={value} placeholder="Order from…" aria-label="Order from" role="combobox" aria-expanded={open} aria-controls={listId}
+        onFocus={() => { setOpen(true); setHi(0); }} onBlur={(e) => { const v = e.target.value; onCommit?.(v); setTimeout(() => setOpen(false), 150); }}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); setHi(0); }}
+        onKeyDown={(e) => {
+          if (!open) return;
+          if (e.key === "ArrowDown") { e.preventDefault(); setHi((h) => Math.min(h + 1, options.length - 1)); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
+          else if (e.key === "Enter" && (options[hi] || typedNew)) { e.preventDefault(); pick(options[hi]?.name ?? value.trim()); }
+          else if (e.key === "Escape") setOpen(false);
+        }} />
+      {open && (options.length > 0 || typedNew) && (
+        <div id={listId} role="listbox" className="absolute z-30 left-0 right-0 mt-1 max-h-[240px] overflow-y-auto scroll-thin bg-panel border border-line rounded-[4px] shadow-[0_12px_30px_rgb(0_0_0/0.5)] py-1">
+          {options.map((o, i) => (
+            <button type="button" key={o.name} role="option" aria-selected={i === hi} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(o.name)} onMouseEnter={() => setHi(i)}
+              className={`w-full text-left px-2.5 py-1.5 text-[13px] flex items-center gap-2 ${i === hi ? "bg-panel-2" : ""}`}>
+              <span className="truncate shrink-0 max-w-[70%]">{o.name}</span>
+              <span className={`ml-auto min-w-0 truncate text-[11.5px] ${o.note === "last time for this" ? "text-chalk" : "text-muted"}`}>{o.note}</span>
+            </button>
+          ))}
+          {typedNew && <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => pick(value.trim())} className="w-full text-left text-chalk px-2.5 py-1.5 text-[13px] hover:bg-panel-2">+ Add &ldquo;{value.trim()}&rdquo; as your store</button>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Pick one person (or nobody). */
@@ -64,30 +108,60 @@ function Seg<T extends string>({ value, options, onChange }: { value: T; options
   );
 }
 
-/** On the Details panel of anything picked on the plan: tap a chip and it's on the list. */
-export function BuyHere({ target, lines, members, onQuick, onMore, onOpen }: {
+/** Suggestions by trade, in a steady order. */
+function byGroup(list: Suggestion[]) {
+  const m = new Map<string, Suggestion[]>();
+  for (const g of GROUP_ORDER) { const xs = list.filter((x) => (x.group ?? "Finishes") === g); if (xs.length) m.set(g, xs); }
+  const rest = list.filter((x) => x.group && !GROUP_ORDER.includes(x.group));
+  if (rest.length) m.set("Other", rest);
+  return [...m];
+}
+
+/** On the Details panel of anything picked on the plan: what this room or item needs, by trade.
+ *  Tap a chip and it's on the list; "Add all" takes the whole list (after one confirm). */
+export function BuyHere({ target, lines, members, onQuick, onAll, onMore, onOpen }: {
   target: BuyTarget; lines: MaterialLine[]; members: Member[];
-  onQuick: (s: Suggestion) => void; onMore: () => void; onOpen: (id: string) => void;
+  onQuick: (s: Suggestion) => void; onAll: (list: Suggestion[]) => void; onMore: () => void; onOpen: (id: string) => void;
 }) {
   const [added, setAdded] = useState<string[]>([]);
+  const [confirm, setConfirm] = useState(false);
+  const left = target.suggestions.filter((x) => !added.includes(x.name) && !lines.some((l) => l.name === x.name && l.status !== "returned"));
+  const total = left.reduce((a, x) => a + x.qty * x.unit_cost, 0);
+  const groups = byGroup(target.suggestions);
   return (
     <div>
-      <p className="eyebrow mb-2">Buy for this</p>
-      {target.suggestions.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {target.suggestions.map((s) => {
-            const done = added.includes(s.name);
-            return (
-              <button key={s.name} onClick={() => { onQuick(s); setAdded((a) => [...a, s.name]); }} title={s.why ? `${s.why}. Tap to add.` : "Tap to add"}
-                className={`h-8 pl-2 pr-2.5 rounded-[3px] border text-[12.5px] inline-flex items-center gap-1.5 ${done ? "border-green text-green" : "border-line bg-panel-2 hover:border-accent"}`}>
-                <span className={`font-bold ${done ? "" : "text-accent"}`}>{done ? "✓" : "+"}</span>
-                <span className="font-mono text-[11.5px]">{qtyText(s.qty, s.unit)}</span>{s.name}
-              </button>
-            );
-          })}
+      <div className="flex items-center gap-2 mb-2">
+        <p className="eyebrow">Buy for this</p>
+        {left.length > 1 && !confirm && <button className="ml-auto text-[12.5px] text-accent hover:underline" onClick={() => setConfirm(true)}>Add all {left.length}</button>}
+      </div>
+      {confirm && (
+        <div className="mb-2 p-2.5 rounded-[3px] border border-accent bg-accent/10 text-[13px] flex items-center gap-2">
+          <span className="flex-1">Add {left.length} items{total ? ` (about ${money(total)})` : ""} for {target.where.split(" · ")[0]}? They share one pin on the map.</span>
+          <button className="btn btn-primary btn-sm" onClick={() => { onAll(left); setAdded((a) => [...a, ...left.map((x) => x.name)]); setConfirm(false); }}>Add</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setConfirm(false)}>Cancel</button>
         </div>
       )}
-      <button className="btn btn-sm w-full mt-2" onClick={onMore}>Something else, or for more than one job…</button>
+      <div className="space-y-2">
+        {groups.map(([g, xs]) => (
+          <div key={g}>
+            {groups.length > 1 && <p className="text-[11.5px] text-muted mb-1">{g}</p>}
+            <div className="flex flex-wrap gap-1.5">
+              {xs.map((x) => {
+                const done = added.includes(x.name) || lines.some((l) => l.name === x.name && l.status !== "returned");
+                return (
+                  <button key={x.name} onClick={() => { if (!done) { onQuick(x); setAdded((a) => [...a, x.name]); } }} title={[x.why, x.lead ? `about ${x.lead} days to get` : null, done ? "On the list" : "Tap to add"].filter(Boolean).join(". ")}
+                    className={`min-h-8 py-1 pl-2 pr-2.5 rounded-[3px] border text-[12.5px] inline-flex items-center gap-1.5 text-left ${done ? "border-green/60 text-green" : "border-line bg-panel-2 hover:border-accent"}`}>
+                    <span className={`font-bold ${done ? "" : "text-accent"}`}>{done ? "✓" : "+"}</span>
+                    <span className="font-mono text-[11.5px] shrink-0">{qtyText(x.qty, x.unit)}</span>
+                    <span>{x.name}{x.why && <span className="block text-[11px] text-muted leading-tight">{x.why}</span>}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <button className="btn btn-sm w-full mt-2" onClick={onMore}>Something else, a kit, or for more than one job…</button>
       {lines.length > 0 && (
         <div className="mt-3 space-y-1">
           <p className="text-[12px] text-muted">On the list for here ({lines.length})</p>
@@ -111,7 +185,7 @@ export function BuyHere({ target, lines, members, onQuick, onMore, onOpen }: {
 /** The full add: name, quantity, and the same thing for other jobs in one go. */
 export function AddMaterial({ target, preset, jobs, defaults, stages, existing, onCancel, onAdd }: {
   target: BuyTarget | null; preset?: Partial<Suggestion> & { name?: string }; jobs: MaterialsJob[]; defaults: BuyDefaults; stages: JobStage[];
-  existing: MaterialLine[]; onCancel: () => void; onAdd: (lines: MaterialInput[]) => Promise<void>;
+  existing: MaterialLine[]; onCancel: () => void; onAdd: (lines: MaterialInput[], together?: boolean) => Promise<void>;
 }) {
   const [name, setName] = useState(preset?.name ?? "");
   const [unit, setUnit] = useState<Unit>(preset?.unit ?? "ea");
@@ -125,6 +199,8 @@ export function AddMaterial({ target, preset, jobs, defaults, stages, existing, 
   const [deliverTo, setDeliverTo] = useState("");
   const [needed, setNeeded] = useState("");
   const [stage, setStage] = useState("");
+  const [lead, setLead] = useState(preset?.lead ? String(preset.lead) : "");
+  const [trade, setTrade] = useState<SuggestGroup | null>(preset?.group ?? null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const stores = useMemo(() => [...new Set(existing.map((l) => l.store).filter(Boolean) as string[])], [existing]);
@@ -132,6 +208,19 @@ export function AddMaterial({ target, preset, jobs, defaults, stages, existing, 
   const jobName = (id: string) => jobs.find((j) => j.id === id)?.name ?? "Job";
   const free = jobs.filter((j) => !split.some((s) => s.job === j.id));
   const total = split.reduce((a, s) => a + (Number(s.qty) || 0), 0);
+  // things bought before, newest first: picking one fills in its unit, price, store and link
+  const recent = useMemo(() => { const m = new Map<string, MaterialLine>(); for (const l of existing) m.set(l.name.toLowerCase(), l); return m; }, [existing]);
+  const fillFrom = (v: string) => {
+    const l = recent.get(v.trim().toLowerCase());
+    const sg = target?.suggestions.find((x) => x.name.toLowerCase() === v.trim().toLowerCase());
+    if (l) { setUnit(l.unit); if (!cost && l.unit_cost) setCost(String(l.unit_cost)); if (!store && l.store) setStore(l.store); if (!link && l.link) setLink(l.link); if (!lead && l.lead_days) setLead(String(l.lead_days)); setTrade(l.trade); }
+    else if (sg) { setUnit(sg.unit); if (!cost && sg.unit_cost) setCost(String(sg.unit_cost)); if (!lead && sg.lead) setLead(String(sg.lead)); setTrade(sg.group ?? null); }
+  };
+  const by = needed && Number(lead) ? orderBy({ needed_by: needed, lead_days: Number(lead) }) : null;
+  const addKit = async (items: Suggestion[]) => {
+    setBusy(true);
+    try { await onAdd(items.map((x) => blankLine(defaults.jobId, target, x, buyer)), true); } catch (x) { setErr(x instanceof Error ? x.message : "Could not add it."); setBusy(false); }
+  };
 
   const submit = async (ev: React.FormEvent) => {
     ev.preventDefault();
@@ -145,7 +234,7 @@ export function AddMaterial({ target, preset, jobs, defaults, stages, existing, 
     setBusy(true);
     try {
       await onAdd(rows.map((s) => ({
-        ...blankLine(s.job, s.job === defaults.jobId ? target : null, { name: nm, qty: Number(s.qty), unit, unit_cost: Number(cost) || 0, link: link || null }, buyer),
+        ...blankLine(s.job, s.job === defaults.jobId ? target : null, { name: nm, qty: Number(s.qty), unit, unit_cost: Number(cost) || 0, link: link || null, lead: Number(lead) || undefined, group: trade ?? undefined }, buyer),
         group_id: group, store: store || null, installer, fulfil, deliver_to: fulfil === "delivery" ? deliverTo || null : null,
         needed_by: needed || null, stage_id: s.job === defaults.jobId ? stage || null : null, note: preset?.why ?? null,
       })));
@@ -165,15 +254,27 @@ export function AddMaterial({ target, preset, jobs, defaults, stages, existing, 
       {target && target.suggestions.length > 0 && !name && (
         <div className="flex flex-wrap gap-1.5">
           {target.suggestions.map((s) => (
-            <button type="button" key={s.name} className="chip hover:text-text hover:border-accent" onClick={() => { setName(s.name); setUnit(s.unit); setCost(s.unit_cost ? String(s.unit_cost) : ""); setSplit((x) => [{ ...x[0], qty: String(s.qty) }, ...x.slice(1)]); }}>
+            <button type="button" key={s.name} className="chip hover:text-text hover:border-accent" onClick={() => { setName(s.name); setUnit(s.unit); setCost(s.unit_cost ? String(s.unit_cost) : ""); setLead(s.lead ? String(s.lead) : ""); setTrade(s.group ?? null); setSplit((x) => [{ ...x[0], qty: String(s.qty) }, ...x.slice(1)]); }}>
               <span className="font-mono">{qtyText(s.qty, s.unit)}</span>{s.name}
             </button>
           ))}
         </div>
       )}
+      {!name && (
+        <div>
+          <p className="text-[12px] text-muted mb-1">Kits: add a whole set in one go</p>
+          <div className="flex flex-wrap gap-1.5">
+            {KITS.map((k) => (
+              <button type="button" key={k.name} disabled={busy} onClick={() => addKit(k.items)} title={k.items.map((x) => `${qtyText(x.qty, x.unit)} ${x.name}`).join("\n")}
+                className="chip hover:text-text hover:border-accent"><span className="text-accent font-bold">+</span>{k.name}<span className="font-mono text-[11px]">{k.items.length}</span></button>
+            ))}
+          </div>
+        </div>
+      )}
       <div>
         <label className="label">What</label>
-        <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. 2 outlets, Drywall 4×8, Kitchen faucet" />
+        <input className="input" autoFocus value={name} list="rk-items" onChange={(e) => { setName(e.target.value); fillFrom(e.target.value); }} placeholder="e.g. 2 outlets, Drywall 4×8, Kitchen faucet" />
+        <datalist id="rk-items">{[...recent.values()].reverse().map((l) => <option key={l.id} value={l.name}>{[qtyText(l.qty, l.unit), l.unit_cost ? `${money(l.unit_cost)} each` : null, l.store].filter(Boolean).join(" · ")}</option>)}</datalist>
         {dupes.length > 0 && <p className="text-[12.5px] text-amber mt-1">Already on the list: {dupes.map((d) => `${qtyText(d.qty, d.unit)} for ${jobName(d.job_id)} (${STATUS_LABEL[d.status].toLowerCase()})`).join(", ")}.</p>}
       </div>
 
@@ -202,7 +303,7 @@ export function AddMaterial({ target, preset, jobs, defaults, stages, existing, 
 
       <div className="grid grid-cols-2 gap-2">
         <div><label className="label">Price each ($)</label><input className="input !h-9 font-mono" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="optional" /></div>
-        <div><label className="label">Store</label><input className="input !h-9" list="rk-stores" value={store} onChange={(e) => setStore(e.target.value)} placeholder="Home Depot…" /><datalist id="rk-stores">{stores.map((s) => <option key={s} value={s} />)}</datalist></div>
+        <div><label className="label">Order from</label><StorePick value={store} onChange={setStore} used={stores} itemName={parseQty(name).name} trade={trade} existing={existing} /></div>
       </div>
       <div><label className="label">Product link</label><input className="input !h-9" value={link} onChange={(e) => setLink(e.target.value)} placeholder="optional" /></div>
 
@@ -215,9 +316,11 @@ export function AddMaterial({ target, preset, jobs, defaults, stages, existing, 
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div><label className="label">Needed by</label><input type="date" className="input !h-9" min={today()} value={needed} onChange={(e) => setNeeded(e.target.value)} /></div>
-        <div><label className="label">For stage</label>
-          <select className="input !h-9" value={stage} onChange={(e) => setStage(e.target.value)}><option value="">Any</option>{stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-        </div>
+        <div><label className="label">Takes (days to get)</label><input className="input !h-9 font-mono" inputMode="numeric" value={lead} onChange={(e) => setLead(e.target.value.replace(/\D/g, ""))} placeholder="in stock" /></div>
+      </div>
+      {by && <p className={`text-[12.5px] -mt-2 ${by <= today() ? "text-red" : "text-amber"}`}>{by <= today() ? "Order today: it won't arrive in time otherwise." : `Order by ${day(by)} to have it by ${day(needed)}.`}</p>}
+      <div><label className="label">For stage</label>
+        <select className="input !h-9" value={stage} onChange={(e) => setStage(e.target.value)}><option value="">Any</option>{stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
       </div>
       {err && <p className="text-red text-sm">{err}</p>}
       <div className="flex gap-2">
@@ -229,11 +332,12 @@ export function AddMaterial({ target, preset, jobs, defaults, stages, existing, 
 }
 
 /** One line, opened: everything about it, changed in place. */
-function LineDetail({ line, plan, jobs, stages, onUpdate, onRemove, onShow, onSplit }: {
-  line: MaterialLine; plan: Plan | null; jobs: MaterialsJob[]; stages: JobStage[];
+function LineDetail({ line, all, plan, jobs, stages, onUpdate, onRemove, onShow, onSplit }: {
+  line: MaterialLine; all: MaterialLine[]; plan: Plan | null; jobs: MaterialsJob[]; stages: JobStage[];
   onUpdate: (patch: Partial<MaterialInput>) => void; onRemove: () => void; onShow?: () => void; onSplit: (jobId: string, qty: number) => void;
 }) {
   const [other, setOther] = useState<{ job: string; qty: string } | null>(null);
+  const [store, setStore] = useState(line.store ?? "");
   const fileRef = useRef<HTMLInputElement>(null);
   const others = jobs.filter((j) => j.id !== line.job_id);
   const num = (v: string) => (v.trim() === "" ? null : Number(v) || 0);
@@ -257,7 +361,7 @@ function LineDetail({ line, plan, jobs, stages, onUpdate, onRemove, onShow, onSp
       </div>
       <div className="grid grid-cols-2 gap-1.5">
         <input className="input !h-8 !text-[13px] font-mono" inputMode="decimal" defaultValue={line.unit_cost ?? ""} placeholder="$ each" onBlur={(e) => onUpdate({ unit_cost: num(e.target.value) })} aria-label="Price each" />
-        <input className="input !h-8 !text-[13px]" defaultValue={line.store ?? ""} placeholder="Store" onBlur={(e) => onUpdate({ store: e.target.value.trim() || null })} aria-label="Store" />
+        <StorePick compact value={store} onChange={setStore} onCommit={(v) => v.trim() !== (line.store ?? "") && onUpdate({ store: v.trim() || null })} used={[...new Set(all.map((l) => l.store).filter(Boolean) as string[])]} itemName={line.name} trade={line.trade} existing={all} />
       </div>
       <input className="input !h-8 !text-[13px]" defaultValue={line.link ?? ""} placeholder="Product link" onBlur={(e) => onUpdate({ link: e.target.value.trim() || null })} aria-label="Product link" />
       <div><p className="text-[12px] text-muted mb-1">Who gets it</p><PersonPick value={line.buyer} onChange={(id) => onUpdate({ buyer: id })} /></div>
@@ -265,9 +369,12 @@ function LineDetail({ line, plan, jobs, stages, onUpdate, onRemove, onShow, onSp
       <Seg value={line.fulfil} onChange={(f) => onUpdate({ fulfil: f })} options={[["pickup", "Pick up"], ["delivery", "Delivery"], ["stock", "From stock"]]} />
       {line.fulfil === "delivery" && <input className="input !h-8 !text-[13px]" defaultValue={line.deliver_to ?? ""} placeholder={jobs.find((j) => j.id === line.job_id)?.address ?? "Delivery address"} onBlur={(e) => onUpdate({ deliver_to: e.target.value.trim() || null })} aria-label="Delivery address" />}
       <div className="grid grid-cols-2 gap-1.5">
-        <input type="date" className="input !h-8 !text-[13px]" value={line.needed_by ?? ""} onChange={(e) => onUpdate({ needed_by: e.target.value || null })} aria-label="Needed by" />
-        <select className="input !h-8 !text-[13px]" value={line.stage_id ?? ""} onChange={(e) => onUpdate({ stage_id: e.target.value || null })} aria-label="For stage"><option value="">Any stage</option>{stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+        <input type="date" className="input !h-8 !text-[13px]" value={line.needed_by ?? ""} onChange={(e) => onUpdate({ needed_by: e.target.value || null })} aria-label="Needed by" title="Needed by" />
+        <input className="input !h-8 !text-[13px] font-mono" inputMode="numeric" defaultValue={line.lead_days ?? ""} placeholder="days to get" aria-label="Days to get it"
+          onBlur={(e) => { const n = Number(e.target.value) || null; if (n !== line.lead_days) onUpdate({ lead_days: n }); }} />
       </div>
+      {orderBy(line) && line.status === "to_buy" && <p className={`text-[12px] -mt-1 ${orderNow(line, today()) ? "text-red" : "text-amber"}`}>{orderNow(line, today()) ? `Order now: it takes ${line.lead_days} days and is needed ${day(line.needed_by!)}.` : `Order by ${day(orderBy(line)!)} (takes ${line.lead_days} days).`}</p>}
+      <select className="input !h-8 !text-[13px]" value={line.stage_id ?? ""} onChange={(e) => onUpdate({ stage_id: e.target.value || null })} aria-label="For stage"><option value="">Any stage</option>{stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
       {plan && (
         <select className="input !h-8 !text-[13px]" value={line.element_id ?? ""} aria-label="Where it goes"
           onChange={(e) => { const r = plan.floors.flatMap((f) => f.rooms.map((x) => ({ x, f }))).find((y) => y.x.id === e.target.value); onUpdate({ element_id: r?.x.id ?? null, floor_id: r?.f.id ?? null, x: null, y: null, anchor: null }); }}>
@@ -316,6 +423,8 @@ export function LineRow({ line, plan, jobs, open, onToggle, onTick, sub, childre
             {sub ?? ([otherJob, placed(line) ? where(plan, line) : null, line.store, line.fulfil !== "pickup" ? FULFIL_LABEL[line.fulfil] : null].filter(Boolean).join(" · ") || "No spot or store yet")}
             {line.status !== "to_buy" && <span style={{ color: STATUS_COLOR[line.status] }}> · {STATUS_LABEL[line.status]}</span>}
             {late && <span className="text-red"> · late</span>}
+            {!late && orderNow(line, today()) && <span className="text-red"> · order now ({line.lead_days}-day wait)</span>}
+            {!late && !orderNow(line, today()) && line.status === "to_buy" && orderBy(line) && <span className="text-amber"> · order by {day(orderBy(line)!)}</span>}
           </span>
         </span>
         {line.unit_cost ? <span className="font-mono text-[12px] text-muted shrink-0">{money(lineTotal(line))}</span> : null}
@@ -326,7 +435,7 @@ export function LineRow({ line, plan, jobs, open, onToggle, onTick, sub, childre
   );
 }
 
-type Group = "where" | "who" | "store" | "status";
+type Group = "where" | "who" | "store" | "trade" | "status";
 
 /** The Buy tab: this job's list, grouped by where it goes, who gets it, the store or the status. */
 export function MaterialsPanel({ jobId, lines, jobs, plan, stages, focus, onAdd, onUpdate, onRemove, onShow, onSplit, onShoppingRun }: {
@@ -345,11 +454,14 @@ export function MaterialsPanel({ jobId, lines, jobs, plan, stages, focus, onAdd,
   const est = mine.filter((l) => l.status !== "returned").reduce((a, l) => a + lineTotal(l), 0);
   const spent = mine.filter((l) => l.status === "got" || l.status === "installed").reduce((a, l) => a + lineTotal(l), 0);
   const toBuy = mine.filter((l) => l.status === "to_buy").length;
+  // special-order items that won't arrive in time unless ordered now (or within two days)
+  const urgent = mine.filter((l) => orderNow(l, today(), 2));
 
   const key = (l: MaterialLine): string => {
     if (group === "who") return members.find((m) => m.id === l.buyer)?.full_name ?? "Nobody yet";
     if (group === "store") return l.fulfil === "stock" ? "From stock" : l.store ?? "No store yet";
     if (group === "status") return STATUS_LABEL[l.status];
+    if (group === "trade") return l.trade ?? "Other";
     if (!plan || !placed(l)) return "No spot yet";
     // by room: the room an element sits in, or the room of the wall side it's on
     const e = l.element_id ? findElement(plan, l.element_id) : null;
@@ -379,12 +491,22 @@ export function MaterialsPanel({ jobId, lines, jobs, plan, stages, focus, onAdd,
           <div key={k} className="bg-panel-2 border border-line rounded-[3px] px-2.5 py-1.5"><p className="text-[11.5px] text-muted">{k}</p><p className="font-mono text-[15px] font-semibold">{v}</p></div>
         ))}
       </div>
+      {urgent.length > 0 && (
+        <div className="rounded-[3px] border border-red/60 bg-red/10 px-3 py-2 text-[13px]">
+          <p className="font-semibold text-red mb-1">Order today ({urgent.length})</p>
+          {urgent.map((l) => (
+            <button key={l.id} className="block w-full text-left truncate hover:underline" onClick={() => setOpen(l.id)}>
+              {qtyText(l.qty, l.unit)} {l.name} <span className="text-muted">· takes {l.lead_days} days, needed {day(l.needed_by!)}{l.store ? ` · ${l.store}` : ""}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-1.5">
         {(["open", "mine", "all"] as const).map((f) => (
           <button key={f} onClick={() => setFilter(f)} className={`chip ${filter === f ? "!text-accent-ink !bg-accent !border-accent" : "hover:text-text"}`}>{f === "open" ? "Still to get" : f === "mine" ? "I'm getting" : "All"}</button>
         ))}
         <select className="input !h-7 !w-auto !text-[12.5px] !py-0 ml-auto" value={group} onChange={(e) => setGroup(e.target.value as Group)} aria-label="Group by">
-          <option value="where">By where it goes</option><option value="who">By who gets it</option><option value="store">By store</option><option value="status">By status</option>
+          <option value="where">By where it goes</option><option value="who">By who gets it</option><option value="store">By store</option><option value="trade">By trade</option><option value="status">By status</option>
         </select>
       </div>
       {shown.length ? [...groups].map(([k, ls]) => (
@@ -394,7 +516,7 @@ export function MaterialsPanel({ jobId, lines, jobs, plan, stages, focus, onAdd,
             {ls.map((l) => (
               <LineRow key={l.id} line={l} plan={plan} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} onTick={() => onUpdate(l.id, { status: NEXT_STATUS[l.status] })}
                 sub={group === "where" ? [l.store, members.find((m) => m.id === l.installer) ? `for ${members.find((m) => m.id === l.installer)!.full_name.split(" ")[0]}` : null, l.fulfil !== "pickup" ? FULFIL_LABEL[l.fulfil] : null, l.needed_by ? `by ${l.needed_by.slice(5)}` : null].filter(Boolean).join(" · ") || undefined : undefined}>
-                <LineDetail line={l} plan={plan} jobs={jobs} stages={stages} onUpdate={(p) => onUpdate(l.id, p)} onRemove={() => onRemove(l.id)}
+                <LineDetail line={l} all={lines} plan={plan} jobs={jobs} stages={stages} onUpdate={(p) => onUpdate(l.id, p)} onRemove={() => onRemove(l.id)}
                   onShow={placed(l) ? () => onShow(l) : undefined} onSplit={(j, q) => onSplit(l, j, q)} />
               </LineRow>
             ))}
