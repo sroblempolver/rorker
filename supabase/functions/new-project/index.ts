@@ -14,7 +14,7 @@ const MAX_BODY = 14 * 1024 * 1024;
 const LIMIT = 20; // requests per address per 10 minutes, per running copy of the function
 const WINDOW = 10 * 60_000;
 
-const ORIGINS = [/^https:\/\/[a-z0-9-]+\.github\.io$/, /^https:\/\/[a-z0-9-]+\.up\.railway\.app$/, /^https?:\/\/localhost(:\d+)?$/, /^https?:\/\/127\.0\.0\.1(:\d+)?$/];
+const ORIGINS = [/^https:\/\/([a-z0-9-]+\.)?rorker\.com$/, /^https:\/\/[a-z0-9-]+\.github\.io$/, /^https:\/\/[a-z0-9-]+\.up\.railway\.app$/, /^https?:\/\/localhost(:\d+)?$/, /^https?:\/\/127\.0\.0\.1(:\d+)?$/];
 const extra = (Deno.env.get("ALLOWED_ORIGINS") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 const allowed = (o: string | null) => !!o && (extra.includes(o) || ORIGINS.some((r) => r.test(o)));
 const hits = new Map<string, number[]>();
@@ -58,12 +58,20 @@ const TOOLS: Anthropic.Tool[] = [
         building_name: { type: "string" },
         storey_height_mm: { type: "number" },
         roof: { type: "string", enum: ["gable", "hip", "flat", "unknown"] },
+        scale: { type: "string", description: "How you got from the drawing to millimetres, in a few words (\"written dimensions\", \"1:100 scale bar\", \"from door widths and the stair, about 9.5 mm per overview pixel\")" },
+        units: { type: "array", description: "Only when the drawing has several homes (townhouses, semi-detached, duplex, flats): every unit, in order along the drawing. Draw a unit in full (its rooms carry its name in unit), or, when it is the same as another unit or its mirror image, give copy_of instead and the app copies that unit's rooms, doors, windows and fixtures.", items: { type: "object", properties: {
+          name: { type: "string", description: "\"Unit 1\", \"Unit 2\" … or the names on the drawing" },
+          copy_of: { type: "string", description: "The unit this one repeats" },
+          mirror: { type: "boolean", description: "True when it is that unit flipped left to right (handed)" },
+          offset_mm: { ...PT, description: "How far this unit's left edge sits from copy_of's left edge, [dx, dy] in mm" },
+        }, required: ["name"] } },
         floors: { type: "array", items: { type: "object", properties: {
           name: { type: "string" }, level: { type: "integer", description: "0 ground, 1 first floor up, -1 basement" },
           rooms: { type: "array", items: { type: "object", properties: {
             name: { type: "string" },
             type: { type: "string", enum: ["kitchen", "bathroom", "wc", "bedroom", "living", "dining", "family", "study", "office", "hallway", "foyer", "stair_hall", "laundry", "utility", "closet", "garage", "storage", "balcony", "porch", "terrace", "other"] },
             polygon: { type: "array", items: PT, minItems: 3, description: "Corners in order, mm, on the wall centre lines" },
+            unit: { type: "string", description: "When the drawing has several homes: the unit this room belongs to, exactly as named in units" },
           }, required: ["name", "type", "polygon"] } },
           doors: { type: "array", items: { type: "object", properties: {
             rooms: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 2, description: "The two room names it joins; \"outside\" for an outside door" },
@@ -90,9 +98,12 @@ Each turn, call exactly one tool:
 - create_project, as soon as you have enough. Job name: the client's surname plus the work ("Okafor kitchen"), else the street address, else a short description.
 
 The sketch (only when there's a drawing, plan, sketch or photo of a layout):
-- Coordinates are millimetres, x to the right, y down, north up the page unless the drawing says otherwise. For a DXF picture, use the scale and frame given with it and the text labels' positions. For other pictures, measure from the dimensions written on the drawing; if there are none, use typical room sizes.
+- Coordinates are millimetres, x to the right, y down, north up the page unless the drawing says otherwise. For a DXF picture, use the scale and frame given with it and the text labels' positions. For other pictures, see Scale below.
 - Rooms are polygons on the wall centre lines, almost always rectangles or L-shapes with straight walls at right angles. Neighbouring rooms must share their edges exactly (same coordinates), and together the rooms should cover the whole floor, hallways and stair halls included. Use the room names written on the drawing, cleaned up ("DINING ROM" -> "Dining room").
 - Each floor is its own entry, even when several floors are drawn side by side in one picture; give each floor's coordinates in its own place in the picture (the app lines floors up).
+- PDFs come as an overview picture of each drawing on the sheet (frame D1, or D1.1 and D1.2 when one sheet holds several plans, such as a ground and a first floor) plus close-ups, each saying where it sits in its overview. Read the details from the close-ups, measure in the overview's pixels, then turn that into mm. Ignore stray lines that shoot off across the sheet (a broken export).
+- Scale: first look for written dimensions, then a scale bar or ratio, then the grid. If there are none, measure from things of known size: door leaves 800 to 900 mm, a straight stair about 900 to 1000 mm wide with 250 mm treads, a dining table for 6 about 1600 x 900, a double bed 1400 to 1600 x 2000, a car 1800 x 4500, a WC about 400 x 700. Use several of them, settle on one mm-per-pixel, and say how in scale. When the scale is a guess, ask in the sketch's questions to confirm one main size (a unit's width or the house's length).
+- Several homes in one drawing (a terrace of townhouses, semi-detached houses, a duplex, flats): count the homes before anything else. A home is a separate dwelling (its own household or tenant): look across the whole drawing for unit labels ("Unit A", "Lot 3", "Apt 2", "Townhouse 1"), party or demising walls (thick walls running the full depth with no door through them), separate front entrances, a kitchen in each, separate meters or services, and the same layout repeated or mirrored. Rooms joined by an internal door are one home; a second kitchen behind the same front door is still one home unless the drawing calls it a unit. List each one in units and make every one of them; never squeeze them into one house. Start each room's name with its unit ("Unit 2 living room") so names stay unique, and set its unit. Doors between a unit and outside are outside doors. Neighbouring units share the party wall line exactly. Draw the first unit in full; a unit that is the same or the mirror image of one already drawn is a copy_of entry (mirror for handed pairs, offset_mm from that unit's left edge to its own). Draw a unit in full when it differs (end units with an extra window, a different layout). Say how many units you found in the summary. Name the building after the drawing ("Townhouses 1-6") when it has no name.
 - Doors: every door between two rooms and every outside door, by the two room names (and the side of the house for an outside door). Windows: by room and the side of the house they're on. Open passages are kind "opening".
 - Fixtures: the main things drawn (kitchen run as base cabinets with the sink, range and fridge; toilets, basins, tubs, showers; beds, sofas, dining table; a car in a garage). Centre in mm, real size, and which way the front faces.
 - Put the things you weren't sure about in the sketch's questions (at most 5, each with quick answers when there are obvious ones). The contractor sees them next to the design.
@@ -109,7 +120,7 @@ type Part = { kind: "image"; name?: string; media_type: string; data: string; no
 
 function firstTurn(description: string, parts: Part[], today: string): Anthropic.ContentBlockParam[] {
   const out: Anthropic.ContentBlockParam[] = [];
-  for (const p of parts.slice(0, 8)) {
+  for (const p of parts.slice(0, 24)) {
     if (p.kind === "pdf" && typeof p.data === "string") {
       out.push({ type: "text", text: `File: ${String(p.name ?? "plans.pdf").slice(0, 120)}` });
       out.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: p.data } });
@@ -140,7 +151,7 @@ Deno.serve(async (req) => {
 
   const raw = await req.text();
   if (raw.length > MAX_BODY) return json({ error: "Those files are too big to send at once. Try fewer pages or smaller photos." }, 413);
-  let body: { description?: string; parts?: Part[]; history?: Anthropic.MessageParam[]; today?: string; test_url?: string; plan?: string };
+  let body: { description?: string; parts?: Part[]; history?: Anthropic.MessageParam[]; today?: string; test_url?: string; test_parts?: string; plan?: string };
   try { body = JSON.parse(raw); } catch { return json({ error: "Bad request." }, 400); }
 
   // for checking the function itself: a picture from the preview's own site
@@ -154,6 +165,22 @@ Deno.serve(async (req) => {
       const note = await fetch(body.test_url.replace(/\.(png|jpg)$/, ".txt")).then((x) => (x.ok ? x.text() : "")).catch(() => "");
       parts = [{ kind: "image", name: body.test_url.split("/").pop(), media_type: body.test_url.endsWith(".png") ? "image/png" : "image/jpeg", data: btoa(s), note }];
     }
+  }
+  // the same for a whole upload as the page prepares it: a folder on the preview's site with parts.json
+  // (name, file, note for each picture) beside the pictures
+  if (body.test_parts && /^https:\/\/sroblempolver\.github\.io\/rorker\/test\/[\w-]+\/$/.test(body.test_parts)) {
+    const list = await fetch(`${body.test_parts}parts.json`).then((x) => (x.ok ? x.json() : [])).catch(() => []);
+    const got: Part[] = [];
+    for (const p of (Array.isArray(list) ? list : []).slice(0, 24)) {
+      if (!/^[\w.-]+\.(png|jpg)$/.test(String(p?.file))) continue;
+      const r = await fetch(body.test_parts + p.file);
+      if (!r.ok) continue;
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      let s = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      got.push({ kind: "image", name: String(p.name ?? p.file), media_type: p.file.endsWith(".png") ? "image/png" : "image/jpeg", data: btoa(s), note: String(p.note ?? "") });
+    }
+    if (got.length) parts = got;
   }
   const history = (Array.isArray(body.history) ? body.history : []).slice(0, 24);
   if (history.length % 2 === 1 || !history.every((m, i) => m && m.role === (i % 2 === 0 ? "assistant" : "user"))) return json({ error: "Bad request." }, 400);
@@ -172,7 +199,7 @@ Deno.serve(async (req) => {
         // round pays for them at the cheap cached rate
         const params = {
           // Sonnet 5.5 thinks at "high" unless told; "medium" keeps a read inside the function's time limit
-          model: MODEL, max_tokens: 32000, thinking: { type: "adaptive" }, output_config: { effort: "medium" },
+          model: MODEL, max_tokens: 64000, thinking: { type: "adaptive" }, output_config: { effort: "medium" },
           system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }], tools: TOOLS, messages,
           cache_control: { type: "ephemeral" },
         };

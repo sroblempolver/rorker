@@ -14,7 +14,11 @@ const js = await esbuild.build({
   entryPoints: [path.join(here, "main.tsx")], bundle: true, minify: true, write: false, format: "iife", target: "es2020",
   jsx: "automatic", define: { "process.env.NODE_ENV": '"production"', __ASSISTANT_FUNCTION__: JSON.stringify(process.env.ASSISTANT_FUNCTION || "assistant"), __BUILD__: JSON.stringify(new Date().toISOString().slice(5, 16).replace("T", " ") + " UTC") }, loader: { ".json": "json" },
   alias: { "@": path.join(root, "src"), "next/navigation": path.join(here, "shims/navigation.ts"), "next/link": path.join(here, "shims/link.tsx") },
+  // pdf.js (for reading PDF plans) stays out of the page and loads from files beside it, only when a PDF is added
+  plugins: [{ name: "pdfjs", setup(b) { b.onResolve({ filter: /^pdfjs-dist/ }, (a) => ({ path: `./pdfjs/${a.path.includes("worker") ? "pdf.worker.min.mjs" : "pdf.min.mjs"}`, external: true })); } }],
 });
+fs.mkdirSync(path.join(path.dirname(out), "pdfjs"), { recursive: true });
+for (const f of ["pdf.min.mjs", "pdf.worker.min.mjs"]) fs.copyFileSync(path.join(root, "node_modules/pdfjs-dist/build", f), path.join(path.dirname(out), "pdfjs", f));
 const cssFile = path.join(here, "dist", "styles.css");
 execFileSync(path.join(root, "node_modules/.bin/tailwindcss"), ["-i", path.join(here, "styles.css"), "-o", cssFile, "--minify"], { cwd: root, stdio: "inherit" });
 const css = fs.readFileSync(cssFile, "utf8");

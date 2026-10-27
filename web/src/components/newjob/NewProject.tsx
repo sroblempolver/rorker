@@ -256,12 +256,13 @@ function Review({ project, built, furnish, setFurnish, onCreate, onRestart, chec
   );
   const plan = built?.plan ?? null;
   const rooms = plan?.floors.reduce((n, f) => n + f.rooms.length, 0) ?? 0;
+  const units = new Set(plan?.floors.flatMap((f) => f.rooms.map((r) => r.unit).filter(Boolean)) ?? []).size;
   return (
     <>
       <section className="card p-5 space-y-2 border-l-[3px] !border-l-accent">
         <p className="eyebrow">Here&apos;s what I made</p>
         <p className="text-[15px] leading-relaxed">{project.summary}</p>
-        {plan && <p className="text-[13px] text-muted">{plan.floors.length} floor{plan.floors.length === 1 ? "" : "s"}, {rooms} rooms. You can fix anything later in the job.</p>}
+        {plan && <p className="text-[13px] text-muted">{units > 1 ? `${units} homes, ` : ""}{plan.floors.length} floor{plan.floors.length === 1 ? "" : "s"}, {rooms} rooms. You can fix anything later in the job.</p>}
       </section>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px] items-start">
         {plan ? (
