@@ -28,6 +28,8 @@ export interface WorkspaceData {
   brand?: Brand;
   /** the company's payout account is connected, so clients can pay online */
   payoutsConnected?: boolean;
+  /** open on the Money tab (coming back from the client's page) */
+  startOnMoney?: boolean;
 }
 
 export interface WorkspaceApi {

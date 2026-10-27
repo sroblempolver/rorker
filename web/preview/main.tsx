@@ -215,7 +215,8 @@ function App() {
   const active = jobs.find((j) => j.job.id === activeId) ?? jobs[0];
   // the assistant changes the job behind the screen's back: hand the workspace a fresh copy after
   const [ver, setVer] = useState(0);
-  const current = useMemo(() => ({ ...active }), [active, ver]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [fromClient, setFromClient] = useState(false);
+  const current = useMemo(() => ({ ...active, startOnMoney: fromClient }), [active, ver, fromClient]); // eslint-disable-line react-hooks/exhaustive-deps
   const api = useMemo(() => {
     const a = memoryApi(active);
     return { ...a, ask: previewAsk(active, a), afterAssistant: () => setVer((n) => n + 1), openShare: (token: string, pin?: string) => { setShare({ token, pin }); setPage("shared"); },
@@ -241,7 +242,7 @@ function App() {
     setPage("job");
   };
   const tab = (p: Page, label: string) => (
-    <button onClick={() => setPage(p)} className={`px-3 h-9 rounded-[3px] font-display text-[15px] font-bold tracking-[0.1em] uppercase ${page === p ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</button>
+    <button onClick={() => { setFromClient(false); setPage(p); }} className={`px-3 h-9 rounded-[3px] font-display text-[15px] font-bold tracking-[0.1em] uppercase ${page === p ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</button>
   );
   return (
     <div className="h-full flex flex-col">
@@ -268,7 +269,7 @@ function App() {
           </div>
           <ClientMoneyView key={`${client?.id ?? "home"}-${tier}`} billing={active.billing} brand={{ ...(active.brand ?? SAMPLE_BRAND), tier }} start={client}
             job={{ name: active.job.name, address: active.job.address, client_name: active.job.client_name, client_email: active.job.client_email, client_phone: active.job.client_phone }}
-            onChange={(b) => { active.billing = b; }} onBack={() => { setVer((n) => n + 1); setPage("job"); }} />
+            onChange={(b) => { active.billing = b; }} onBack={() => { setFromClient(true); setVer((n) => n + 1); setPage("job"); }} />
         </div>
       ) : page === "shared" && share ? (
         <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">

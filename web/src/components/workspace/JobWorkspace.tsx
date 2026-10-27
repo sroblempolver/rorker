@@ -44,7 +44,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   // a pin being made: `at` set means the quick card at that screen point, otherwise the full form
   const [draft, setDraft] = useState<(PinTarget & { at?: ScreenPoint; preset?: { kind: PinKind; title: string; tagged?: string[]; photo?: boolean } }) | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
-  const [tab, setTab] = useState<Tab>(data.plan ? "details" : "plan");
+  const [tab, setTab] = useState<Tab>(data.startOnMoney && data.billing ? "money" : data.plan ? "details" : "plan");
   const [flyTo, setFlyTo] = useState<{ ids: string[]; n: number } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const job = data.job;

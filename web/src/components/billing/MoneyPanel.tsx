@@ -124,7 +124,6 @@ export function MoneyPanel({ initial, brand, job, jobId, plan, stages, api, conn
       ))}
       {view === "quotes" && !quote && cq && (
         <div className="pt-2">
-          <p className="eyebrow mb-2">Where the money goes</p>
           <RoomCosts billing={b} plan={plan} onShowRoom={api.showRoom} />
         </div>
       )}
