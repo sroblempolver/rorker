@@ -20,6 +20,7 @@ import { Inspector, ProjectSummary, type AddPin } from "./Inspector";
 import { PinDetail, PinForm, PinsList, QuickPin } from "./PinsPanel";
 import { PlanPanel, UploadBox } from "./PlanPanel";
 import { ShareDialog } from "./ShareDialog";
+import { useFollowMarks } from "./useFollowMarks";
 import { StagesPanel, StageStrip } from "./StagesPanel";
 
 type Tab = "details" | "pins" | "stages" | "plan";
@@ -141,6 +142,9 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     setSelectedPin(null);
     setFlyTo({ ids, n: Date.now() });
   }, [plan]);
+
+  // the assistant pointing at a place: go there and open it in the side panel (not over the Plan tab's chat)
+  useFollowMarks(view, level, setLevelRaw, (id) => { setSelected(id); setSelectedPin(null); setSelectedItem(null); setDraft(null); setTab((t) => (t === "plan" ? t : "details")); });
 
   /** A click on the map with the pin tool (or right-click / long-press): quick card right there. */
   const placePin = useCallback((t: PinTarget, at: ScreenPoint) => {

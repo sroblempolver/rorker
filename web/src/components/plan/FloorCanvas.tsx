@@ -7,8 +7,9 @@ import type { JobItem, Pin, PinInput } from "@/lib/data/types";
 import { bboxOf, centroid, unionBBox, edgeDistance, elementCenter, findElement, floorBBox, footprint, labelPoint, lineD, pathD, pointInPoly, roomOf, roomSides, sidePoint, type WallSide } from "@/lib/plan/geometry";
 import type { BBox, ElementStatus, Fixture, Floor, Opening, Plan, Pt, Room } from "@/lib/plan/types";
 import { CHALK, FIXTURE_STROKE, GLASS, GROUND, ROOM_MATERIAL, STATUS_COLOR, WALL_EXT_TOP, WALL_SIDE, WALL_TOP } from "./style";
-import { DraftFlag, PinFlag, PlanDefs, useHoldToPin, useWorldDrag } from "./svg";
-import { HIDDEN_KINDS, TOP_FILL, fixtureTop, isWallMounted } from "./fixtures";
+import { DraftFlag, MarkDot, PinFlag, PlanDefs, useHoldToPin, useWorldDrag } from "./svg";
+import { useMarks } from "@/lib/plan/marks";
+import { HIDDEN_KINDS, TOP_FILL, fixtureBottom, fixtureTop, isWallMounted } from "./fixtures";
 import { ITEM_ICON } from "./items";
 import type { Controls, PinTarget, ScreenPoint } from "./target";
 import { usePanZoom } from "./usePanZoom";
@@ -143,6 +144,19 @@ export function FloorCanvas(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.flyTo]);
 
+  // the places the assistant is talking about: blink them, and bring them into view
+  const { marks, n: markN } = useMarks();
+  const floorMarks = useMemo(() => marks.filter((m) => m.floor_id === floor.id), [marks, floor.id]);
+  useEffect(() => {
+    if (!floorMarks.length) return;
+    const xs = floorMarks.map((m) => m.x), ys = floorMarks.map((m) => m.y);
+    const b = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    const w = Math.max(b[2] - b[0] + 3000, 4000), h = Math.max(b[3] - b[1] + 3000, 4000);
+    const inView = floorMarks.every((m) => m.x > view.x && m.x < view.x + view.w && m.y > view.y && m.y < view.y + view.h);
+    if (!inView) animateTo({ x: (b[0] + b[2]) / 2 - w / 2, y: (b[1] + b[3]) / 2 - h / 2, w, h }, 0.6);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markN]);
+
   useEffect(() => {
     props.controls({ zoomBy, home: () => setHome(homeBox, true, room ? 0.3 : 0.06) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -271,7 +285,7 @@ export function FloorCanvas(props: Props) {
         {floor.fixtures.filter((f) => !HIDDEN_KINDS.has(f.kind) && isWallMounted(f)).map((f) => (
           <path key={f.id} d={pathD(shapes.get(f.id)!)} fill="none" stroke="#f4efe6" strokeOpacity={inRoom(f.room_id) ? 0.55 : 0.2} strokeWidth={lw} strokeDasharray={`${5 * lw} ${4 * lw}`} pointerEvents="none" />
         ))}
-        {floor.fixtures.filter((f) => !inert(f) || f.kind === "part").map((f) => {
+        {floor.fixtures.filter((f) => !inert(f) || f.kind === "part").sort((a, b) => fixtureBottom(a) - fixtureBottom(b)).map((f) => {
           const b = f.bbox, sel = selected === f.id, hot = hover === f.id;
           if (f.kind === "part") return <path key={f.id} d={lineD(f.outline)} fill="none" stroke={FIXTURE_STROKE} strokeOpacity={inRoom(f.room_id) ? 0.7 : 0.25} strokeWidth={lw} pointerEvents="none" />;
           const faint = f.kind === "other";
@@ -436,6 +450,7 @@ export function FloorCanvas(props: Props) {
         })}
         {draftPt && <DraftFlag x={draftPt[0]} y={draftPt[1]} px={lw} />}
       </g>
+      {floorMarks.map((m, i) => <MarkDot key={`${markN}-${i}`} x={m.x} y={m.y} color={m.color} label={m.label} px={lw} />)}
     </svg>
   );
 }

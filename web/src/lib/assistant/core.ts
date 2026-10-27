@@ -9,7 +9,10 @@
 import type { ElementStatus, Plan } from "@/lib/plan/types";
 import type { ElementEdit, ItemInput, ItemKind, Job, JobItem, JobStage, Member, MemberRole, Pin, PinInput, PinKind, PinStatus, StageStatus } from "@/lib/data/types";
 import { bboxOf, elementLabel, findElement, labelPoint, roomOf, roomSides } from "@/lib/plan/geometry";
-import { applyEdits, fixtureSize } from "@/lib/plan/edits";
+import { addedFixture, applyEdits, fixtureSize } from "@/lib/plan/edits";
+import { kindFor, OBJECT_KINDS, specOf, topOf, bottomOf, weightOf, type Part } from "@/lib/plan/catalog";
+import { naturalFacing, partnerOf, supportOf, toward } from "@/lib/plan/arrange";
+import { MARK_COLORS, type Mark } from "@/lib/plan/pointing";
 import { today } from "@/lib/dates";
 
 /** `plan` is the plan as drawn; `edits` are the changes made in the app on top of it (moved, added, removed). */
@@ -39,9 +42,18 @@ export interface ToolSpec { name: string; description: string; input_schema: { t
 const JOB = { type: "string", description: "The job: its id, or its name as the person says it (\"Hadley Road\"). Leave out for the job they're looking at." };
 const PIN_KINDS = ["task", "issue", "note", "material"];
 const ITEM_KINDS = ["outlet", "switch", "light", "data", "plumbing", "vent", "thermostat", "mount", "other"];
-const OBJECT_KINDS = ["base_cabinet", "wall_cabinet", "tall_cabinet", "kitchen_sink", "dishwasher", "range", "cooktop", "oven", "range_hood", "fridge", "island", "toilet", "washbasin", "vanity", "bathtub", "shower", "bed", "sofa", "armchair", "chair", "table", "dining_table", "desk", "nightstand", "sideboard", "wardrobe", "bookshelf", "washing_machine", "dryer", "water_heater", "fireplace", "tv", "lamp", "plant", "other"];
 const SIDE = { type: "string", enum: ["north", "south", "east", "west"] };
 const FACING: Record<string, number> = { east: 0, south: 90, west: 180, north: -90 };
+const PART = { type: "object", properties: {
+  shape: { type: "string", enum: ["box", "cylinder", "sphere"] },
+  x: { type: "number", description: "Centre, mm right of the object's middle as seen from its front" }, z: { type: "number", description: "Centre, mm toward its front from its middle" },
+  y: { type: "number", description: "Bottom of this part, mm above the object's bottom" },
+  w: { type: "number", description: "Width, mm (left to right)" }, d: { type: "number", description: "Depth, mm (front to back)" }, h: { type: "number", description: "Height, mm" },
+  color: { type: "string", description: "#rrggbb, its real colour" },
+}, required: ["shape", "x", "y", "z", "w", "d", "h"] };
+
+/** What a tool run did besides its answer: whether the job changed, and the places to point at on the plan. */
+export interface Changes { any: boolean; marks?: Mark[]; focus?: string | null }
 
 export const TOOLS: ToolSpec[] = [
   { name: "list_jobs", description: "List the jobs this person can see: id, name, address, status, open pins and current stage.", input_schema: { type: "object", properties: {} } },
@@ -78,16 +90,30 @@ export const TOOLS: ToolSpec[] = [
   },
   { name: "room_layout", description: "A room's layout for changing what's in it: its inside edges (x grows east, y grows south, in mm), its walls with the doors and windows on them, and every object in it with id, centre, size and the way it faces. Call it before adding or moving things.", input_schema: { type: "object", properties: { job: JOB, room: { type: "string", description: "Room id or name" } }, required: ["room"] } },
   {
-    name: "add_objects", description: "Add furniture, appliances or fixtures to a room of the plan, each at a centre point in plan mm, at its real size (width across its front, depth front to back), with the way its front faces. Pieces are kept inside the room.",
-    input_schema: { type: "object", properties: { job: JOB, room: { type: "string" }, objects: { type: "array", maxItems: 30, items: { type: "object", properties: {
-      kind: { type: "string", enum: OBJECT_KINDS }, name: { type: "string", description: "e.g. \"Queen bed\"" }, x: { type: "number" }, y: { type: "number" },
-      width_mm: { type: "number" }, depth_mm: { type: "number" }, facing: { ...SIDE, description: "The way its front faces (the foot of a bed, the seat of a sofa)" }, height_mm: { type: "number" },
-    }, required: ["kind", "x", "y", "width_mm", "depth_mm"] } } }, required: ["room", "objects"] },
+    name: "add_objects", description: "Add furniture, appliances, electronics or fixtures to a room. Each goes in at its real size, height and weight (the catalogue's usual values unless you give them), at the right height: things that sit on something (a computer, monitor, microwave, table lamp, TV) go on top of it, on the desk or counter you name with `on` or the nearest suitable one in the room; wall things (mirror, picture, wall cabinet, shelf) hang at their usual height against the nearest wall. When you leave out `facing` it faces the natural way: chairs to their desk or table, stools to the counter, sofas to the TV, beds, cabinets and desks with their backs to the wall. Pieces are kept inside the room. Something not in the kind list: kind \"other\", its real name, and `parts`.",
+    input_schema: { type: "object", properties: { job: JOB, room: { type: "string", description: "Room id (best) or name" }, objects: { type: "array", maxItems: 30, items: { type: "object", properties: {
+      kind: { type: "string", enum: OBJECT_KINDS }, name: { type: "string", description: "What it is, e.g. \"Queen bed\", \"Desktop computer\", \"Espresso machine\"" },
+      x: { type: "number", description: "Centre, plan mm. Can be left out for things put on something or next to their partner (a chair at its desk)" }, y: { type: "number" },
+      width_mm: { type: "number", description: "Across its front; leave out for the usual size" }, depth_mm: { type: "number", description: "Front to back" }, height_mm: { type: "number" },
+      weight_kg: { type: "number" },
+      facing: { ...SIDE, description: "The way its front faces (the foot of a bed, the seat of a chair, a screen's face). Leave out for the natural way." },
+      face_toward: { type: "string", description: "Id of something it should face (a chair facing desk G-F41)" },
+      on: { type: "string", description: "Id of what it sits on (the desk, counter or sideboard), from room_layout or earlier in this call (\"new:0\" is the first object of this call)" },
+      height_above_floor_mm: { type: "number", description: "Its bottom above the floor, for something hung at an unusual height" },
+      parts: { type: "array", maxItems: 40, items: PART, description: "For kind other: the object built from simple shapes at real sizes, as it really looks (a rowing machine: rail, seat, flywheel, footrests). Its overall width, depth and height must contain the parts." },
+    }, required: ["kind"] } } }, required: ["room", "objects"] },
   },
   {
-    name: "change_object", description: "Move, turn, resize or rename one object in the plan. Move by mm east/south (negative for west/north), or to a new centre.",
+    name: "change_object", description: "Move, turn, resize, rename or re-seat one object. Move by mm east/south (negative for west/north), or to a new centre; turn it to face a side or another object; put it on something (`on`), or set its height above the floor.",
     input_schema: { type: "object", properties: { job: JOB, element_id: { type: "string" }, move_east_mm: { type: "number" }, move_south_mm: { type: "number" }, to_x: { type: "number" }, to_y: { type: "number" },
-      facing: SIDE, width_mm: { type: "number" }, depth_mm: { type: "number" }, height_mm: { type: "number" }, name: { type: "string" } }, required: ["element_id"] },
+      facing: SIDE, face_toward: { type: "string", description: "Id of what it should face" }, on: { type: "string", description: "Id of what it should sit on" }, height_above_floor_mm: { type: "number" },
+      width_mm: { type: "number" }, depth_mm: { type: "number" }, height_mm: { type: "number" }, weight_kg: { type: "number" }, name: { type: "string" } }, required: ["element_id"] },
+  },
+  {
+    name: "point_at", description: "Put a blinking coloured dot on the plan (2D and 3D) on each place you're talking about, so the person sees which is which. Use it whenever you name places they must tell apart or find: before asking \"the bedroom with the blue dot or the green one?\", and to show where something is. With one place it also opens that room or object in the side panel. Returns each place's dot colour; say the colours in your reply.",
+    input_schema: { type: "object", properties: { job: JOB, places: { type: "array", minItems: 1, maxItems: 6, items: { type: "object", properties: {
+      id: { type: "string", description: "Room, object, door, window or wall id" }, label: { type: "string", description: "What you call it, e.g. \"south bedroom\"" },
+    }, required: ["id"] } }, open: { type: "string", description: "Id to open in the side panel (defaults to the place when there is just one)" } }, required: ["places"] },
   },
   { name: "remove_objects", description: "Take objects out of the plan by id (furniture, appliances, fixtures). Ones from the drawing can be brought back with Reset.", input_schema: { type: "object", properties: { job: JOB, element_ids: { type: "array", items: { type: "string" } } }, required: ["element_ids"] } },
   { name: "rename_room", description: "Rename a room or change its type.", input_schema: { type: "object", properties: { job: JOB, room: { type: "string" }, name: { type: "string" }, type: { type: "string", enum: ["kitchen", "bathroom", "wc", "bedroom", "living", "dining", "family", "study", "office", "hallway", "foyer", "stair_hall", "laundry", "utility", "closet", "garage", "storage", "balcony", "porch", "terrace", "other"] } }, required: ["room"] } },
@@ -104,7 +130,10 @@ export function instructions(me: AssistantBackend["me"], ctx: AssistantContext):
     "Never say which AI model or company powers you; you are the Rorker assistant.",
     "Where things are: left and right of an object always mean as seen standing in front of it, facing it (the way you'd use a stove, a sink or a cabinet), not as seen on the plan. \"The cabinet right of the stove\" is the one at your right hand when you face the stove. Use whats_around to find it. Above and below mean height on the wall. North, south, east and west follow the plan (north is up). If two things still fit, ask one short question naming them by where they are.",
     "Changing the plan: you can add, move, turn, resize and remove furniture, appliances and fixtures, and rename rooms (room_layout first, then add_objects, change_object, remove_objects, rename_room). Walls, rooms' shapes, doors and windows can't be changed here yet: say so in one sentence and offer to add a task pin for it.",
-    "When adding furniture use standard sizes (width x depth, mm): double bed 1400x2000, queen 1600x2000, king 1800x2000, single 900x2000, nightstand 450x400, wardrobe 1200x600, 3-seat sofa 2100x900, 2-seat sofa 1600x900, armchair 850x850, coffee table (table) 1100x600, TV unit (sideboard) 1600x450 with a tv on it, dining table 1600x900 for 6 or 1200x800 for 4 with a chair (450x450) at each place, desk 1200x600 with a chair, bookshelf 800x300, lamp and plant 400x400; kitchen base cabinets 600 deep, fridge 700x700, range 600x600, dishwasher 600x600; toilet 400x650, basin 600x450, shower 900x900, bathtub 1700x700, washing machine and dryer 600x600. Place things the way a designer would: beds with the headboard against a solid wall, facing into the room, a nightstand each side of a double; sofas facing the TV or fireplace; tables centred with chairs around; pieces against a wall sit 20 mm off its inside edge; keep about 900 mm of walking space and never block a door or doorway. Only add what fits; leave other things as they are unless asked.",
+    "Real things, real sizes: every object has a real width, depth, height, weight and mounting height, and drawings never show furniture heights, so add_objects fills in the usual ones for each kind. Pick the kind that is the actual thing (a computer is kind computer, never a box or other). A computer, monitor, laptop, printer, table lamp, microwave, coffee machine or TV sits on a desk, counter or sideboard, never on the floor: put it `on` that piece (add the desk first if the room has none, or ask). Chairs go at their desk or table facing it, bar stools at the counter or island facing it, sofas and armchairs face the TV, fireplace or coffee table, beds, cabinets, wardrobes and desks stand with their backs to a wall facing into the room, wall cabinets, mirrors, pictures and shelves hang on a wall at their usual height. Leave facing out and it is worked out that way; give it only when the person asks for something else.",
+    "Something not in the kind list (a rowing machine, a pool table, a kayak rack): don't settle for a box. Work out from what you know (or look it up with web search when you can) what it really looks like, its real size and weight, then add it as kind other with its name and parts: simple boxes, cylinders and spheres at real sizes and colours that together look like the real thing. Only when you truly can't tell what it is, ask what it looks like.",
+    "Placing: the usual layouts (width x depth, mm): double bed 1400x2000, queen 1600x2000, king 1800x2000, single 900x2000 with a nightstand each side of a double; dining table 1600x900 for 6 or 1200x800 for 4 with a chair at each place; desk 1200x600 with an office chair; sofa facing the TV on a sideboard. Place things the way a designer would: keep about 900 mm of walking space and never block a door or doorway. Only add what fits; leave other things as they are unless asked.",
+    "Showing places: whenever you mention a room or spot the person has to pick between or find (\"which bedroom?\"), call point_at first so a coloured dot blinks on each one, then name them by where they are and by colour (\"the bedroom on the south side, blue dot, or the east one, green dot?\"). Rooms often share a name, so tell them apart by their side of the floor (find_in_plan says where each one is). After adding or moving something it is pointed at for you.",
     // keep these two last: they change per request, and everything above them is cached
     `Today is ${today()}.`,
     ctx.jobId ? `They are looking at the job "${ctx.jobName ?? ctx.jobId}" (id ${ctx.jobId})${ctx.where ? `, at ${ctx.where}` : ""}${ctx.selected ? `, with ${ctx.selected} selected` : ""}. "This job", "here" and "this" refer to that.` : "They are on the jobs list.",
@@ -238,10 +267,47 @@ function findRoom(plan: Plan | null, ref: unknown): { f: Plan["floors"][number];
   return hit;
 }
 
+/** Which part of its floor a point is in: "the south-east of Level 1". */
+function partOf(fl: Plan["floors"][number], p: [number, number]): string {
+  const [x0, y0, x1, y1] = fl.bounds;
+  const fx = (p[0] - x0) / Math.max(1, x1 - x0), fy = (p[1] - y0) / Math.max(1, y1 - y0);
+  const ns = fy < 0.38 ? "north" : fy > 0.62 ? "south" : "", ew = fx < 0.38 ? "west" : fx > 0.62 ? "east" : "";
+  return `the ${ns && ew ? `${ns}-${ew}` : ns || ew || "middle"} of ${fl.name}`;
+}
+
+const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : Number(v) || 0);
+const facingWord = (deg: number | null | undefined) => (deg == null ? null : heading(Math.cos((deg * Math.PI) / 180), Math.sin((deg * Math.PI) / 180)));
+
+/** Parts the model described, checked and capped. */
+function readParts(v: unknown): Part[] {
+  if (!Array.isArray(v)) return [];
+  return v.slice(0, 40).flatMap((q) => {
+    if (!q || typeof q !== "object") return [];
+    const o = q as Record<string, unknown>;
+    const shape = o.shape === "cylinder" || o.shape === "sphere" ? o.shape : "box";
+    const w = Math.min(10000, Math.abs(num(o.w))), d = Math.min(10000, Math.abs(num(o.d))), h = Math.min(10000, Math.abs(num(o.h)));
+    if (!w || !d || !h) return [];
+    const color = typeof o.color === "string" && /^#[0-9a-f]{6}$/i.test(o.color) ? o.color : undefined;
+    return [{ shape, x: num(o.x), y: Math.max(0, num(o.y)), z: num(o.z), w, d, h, ...(color ? { color } : {}) }];
+  });
+}
+
+/** Where a place is, for a dot on the plan. */
+function markFor(plan: Plan, id: string, label: string, color: string): Mark | null {
+  const e = findElement(plan, id);
+  if (!e) return null;
+  let pt: [number, number], z = 0;
+  if (e.kind === "fixture") { pt = e.el.center; z = topOf(e.el); }
+  else if (e.kind === "opening") { pt = [(e.el.a[0] + e.el.b[0]) / 2, (e.el.a[1] + e.el.b[1]) / 2]; z = 1000; }
+  else if (e.kind === "room") pt = labelPoint(e.el.polygon);
+  else { const b = bboxOf(e.el.polygon); pt = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]; z = e.kind === "wall" ? 1200 : 0; }
+  return { floor_id: e.floor.id, x: Math.round(pt[0]), y: Math.round(pt[1]), z: Math.round(z), label, color, id };
+}
+
 const date = (v: unknown) => { const s = str(v); if (!s) return undefined; if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error("Dates are YYYY-MM-DD."); return s; };
 
 /** Run one tool for the assistant. Returns small plain data; throws a message the model can act on. */
-export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: string, input: Record<string, unknown>, changed: { any: boolean }): Promise<unknown> {
+export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: string, input: Record<string, unknown>, changed: Changes): Promise<unknown> {
   const admin = b.me.role === "admin";
   switch (name) {
     case "list_jobs": {
@@ -259,7 +325,7 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
         id: d.job.id, name: d.job.name, address: d.job.address, type: d.job.job_type, status: d.job.status,
         ...(admin ? { client: d.job.client_name, client_email: d.job.client_email, client_phone: d.job.client_phone } : {}),
         stages: d.stages.map((s) => ({ name: s.name, status: s.status })),
-        floors: d.plan?.floors.map((f) => ({ id: f.id, name: f.name, rooms: f.rooms.map((r) => ({ id: r.id, name: r.name, type: r.type, m2: Math.round(r.area_m2 * 10) / 10 })) })) ?? [],
+        floors: d.plan?.floors.map((f) => ({ id: f.id, name: f.name, rooms: f.rooms.map((r) => ({ id: r.id, name: r.name, type: r.type, m2: Math.round(r.area_m2 * 10) / 10, where: partOf(f, labelPoint(r.polygon)) })) })) ?? [],
         open_pins: d.pins.filter((p) => p.status !== "done").map((p) => ({ number: p.number, kind: p.kind, title: p.title, status: p.status, due: p.due_date, tagged: names(p.tagged), where: where(d.plan, p) })),
         done_pins: d.pins.filter((p) => p.status === "done").length,
       };
@@ -277,7 +343,7 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
           const score = id.toLowerCase() === q ? 100 : words.filter((w) => hay.includes(w)).length;
           if (score > 0 && score >= Math.min(words.length, 2)) out.push({ id, what: `${label}${kind && !norm(label).includes(norm(kind)) ? ` (${kind.replace(/_/g, " ")})` : ""}`, room, floor: f.name, score });
         };
-        for (const r of f.rooms) consider(r.id, r.name, `room ${r.type}`, null);
+        for (const r of f.rooms) consider(r.id, `${r.name}, in ${partOf(f, labelPoint(r.polygon))}`, `room ${r.type}`, null);
         for (const x of f.fixtures) if (x.kind !== "door_leaf" && x.kind !== "part") { const n = frontOf(f, x); consider(x.id, `${x.name}, front faces ${heading(n[0], n[1])}`, x.kind, roomName(x.room_id)); }
         for (const o of f.openings) consider(o.id, o.name, o.kind, o.room_ids.map(roomName).filter(Boolean).join(" / ") || null);
       }
@@ -378,7 +444,7 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
       const { f, r } = findRoom(d.plan, input.room);
       const [x0, y0, x1, y1] = bboxOf(r.polygon);
       return {
-        room: `${r.name} (${r.id})`, floor: f.name, type: r.type,
+        room: `${r.name} (${r.id})`, floor: f.name, type: r.type, where: partOf(f, labelPoint(r.polygon)), ceiling_mm: f.height_mm || 2700,
         inside_edges_mm: { west_x: x0 + 60, east_x: x1 - 60, north_y: y0 + 60, south_y: y1 - 60 },
         corners_mm: r.polygon,
         walls: roomSides(f, r).map((s) => ({
@@ -387,7 +453,11 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
         })),
         objects: f.fixtures.filter((x) => x.room_id === r.id && x.kind !== "door_leaf" && x.kind !== "part").map((x) => {
           const n = frontOf(f, x), sz = fixtureSize(x);
-          return { id: x.id, what: x.name, kind: x.kind, centre: x.center.map(Math.round), width_mm: Math.round(sz.width), depth_mm: Math.round(sz.depth), faces: heading(n[0], n[1]), ...(x.elevation_mm ? { up_on_wall: true } : {}) };
+          const sup = supportOf(f.fixtures, x), bot = bottomOf(x);
+          return {
+            id: x.id, what: x.name, kind: x.kind, centre: x.center.map(Math.round), width_mm: Math.round(sz.width), depth_mm: Math.round(sz.depth), height_mm: Math.round(topOf(x) - bot), faces: heading(n[0], n[1]),
+            ...(sup ? { sits_on: `${sup.name} (${sup.id}), top at ${Math.round(bot)} mm` } : bot ? { bottom_above_floor_mm: Math.round(bot) } : {}), ...(weightOf(x) ? { weight_kg: weightOf(x) } : {}),
+          };
         }),
       };
     }
@@ -397,56 +467,213 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
       const list = Array.isArray(input.objects) ? (input.objects as Record<string, unknown>[]).slice(0, 30) : [];
       if (!list.length) throw new Error("Give at least one object.");
       const [rx0, ry0, rx1, ry1] = bboxOf(r.polygon);
+      const ex0 = rx0 + 60, ex1 = rx1 - 60, ey0 = ry0 + 60, ey1 = ry1 - 60; // the room's inside edges
       const taken = new Set(Object.keys(d.edits ?? {}).concat(f.fixtures.map((x) => x.id)));
+      const here = [...f.fixtures]; // what's in the floor now, with this call's new pieces added as they go
+      const fresh: string[] = [];
+      const byRef = (ref: string) => here.find((x) => x.id === (/^new:\d+$/.test(ref) ? fresh[Number(ref.slice(4))] : ref)) ?? null;
       let n = 1;
-      const added: string[] = [];
-      for (const o of list) {
-        const kind = str(o.kind);
+      const added: unknown[] = [];
+      const fit = (v: number, lo: number, hi: number) => (lo <= hi ? Math.min(hi, Math.max(lo, v)) : (lo + hi) / 2);
+      const skipped: { what: string; problem: string }[] = [];
+      for (const o of list) try {
+        let kind = str(o.kind);
+        const parts = readParts(o.parts);
+        const said = str(o.name);
+        // the catalogue's own word for it, even when the model picked "other" for a computer
+        if (!OBJECT_KINDS.includes(kind) || kind === "other") kind = kindFor(kind) ?? kindFor(said) ?? (parts.length ? "other" : kind);
+        if (kind === "other" && !parts.length) throw new Error(`"${said || "That"}" isn't one of the kinds I know. Build it as kind other with parts: simple shapes at its real size and colours, so it looks like the real thing, not a box.`);
         if (!OBJECT_KINDS.includes(kind)) throw new Error(`kind must be one of ${OBJECT_KINDS.join(", ")}.`);
-        const width = Math.max(150, Number(o.width_mm) || 600), depth = Math.max(150, Number(o.depth_mm) || 600);
-        const facing = str(o.facing) in FACING ? FACING[str(o.facing)] : null;
-        const across = facing === 0 || facing === 180;
-        const hx = (across ? depth : width) / 2, hy = (across ? width : depth) / 2;
-        // kept inside the room, clear of the wall faces, when it fits
-        const fit = (v: number, lo: number, hi: number) => (lo <= hi ? Math.min(hi, Math.max(lo, v)) : (lo + hi) / 2);
-        const x = Math.round(fit(Number(o.x) || (rx0 + rx1) / 2, rx0 + 60 + hx, rx1 - 60 - hx));
-        const y = Math.round(fit(Number(o.y) || (ry0 + ry1) / 2, ry0 + 60 + hy, ry1 - 60 - hy));
+        const spec = specOf(kind);
+        const ext = parts.length ? { w: Math.max(...parts.map((q) => Math.abs(q.x) * 2 + q.w)), d: Math.max(...parts.map((q) => Math.abs(q.z) * 2 + q.d)), h: Math.max(...parts.map((q) => q.y + q.h)) } : null;
+        const width = Math.max(20, num(o.width_mm) || ext?.w || spec?.w || 600), depth = Math.max(10, num(o.depth_mm) || ext?.d || spec?.d || 600);
+        const height = num(o.height_mm) || ext?.h || spec?.h || 850;
+        const name = said || spec?.label || kind.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+        let x = num(o.x) || null, y = num(o.y) || null;
+        let facing: number | null = str(o.facing) in FACING ? FACING[str(o.facing)] : null;
+        let elevation = 0;
+        let on: { id: string; at: [number, number] } | null = null;
+        let where = "";
+        const dims = (fc: number | null) => { const across = fc === 0 || fc === 180; return { hx: (across ? depth : width) / 2, hy: (across ? width : depth) / 2 }; };
+        const vec = (fc: number): [number, number] => [Math.round(Math.cos((fc * Math.PI) / 180)), Math.round(Math.sin((fc * Math.PI) / 180))];
+        const clearSpot = (fc: number | null, loose: boolean) => {
+          const solid = here.filter((q) => q.room_id === r.id && q.kind !== "rug" && bottomOf(q) < 400 && !["wall", "ceiling"].includes(specOf(q.kind)?.mount ?? ""));
+          const clash = (cx: number, cy: number, hx: number, hy: number) => solid.reduce((sum, q) =>
+            sum + Math.max(0, Math.min(cx + hx + 50, q.bbox[2]) - Math.max(cx - hx - 50, q.bbox[0])) * Math.max(0, Math.min(cy + hy + 50, q.bbox[3]) - Math.max(cy - hy - 50, q.bbox[1])), 0);
+          const walls: { at: [number, number]; facing: number | null }[] = [], open: typeof walls = [];
+          for (const wf of fc != null ? [fc] : [90, -90, 0, 180]) {
+            const { hx, hy } = dims(wf), side = wf === 0 || wf === 180;
+            const lo = side ? ey0 + hy : ex0 + hx, hi = side ? ey1 - hy : ex1 - hx;
+            if (lo > hi) continue;
+            const fixed = wf === 90 ? ey0 + hy + 20 : wf === -90 ? ey1 - hy - 20 : wf === 0 ? ex0 + hx + 20 : ex1 - hx - 20;
+            for (let k = 0; k <= (hi - lo) / 100; k++) {
+              const t = (lo + hi) / 2 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 100;
+              if (t >= lo && t <= hi) walls.push({ at: side ? [fixed, t] : [t, fixed], facing: wf });
+            }
+          }
+          for (let gx = ex0 + 200; gx <= ex1 - 200; gx += 200) for (let gy = ey0 + 200; gy <= ey1 - 200; gy += 200) open.push({ at: [gx, gy], facing: fc });
+          open.sort((p, q) => Math.hypot(p.at[0] - (ex0 + ex1) / 2, p.at[1] - (ey0 + ey1) / 2) - Math.hypot(q.at[0] - (ex0 + ex1) / 2, q.at[1] - (ey0 + ey1) / 2));
+          let best = { at: [(ex0 + ex1) / 2, (ey0 + ey1) / 2] as [number, number], facing: fc }, least = Infinity;
+          for (const c of loose ? [...open, ...walls] : [...walls, ...open]) {
+            const { hx, hy } = dims(c.facing), v = clash(c.at[0], c.at[1], hx, hy);
+            if (v < least) { least = v; best = c; }
+            if (!v) break;
+          }
+          return { ...best, crowded: least > 0 };
+        };
+
+        // what it stands on: the piece named, else the nearest suitable one in the room
+        let sup = str(o.on) ? byRef(str(o.on)) : null;
+        if (str(o.on) && !sup) throw new Error(`No ${str(o.on)} in ${r.name} to put it on. Use room_layout for ids.`);
+        if (!sup && spec?.mount === "surface") {
+          const cands = here.filter((q) => q.room_id === r.id && spec.on?.includes(q.kind));
+          cands.sort((p, q) => spec.on!.indexOf(p.kind) - spec.on!.indexOf(q.kind) || (x != null && y != null ? Math.hypot(p.center[0] - x, p.center[1] - y!) - Math.hypot(q.center[0] - x, q.center[1] - y!) : 0));
+          sup = cands[0] ?? null;
+          if (!sup && !spec.at) throw new Error(`A ${name.toLowerCase()} sits on a ${spec.on!.slice(0, 3).join(" or ").replace(/_/g, " ")}, and ${r.name} has none. Add one first (then put it on it), or ask where it should go.`);
+        }
+        if (sup) {
+          // on top of it, facing whoever uses it, toward the back when it's a screen or a machine
+          const sf = sup.facing ?? naturalFacing(f, here, sup) ?? 90;
+          if (facing == null) facing = str(o.face_toward) && byRef(str(o.face_toward)) ? toward({ center: sup.center }, byRef(str(o.face_toward))!) : sf;
+          const sz = fixtureSize({ ...sup, facing: sf }), fv = vec(sf), rv: [number, number] = [-fv[1], fv[0]];
+          const { hx, hy } = dims(facing);
+          if (x == null || y == null || x < sup.bbox[0] || x > sup.bbox[2] || y < sup.bbox[1] || y > sup.bbox[3]) {
+            const back = spec?.back ? sz.depth / 2 - depth / 2 - 40 : 0;
+            const sideways = spec?.back ? 0 : Math.max(0, sz.width / 2 - width / 2 - 80) * (kind === "table_lamp" ? 1 : 0.5);
+            x = sup.center[0] - fv[0] * back + rv[0] * sideways; y = sup.center[1] - fv[1] * back + rv[1] * sideways;
+          }
+          x = fit(x, sup.bbox[0] + hx, sup.bbox[2] - hx); y = fit(y, sup.bbox[1] + hy, sup.bbox[3] - hy);
+          elevation = topOf(sup);
+          on = { id: sup.id, at: sup.center };
+          where = `on ${sup.name} (${sup.id}), ${Math.round(elevation)} mm up`;
+        } else if (spec?.mount === "wall" || spec?.mount === "ceiling" || (spec?.mount === "surface" && spec.at)) {
+          elevation = num(o.height_above_floor_mm) || (spec.mount === "ceiling" ? (f.height_mm || 2700) - height - 50 : spec.at ?? 1200);
+          if (spec.mount !== "ceiling") {
+            // flat against the nearest wall, facing into the room
+            const px = x ?? (ex0 + ex1) / 2, py = y ?? ey0;
+            const ds: [number, number][] = [[px - ex0, 0], [ex1 - px, 180], [py - ey0, 90], [ey1 - py, -90]];
+            const wall = facing != null ? ds.find((q) => q[1] === facing)! : ds.sort((p, q) => p[0] - q[0])[0];
+            facing = wall[1];
+            const { hx, hy } = dims(facing);
+            x = facing === 0 ? ex0 + hx : facing === 180 ? ex1 - hx : fit(px, ex0 + hx, ex1 - hx);
+            y = facing === 90 ? ey0 + hy : facing === -90 ? ey1 - hy : fit(py, ey0 + hy, ey1 - hy);
+            where = `on the ${heading(-vec(facing)[0], -vec(facing)[1])} wall, bottom ${Math.round(elevation)} mm up`;
+          } else where = `hanging from the ceiling, bottom ${Math.round(elevation)} mm up`;
+        } else {
+          if (num(o.height_above_floor_mm)) elevation = num(o.height_above_floor_mm);
+          const partner = str(o.face_toward) ? byRef(str(o.face_toward)) : spec?.face === "to" ? partnerOf(here, { ...addedFixture("probe", { floor_id: f.id, room_id: r.id, kind, name, center: [x ?? (ex0 + ex1) / 2, y ?? (ey0 + ey1) / 2], width, depth, facing: null }) }, spec.to ?? [], x == null ? 20000 : kind === "sofa" || kind === "armchair" ? 4000 : 1500) : null;
+          if (str(o.face_toward) && !partner) throw new Error(`No ${str(o.face_toward)} to face. Use room_layout for ids.`);
+          // a chair or stool with no spot given goes at its partner's front, where you'd sit
+          if ((x == null || y == null) && partner) {
+            const pf = partner.facing ?? naturalFacing(f, here, partner);
+            const pv = pf == null ? [0, 1] : vec(pf), ps = fixtureSize({ ...partner, facing: pf });
+            const reach = (pf == null ? (partner.bbox[3] - partner.bbox[1]) / 2 : ps.depth / 2) + depth / 2 - (kind === "sofa" || kind === "armchair" ? -700 : 120);
+            x = partner.center[0] + pv[0] * reach; y = partner.center[1] + pv[1] * reach;
+          }
+          // nowhere given: the first clear spot, backed up to a wall when it stands that way
+          if ((x == null || y == null) && !partner) {
+            const spot = clearSpot(facing, spec?.face === "any");
+            x = spot.at[0]; y = spot.at[1];
+            if (facing == null) facing = spot.facing;
+            if (spot.crowded) where = "no clear floor left in the room, so it overlaps something: tell the person and ask where it should go";
+          }
+          x ??= (ex0 + ex1) / 2; y ??= (ey0 + ey1) / 2;
+          if (facing == null && partner) facing = toward({ center: [x, y] }, partner);
+          if (facing == null) facing = naturalFacing(f, here, addedFixture("probe", { floor_id: f.id, room_id: r.id, kind, name, center: [x, y], width, depth, facing: null }));
+          const { hx, hy } = dims(facing);
+          x = fit(x!, ex0 + hx, ex1 - hx); y = fit(y!, ey0 + hy, ey1 - hy);
+          // backed up to its wall when it's close: 20 mm off, the way it would really stand
+          if (facing != null && spec?.face === "room") {
+            if (facing === 90 && y - hy - ey0 < 300) y = ey0 + hy + 20;
+            if (facing === -90 && ey1 - (y + hy) < 300) y = ey1 - hy - 20;
+            if (facing === 0 && x - hx - ex0 < 300) x = ex0 + hx + 20;
+            if (facing === 180 && ex1 - (x + hx) < 300) x = ex1 - hx - 20;
+          }
+          if (partner) where = `facing ${partner.name} (${partner.id})`;
+        }
+        x ??= (ex0 + ex1) / 2; y ??= (ey0 + ey1) / 2;
         while (taken.has(`${f.id}-N${String(n).padStart(2, "0")}`)) n++;
         const id = `${f.id}-N${String(n).padStart(2, "0")}`;
         taken.add(id);
-        const name = str(o.name) || kind.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
-        await b.saveEdit(d.job.id, id, { added: { floor_id: f.id, room_id: r.id, kind, name, center: [x, y], width, depth, facing, height_mm: Number(o.height_mm) > 0 ? Number(o.height_mm) : null } });
-        added.push(`${name} (${id})`);
+        const obj = {
+          floor_id: f.id, room_id: r.id, kind, name, center: [Math.round(x), Math.round(y)] as [number, number], width: Math.round(width), depth: Math.round(depth), facing,
+          height_mm: Math.round(height), elevation_mm: Math.round(elevation), weight_kg: num(o.weight_kg) || null,
+          ...(on ? { on: on.id, on_at: on.at } : {}), ...(parts.length ? { parts } : {}),
+        };
+        await b.saveEdit(d.job.id, id, { added: obj });
+        here.push(addedFixture(id, obj));
+        fresh.push(id);
+        const kg = obj.weight_kg ?? spec?.kg ?? null;
+        added.push({ id, what: name, kind, size_mm: `${obj.width} wide x ${obj.depth} deep x ${obj.height_mm} high`, ...(kg ? { weight_kg: kg } : {}), faces: facingWord(facing) ?? "no particular way", ...(where ? { where } : {}) });
+        changed.marks = [...(changed.marks ?? []), { floor_id: f.id, x: obj.center[0], y: obj.center[1], z: obj.elevation_mm + obj.height_mm, label: name, color: MARK_COLORS[5][1], id }];
+      } catch (e) {
+        // one that can't go in doesn't stop the rest
+        if (list.length === 1) throw e;
+        skipped.push({ what: str(o.name) || str(o.kind), problem: e instanceof Error ? e.message : String(e) });
       }
+      if (!fresh.length) throw new Error(skipped.map((q) => q.problem).join(" "));
       changed.any = true;
-      return { added, room: r.name };
+      changed.focus = fresh.length === 1 ? fresh[0] : r.id;
+      return { added, ...(skipped.length ? { not_added: skipped } : {}), room: `${r.name} (${r.id}), ${partOf(f, labelPoint(r.polygon))}` };
     }
     case "change_object": {
       const d = await resolveJob(b, ctx, input.job);
       const id = str(input.element_id);
-      const hit = d.plan?.floors.flatMap((fl) => fl.fixtures).find((x) => x.id === id);
-      if (!hit) throw new Error(`No object ${id} in this plan. Use find_in_plan or room_layout.`);
+      const fl = d.plan?.floors.find((q) => q.fixtures.some((x) => x.id === id));
+      const hit = fl?.fixtures.find((x) => x.id === id);
+      if (!fl || !hit) throw new Error(`No object ${id} in this plan. Use find_in_plan or room_layout.`);
+      const find = (ref: string) => fl.fixtures.find((x) => x.id === ref) ?? null;
       const prev = d.edits?.[id] ?? {};
       const next: ElementEdit = { ...prev };
-      let dx = Number(input.move_east_mm) || 0, dy = Number(input.move_south_mm) || 0;
-      if (input.to_x != null) dx = Number(input.to_x) - hit.center[0];
-      if (input.to_y != null) dy = Number(input.to_y) - hit.center[1];
-      if (dx || dy) { next.dx = Math.round((prev.dx ?? 0) + dx); next.dy = Math.round((prev.dy ?? 0) + dy); }
-      if (str(input.facing) in FACING) next.facing = FACING[str(input.facing)];
-      if (Number(input.width_mm) > 0) next.width = Math.round(Number(input.width_mm));
-      if (Number(input.depth_mm) > 0) next.depth = Math.round(Number(input.depth_mm));
-      if (Number(input.height_mm) > 0) next.height_mm = Math.round(Number(input.height_mm));
-      if (str(input.name)) next.name = str(input.name);
+      let dx = num(input.move_east_mm), dy = num(input.move_south_mm);
+      if (input.to_x != null) dx = num(input.to_x) - hit.center[0];
+      if (input.to_y != null) dy = num(input.to_y) - hit.center[1];
+      let facing: number | null = str(input.facing) in FACING ? FACING[str(input.facing)] : null;
+      const sup = str(input.on) ? find(str(input.on)) : null;
+      if (str(input.on) && !sup) throw new Error(`No ${str(input.on)} to put it on. Use room_layout for ids.`);
+      if (sup) { dx = sup.center[0] - hit.center[0]; dy = sup.center[1] - hit.center[1]; if (facing == null) facing = sup.facing ?? naturalFacing(fl, fl.fixtures, sup); }
+      if (str(input.face_toward)) {
+        const t = find(str(input.face_toward));
+        if (!t) throw new Error(`No ${str(input.face_toward)} to face. Use room_layout for ids.`);
+        facing = toward({ center: [hit.center[0] + dx, hit.center[1] + dy] }, t);
+      }
+      const lift = sup ? topOf(sup) : num(input.height_above_floor_mm) || null;
+      if (prev.added) {
+        // an object added in the app: change it where it was made, so it keeps sitting on what it sits on
+        const a = { ...prev.added };
+        a.center = [Math.round(a.center[0] + dx), Math.round(a.center[1] + dy)];
+        if (facing != null) a.facing = facing;
+        if (sup) { a.on = sup.id; a.on_at = sup.center; }
+        if (lift != null) { a.elevation_mm = lift; if (!sup) { a.on = null; a.on_at = null; } }
+        if (num(input.width_mm) > 0) a.width = Math.round(num(input.width_mm));
+        if (num(input.depth_mm) > 0) a.depth = Math.round(num(input.depth_mm));
+        if (num(input.height_mm) > 0) a.height_mm = Math.round(num(input.height_mm));
+        if (num(input.weight_kg) > 0) a.weight_kg = num(input.weight_kg);
+        if (str(input.name)) a.name = str(input.name);
+        next.added = a;
+      } else {
+        if (dx || dy) { next.dx = Math.round((prev.dx ?? 0) + dx); next.dy = Math.round((prev.dy ?? 0) + dy); }
+        if (facing != null) next.facing = facing;
+        if (lift != null) next.dz = Math.round((prev.dz ?? 0) + lift - bottomOf(hit));
+        if (num(input.width_mm) > 0) next.width = Math.round(num(input.width_mm));
+        if (num(input.depth_mm) > 0) next.depth = Math.round(num(input.depth_mm));
+        if (num(input.height_mm) > 0) next.height_mm = Math.round(num(input.height_mm));
+        if (str(input.name)) next.name = str(input.name);
+      }
       await b.saveEdit(d.job.id, id, next);
       changed.any = true;
-      return { changed: `${hit.name} (${id})`, ...(dx || dy ? { moved_east_mm: Math.round(dx), moved_south_mm: Math.round(dy) } : {}), ...(next.facing != null && input.facing ? { faces: str(input.facing) } : {}) };
+      changed.marks = [{ floor_id: fl.id, x: Math.round(hit.center[0] + dx), y: Math.round(hit.center[1] + dy), z: Math.round(lift ?? bottomOf(hit)) + Math.round(topOf(hit) - bottomOf(hit)), label: hit.name, color: MARK_COLORS[5][1], id }];
+      changed.focus = id;
+      return { changed: `${hit.name} (${id})`, ...(dx || dy ? { moved_east_mm: Math.round(dx), moved_south_mm: Math.round(dy) } : {}), ...(facing != null ? { faces: facingWord(facing) } : {}), ...(sup ? { now_on: `${sup.name} (${sup.id})` } : {}), ...(lift != null ? { bottom_above_floor_mm: Math.round(lift) } : {}) };
     }
     case "remove_objects": {
       const d = await resolveJob(b, ctx, input.job);
       const ids = Array.isArray(input.element_ids) ? input.element_ids.map(str).filter(Boolean) : [];
       const all = d.plan?.floors.flatMap((fl) => fl.fixtures) ?? [];
       const gone: string[] = [], missing: string[] = [];
-      for (const id of ids.slice(0, 60)) {
+      // what sits on a piece goes with it (the computer with its desk)
+      const riding = all.filter((q) => q.on && ids.includes(q.on) && !ids.includes(q.id)).map((q) => q.id);
+      for (const id of [...ids.slice(0, 60), ...riding]) {
         const x = all.find((q) => q.id === id);
         if (!x) { missing.push(id); continue; }
         const prev = d.edits?.[id];
@@ -455,6 +682,25 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
       }
       if (gone.length) changed.any = true;
       return { removed: gone, ...(missing.length ? { not_found: missing } : {}) };
+    }
+    case "point_at": {
+      const d = await resolveJob(b, ctx, input.job);
+      if (!d.plan) return "This job has no plan yet.";
+      const places = Array.isArray(input.places) ? (input.places as Record<string, unknown>[]).slice(0, 6) : [];
+      const marks: Mark[] = [], out: unknown[] = [], missing: string[] = [];
+      places.forEach((q, i) => {
+        const id = str(q.id);
+        const [cname, color] = MARK_COLORS[i % MARK_COLORS.length];
+        const e = findElement(d.plan!, id);
+        const m = e ? markFor(d.plan!, id, str(q.label) || elementLabel(e), color) : null;
+        if (!m || !e) { missing.push(id); return; }
+        marks.push(m);
+        out.push({ id, what: elementLabel(e), dot: cname, where: partOf(e.floor, [m.x, m.y]) });
+      });
+      if (!marks.length) throw new Error(`None of ${missing.join(", ")} are in this plan. Use find_in_plan for ids.`);
+      changed.marks = marks;
+      changed.focus = str(input.open) || (marks.length === 1 ? marks[0].id : null);
+      return { shown: out, ...(missing.length ? { not_found: missing } : {}), say: "Name each place by its dot colour." };
     }
     case "rename_room": {
       const d = await resolveJob(b, ctx, input.job);
