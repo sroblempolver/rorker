@@ -135,6 +135,14 @@ class Floor(BaseModel):
     stairs: list[Stair] = Field(default_factory=list)
 
 
+class QuestionPoint(BaseModel):
+    floor_id: str
+    x: float
+    y: float
+    z: float = 0  # mm above that floor
+    outside: bool = False  # show it on the outside of the building, not inside a floor
+
+
 class Question(BaseModel):
     id: str
     text: str
@@ -143,6 +151,7 @@ class Question(BaseModel):
     default: Optional[str] = None  # what the plan currently assumes
     kind: Literal["room_name", "room_split", "fixture", "label", "exterior", "scale", "other"] = "other"
     answer: Optional[str] = None
+    point: Optional[QuestionPoint] = None  # where on the building it is about, for the blinking dot
 
 
 class Flag(BaseModel):
@@ -158,6 +167,10 @@ class Exterior(BaseModel):
     storey_height_mm: float = 3000
     roof: Literal["gable", "hip", "flat", "unknown"] = "unknown"
     notes: Optional[str] = None
+    # set when the drawing or an answer says so; the house rules (rules.py) fill in the rest
+    roof_pitch_deg: Optional[float] = None
+    eave_mm: Optional[float] = None
+    plinth_mm: Optional[float] = None
 
 
 class SourceInfo(BaseModel):

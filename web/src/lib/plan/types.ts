@@ -38,10 +38,16 @@ export interface Floor {
 export interface Question {
   id: string; text: string; element_ids: string[]; options: string[]; default: string | null;
   kind: string; answer: string | null;
+  /** where on the building the question is about, for the blinking dot (mm; z above that floor) */
+  point?: { floor_id: string; x: number; y: number; z: number; outside: boolean } | null;
 }
 export interface Plan {
   schema_version: number; units: "mm";
-  building: { name: string; size_mm: [number, number]; exterior: { estimated: boolean; storey_height_mm: number; roof: string; notes: string | null } };
+  building: { name: string; size_mm: [number, number]; exterior: {
+    estimated: boolean; storey_height_mm: number; roof: string; notes: string | null;
+    /** set when the drawing or an answer says so; the house rules fill in the rest */
+    roof_pitch_deg?: number | null; eave_mm?: number | null; plinth_mm?: number | null;
+  } };
   floors: Floor[]; questions: Question[];
   flags: { code: string; message: string; element_ids: string[]; severity: string }[];
   source: { kind: string; filename: string; pipeline_version: string; model: string | null; ai_used: boolean };

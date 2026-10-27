@@ -3,6 +3,7 @@
   python -m rorker_agent read FILE [--out DIR] [--no-ai]
   python -m rorker_agent test [CASE ...] [--no-ai] [--log FILE] [--note TEXT]
   python -m rorker_agent answer PLAN.json Q1="One room" Q2="Kitchen" [--out PLAN.json]
+  python -m rorker_agent check PLAN.json [--ai] [--out PLAN.json]    # the self-check on a plan already read
   python -m rorker_agent worker            # process uploads queued in Supabase
 """
 from __future__ import annotations
@@ -134,6 +135,16 @@ def cmd_answer(a):
     print("\n".join(f"{q.id}: {q.text} -> {q.answer}" for q in plan.questions))
 
 
+def cmd_check(a):
+    from .pipeline import ai_available
+    from .schema import Plan
+    from .selfcheck import self_check
+    plan = Plan.model_validate_json(Path(a.plan).read_text())
+    plan = self_check(plan, ai=a.ai and ai_available())
+    Path(a.out or a.plan).write_text(plan.model_dump_json(indent=1))
+    print(json.dumps(plan.stats.get("self_check"), indent=1, ensure_ascii=False))
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="rorker_agent")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -151,6 +162,10 @@ def main(argv=None):
     an.add_argument("plan")
     an.add_argument("answers", nargs="+")
     an.add_argument("--out")
+    ck = sub.add_parser("check")
+    ck.add_argument("plan")
+    ck.add_argument("--ai", action="store_true")
+    ck.add_argument("--out")
     sub.add_parser("worker")
     a = p.parse_args(argv)
     if a.cmd == "read":
@@ -159,6 +174,8 @@ def main(argv=None):
         cmd_test(a)
     elif a.cmd == "answer":
         cmd_answer(a)
+    elif a.cmd == "check":
+        cmd_check(a)
     elif a.cmd == "worker":
         from .worker import main as wmain
         wmain()
