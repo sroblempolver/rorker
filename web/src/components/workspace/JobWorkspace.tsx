@@ -1,21 +1,26 @@
 "use client";
 // One job: the plan on the left, the side panel on the right (details, pins, stages, plan). All state
 // lives here and every change goes through the WorkspaceApi, so the same screen runs on the server
-// actions or on the in-memory preview.
+// actions or on the in-memory preview. Like a good game menu, Esc (or the Back bar, or the browser's
+// back button) always steps back one thing, most changes can be undone, and the job opens where you left it.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementStatus, Question } from "@/lib/plan/types";
 import { clearMarks, MARK_COLORS, showMarks } from "@/lib/plan/marks";
-import type { ElementEdit, ItemInput, JobItem, Pin, PinInput, PinKind } from "@/lib/data/types";
+import type { ElementEdit, ItemInput, JobItem, Pin, PinInput, PinKind, PlanRow } from "@/lib/data/types";
 import { today } from "@/lib/dates";
 import { PlanChat } from "./PlanChat";
 import { applyEdits } from "@/lib/plan/edits";
-import { findElement } from "@/lib/plan/geometry";
+import { elementLabel, findElement } from "@/lib/plan/geometry";
+import { recall, remember } from "@/lib/remember";
 import { pinLevel } from "@/components/plan/pinLevel";
 import { PlanViewer, type Level } from "@/components/plan/PlanViewer";
 import { Assistant } from "@/components/assistant/Assistant";
 import type { ColorMode } from "@/components/plan/FloorCanvas";
 import type { PinTarget, ScreenPoint } from "@/components/plan/target";
+import { STATUS_LABEL } from "@/components/plan/style";
 import { TeamContext } from "@/components/team/context";
+import { ShortcutsDialog, useFeedback } from "@/components/ui/feedback";
+import { useEscape, useHotkeys } from "@/components/ui/hotkeys";
 import type { WorkspaceApi, WorkspaceData } from "./api";
 import { Inspector, ProjectSummary, type AddPin } from "./Inspector";
 import { PinDetail, PinForm, PinsList, QuickPin, where } from "./PinsPanel";
@@ -28,6 +33,19 @@ import { AddMaterial, MaterialsPanel, blankLine, type BuyTarget } from "@/compon
 import { parseQty, type Suggestion } from "@/lib/materials/suggest";
 import { NEXT_STATUS, pinSummary, qtyText, type MaterialInput, type MaterialLine } from "@/lib/materials/types";
 
+const TABS: Tab[] = ["details", "pins", "buy", "stages", "plan", "money"];
+
+interface Undo { id: number; label: string; run: () => void | Promise<void>; key?: string }
+
+/** a remembered level still fits this plan (rooms can change when the plan is read again) */
+function levelFits(plan: PlanRow["data"], l: Level) {
+  if (l.kind === "site" || l.kind === "exterior") return true;
+  const f = plan.floors.find((x) => x.id === l.floorId);
+  if (!f) return false;
+  if (l.kind === "floor") return true;
+  return f.rooms.some((r) => r.id === l.roomId) && (l.kind === "room" || l.sideKey.startsWith(`${l.roomId}:`));
+}
+const sameLevel = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 type Tab = "details" | "pins" | "buy" | "stages" | "plan" | "money";
 export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; api: WorkspaceApi; onAllJobs: () => void }) {
@@ -51,7 +69,6 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const mapRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab>(data.startOnMoney && data.billing ? "money" : data.plan ? "details" : "plan");
   const [flyTo, setFlyTo] = useState<{ ids: string[]; n: number } | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
   const job = data.job;
   const [billing, setBilling] = useState(data.billing);
   const [payouts, setPayouts] = useState(!!data.payoutsConnected);
@@ -66,11 +83,50 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   useEffect(() => { void api.materials?.list().then(setMlines).catch(() => {}); }, [api]);
   // opening the add sheet or the list starts at the top
   useEffect(() => { if (tab === "buy") panelRef.current?.scrollTo(0, 0); }, [tab, buyDraft]);
+  const { toast } = useFeedback();
 
-  const say = useCallback((m: string) => { setToast(m); setTimeout(() => setToast((t) => (t === m ? null : t)), 3200); }, []);
+  const say = useCallback((m: string) => toast(m), [toast]);
   const guard = useCallback(async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
-    try { return await fn(); } catch (e) { say(e instanceof Error ? e.message : "Something went wrong."); }
-  }, [say]);
+    try { return await fn(); } catch (e) { toast(e instanceof Error ? e.message : "Something went wrong.", { tone: "error" }); }
+  }, [toast]);
+
+  // Undo: newest last. Ctrl+Z, the Undo button in the header, or Undo on the toast all take the top one.
+  const undos = useRef<Undo[]>([]);
+  const [undoLabel, setUndoLabel] = useState<string | null>(null);
+  const undoSeq = useRef(0);
+  const take = useCallback((pick: (u: Undo) => boolean) => {
+    const u = [...undos.current].reverse().find(pick);
+    if (u) undos.current = undos.current.filter((x) => x !== u);
+    setUndoLabel(undos.current.at(-1)?.label ?? null);
+    return u;
+  }, []);
+  /** Remember how to take a change back; `announce` puts it on a toast with an Undo button too. */
+  const undoable = useCallback((label: string, run: Undo["run"], opts: { announce?: boolean; key?: string } = {}) => {
+    const u: Undo = { id: ++undoSeq.current, label, run, key: opts.key };
+    undos.current = [...undos.current.slice(-29), u];
+    setUndoLabel(label);
+    if (opts.announce) toast(label, { action: { label: "Undo", run: () => { if (take((x) => x === u)) void guard(async () => { await run(); }); } } });
+  }, [toast, take, guard]);
+  const undo = useCallback(() => {
+    const u = take(() => true);
+    if (!u) return say("Nothing to undo");
+    void guard(async () => { await u.run(); say(`Undone: ${u.label}`); });
+  }, [take, guard, say]);
+
+  // Deletes wait out the Undo window before they reach the server, so Undo brings back everything
+  // (comments, photos, the same number). Leaving the job sends them right away.
+  const pending = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; commit: () => Promise<void> }>());
+  const deleteLater = useCallback((key: string, commit: () => Promise<void>) => {
+    const timer = setTimeout(() => { pending.current.delete(key); take((u) => u.key === key); void guard(commit); }, 6500);
+    pending.current.set(key, { timer, commit });
+    return () => { clearTimeout(timer); pending.current.delete(key); };
+  }, [guard, take]);
+  useEffect(() => {
+    const all = pending.current;
+    const flush = () => { all.forEach((p) => { clearTimeout(p.timer); void p.commit().catch(() => {}); }); all.clear(); };
+    window.addEventListener("pagehide", flush);
+    return () => { window.removeEventListener("pagehide", flush); flush(); };
+  }, []);
 
   // poll while the plan reader is working
   const working = runs.some((r) => r.status === "queued" || r.status === "running");
@@ -104,13 +160,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const [askOpen, setAskOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
 
-  // Esc puts the pin back
-  useEffect(() => {
-    if (!pinMode) return;
-    const k = (e: KeyboardEvent) => { if (e.key === "Escape") setPinMode(false); };
-    window.addEventListener("keydown", k);
-    return () => window.removeEventListener("keydown", k);
-  }, [pinMode]);
+  const [help, setHelp] = useState(false);
 
   // the plan as it is now: what the reader found, plus everything moved or changed in the app
   const view = useMemo(() => (plan ? applyEdits(plan.data, edits) : null), [plan, edits]);
@@ -191,22 +241,60 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     setPins((l) => [...l, p]);
     setDraft(null);
     setSelectedPin(p.id);
-    say(`Pin #${p.number} added`);
+    undoable(`Pin #${p.number} added`, async () => {
+      await api.deletePin(p.id);
+      setPins((l) => l.filter((x) => x.id !== p.id));
+      setSelectedPin((s) => (s === p.id ? null : s));
+    }, { announce: true });
     return p;
-  }, [api, say]);
+  }, [api, undoable]);
 
-  const setStatus = useCallback(async (id: string, s: ElementStatus | null) => {
+  const applyStatus = useCallback(async (id: string, s: ElementStatus | null) => {
     setStates((m) => { const n = new Map(m); if (s) n.set(id, s); else n.delete(id); return n; });
     await guard(() => api.setElementState(id, s));
   }, [api, guard]);
+  const setStatus = useCallback(async (id: string, s: ElementStatus | null) => {
+    const prev = states.get(id) ?? null;
+    if (prev === s) return;
+    const e = plan ? findElement(plan.data, id) : null;
+    const name = e ? elementLabel(e) : id;
+    await applyStatus(id, s);
+    undoable(s ? `${name}: ${STATUS_LABEL[s]}` : `${name}: status cleared`, () => applyStatus(id, prev), { announce: true });
+  }, [states, plan, applyStatus, undoable]);
 
-  const updatePin = useCallback(async (id: string, input: Parameters<WorkspaceApi["updatePin"]>[1]) => {
+  const applyPin = useCallback(async (id: string, input: Parameters<WorkspaceApi["updatePin"]>[1]) => {
     await api.updatePin(id, input);
     setPins((list) => list.map((p) => (p.id === id ? { ...p, ...input, closed_at: input.status === "done" ? new Date().toISOString() : input.status ? null : p.closed_at } as Pin : p)));
   }, [api]);
+  const updatePin = useCallback(async (id: string, input: Parameters<WorkspaceApi["updatePin"]>[1]) => {
+    const before = pins.find((p) => p.id === id);
+    await applyPin(id, input);
+    if (!before) return;
+    // put back exactly the fields that changed
+    const back = Object.fromEntries(Object.keys(input).map((k) => [k, before[k as keyof Pin]])) as Parameters<WorkspaceApi["updatePin"]>[1];
+    const label = input.status === "done" ? `Pin #${before.number} closed` : input.status ? `Pin #${before.number}: ${input.status === "open" ? "reopened" : "in progress"}` : `Pin #${before.number} changed`;
+    undoable(label, () => applyPin(id, back), { announce: input.status === "done" });
+  }, [pins, applyPin, undoable]);
+
+  const deletePin = useCallback(async (p: Pin) => {
+    setPins((l) => l.filter((x) => x.id !== p.id));
+    setSelectedPin((s) => (s === p.id ? null : s));
+    const key = `pin:${p.id}`;
+    const cancel = deleteLater(key, () => api.deletePin(p.id));
+    undoable(`Pin #${p.number} deleted`, () => { cancel(); setPins((l) => [...l.filter((x) => x.id !== p.id), p].sort((a, b) => a.number - b.number)); }, { announce: true, key });
+  }, [api, deleteLater, undoable]);
 
   /** Save a change to one plan element: merged into what was saved before, null puts it back as drawn. */
+  const putEdit = useCallback(async (id: string, value: ElementEdit | null) => {
+    setEdits((all) => { const out = { ...all }; if (value) out[id] = value; else delete out[id]; return out; });
+    await guard(() => api.saveElementEdit(id, value));
+  }, [api, guard]);
   const saveEdit = useCallback(async (id: string, patch: ElementEdit | null) => {
+    const before = edits[id] ?? null;
+    const e = plan ? findElement(plan.data, id) : null;
+    const name = e ? elementLabel(e) : id;
+    const moved = patch && Object.keys(patch).every((k) => k === "dx" || k === "dy" || k === "dz");
+    undoable(!patch ? `${name} put back as drawn` : moved ? `Moved ${name}` : `Changed ${name}`, () => putEdit(id, before), { announce: !patch });
     let next: ElementEdit | null = null;
     setEdits((all) => {
       const merged = patch ? Object.fromEntries(Object.entries({ ...all[id], ...patch }).filter(([, v]) => v !== undefined && v !== null && v !== "")) as ElementEdit : null;
@@ -216,7 +304,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       return out;
     });
     await guard(() => api.saveElementEdit(id, next));
-  }, [api, guard]);
+  }, [api, guard, edits, plan, undoable, putEdit]);
 
   const moveFixture = useCallback((id: string, dx: number, dy: number, dz: number) => {
     const e = edits[id] ?? {};
@@ -237,18 +325,35 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     setItems((l) => [...l, it]);
     selectItem(it.id);
     say("Placed. Drag it to where it goes");
-  }, [api, guard, say, selectItem]);
+    undoable(`Added ${it.label || it.kind}`, async () => {
+      await api.deleteItem(it.id);
+      setItems((l) => l.filter((i) => i.id !== it.id));
+      setSelectedItem((s) => (s === it.id ? null : s));
+    });
+  }, [api, guard, say, selectItem, undoable]);
 
-  const updateItem = useCallback(async (id: string, input: Partial<ItemInput>) => {
+  const applyItem = useCallback(async (id: string, input: Partial<ItemInput>) => {
     setItems((l) => l.map((i) => (i.id === id ? { ...i, ...input } as JobItem : i)));
     await guard(() => api.updateItem(id, input));
   }, [api, guard]);
+  const updateItem = useCallback(async (id: string, input: Partial<ItemInput>) => {
+    const before = items.find((i) => i.id === id);
+    await applyItem(id, input);
+    if (!before) return;
+    const back = Object.fromEntries(Object.keys(input).map((k) => [k, before[k as keyof JobItem]])) as Partial<ItemInput>;
+    const moved = Object.keys(input).every((k) => k === "x" || k === "y");
+    undoable(`${moved ? "Moved" : "Changed"} ${before.label || before.kind}`, () => applyItem(id, back));
+  }, [items, applyItem, undoable]);
 
   const deleteItem = useCallback(async (id: string) => {
+    const it = items.find((i) => i.id === id);
     setItems((l) => l.filter((i) => i.id !== id));
     setSelectedItem(null);
-    await guard(() => api.deleteItem(id));
-  }, [api, guard]);
+    if (!it) return;
+    const key = `item:${id}`;
+    const cancel = deleteLater(key, () => api.deleteItem(id));
+    undoable(`Removed ${it.label || it.kind}`, () => { cancel(); setItems((l) => [...l, it]); }, { announce: true, key });
+  }, [api, items, deleteLater, undoable]);
 
   /** Add lines to the list; the ones for this job with a spot get a material pin on the map. Lines
    *  added together at one spot (a whole room's list, a kit) share one pin, so the map stays readable. */
@@ -326,12 +431,100 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     setTab("pins");
   }, []);
 
+  /** One step up the map: wall -> room -> floor -> outside -> the whole job. */
+  const stepOut = useCallback(() => {
+    if (level.kind === "wall") setLevel({ kind: "room", floorId: level.floorId, roomId: level.roomId });
+    else if (level.kind === "room") setLevel({ kind: "floor", floorId: level.floorId });
+    else if (level.kind === "floor") setLevel({ kind: "exterior" });
+    else if (level.kind === "exterior") setLevel({ kind: "site" });
+  }, [level, setLevel]);
+  const pickedSomething = !!selectedItem || (!!selected && !(level.kind === "room" && selected === level.roomId));
+  /** Back one step, like backing out of a game menu: the top-most thing open closes first. */
+  const back = useCallback(() => {
+    if (askOpen) return setAskOpen(false);
+    if (pinMode) return setPinMode(false);
+    if (draft) return setDraft(null);
+    if (tab === "buy" && buyDraft) return setBuyDraft(null);
+    if (selectedPin) return setSelectedPin(null);
+    if (selectedItem) return setSelectedItem(null);
+    if (pickedSomething) return setSelected(level.kind === "room" ? level.roomId : null);
+    stepOut();
+  }, [askOpen, pinMode, draft, tab, buyDraft, selectedPin, selectedItem, pickedSomething, level, stepOut]);
+  useEscape(back);
+
+  // the tabs this job shows (Buy and Money only when they're wired up); 1, 2, 3... open them in order
+  const shownTabs = TABS.filter((t) => (t !== "buy" || !!api.materials) && (t !== "money" || !!(billing && api.money)));
+  const openTab = useCallback((t: Tab) => { if (t === "buy" && tab === "buy") setBuyDraft(null); setTab(t); if (t !== "pins") setDraft(null); }, [tab]);
+  useHotkeys({
+    p: () => { if (plan) setPinMode((m) => !m); },
+    ...Object.fromEntries(shownTabs.map((t, i) => [String(i + 1), () => openTab(t)])),
+    "Mod+z": undo,
+    "?": () => setHelp(true),
+  });
+
+  // open where you left this job last time on this device: same tab, same floor or room, 2D or 3D
+  const memKey = `job.${job.id}`;
+  const restored = useRef(false);
+  const replaceNext = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    const m = recall<{ tab?: Tab; level?: Level; view3d?: boolean; colorMode?: ColorMode }>(memKey);
+    if (!m) return;
+    if (m.tab && !data.startOnMoney && shownTabs.includes(m.tab) && (plan || m.tab !== "details")) setTab(m.tab);
+    if (typeof m.view3d === "boolean" && data.can3d !== false) setView3d(m.view3d);
+    if (m.colorMode) setColorMode(m.colorMode);
+    if (m.level && plan && m.level.kind !== "site" && levelFits(plan.data, m.level)) { replaceNext.current = true; setLevel(m.level); }
+  }, [memKey, plan, data.can3d, setLevel]);
+  useEffect(() => { if (restored.current) remember(memKey, { tab, level, view3d, colorMode }); }, [memKey, tab, level, view3d, colorMode]);
+
+  // the browser's back and forward buttons walk the map too (and a phone's back gesture)
+  const fromHistory = useRef(false);
+  const levelNow = useRef(level);
+  levelNow.current = level;
+  useEffect(() => {
+    const here = { ...(history.state ?? {}), rorkerJob: job.id, rorkerLevel: level };
+    if (fromHistory.current) { fromHistory.current = false; return; }
+    if (history.state?.rorkerJob === job.id && sameLevel(history.state.rorkerLevel, level)) return;
+    if (history.state?.rorkerJob !== job.id || replaceNext.current) { replaceNext.current = false; history.replaceState(here, ""); }
+    else history.pushState(here, "");
+  }, [level, job.id]);
+  useEffect(() => {
+    const pop = (e: PopStateEvent) => {
+      const l = e.state?.rorkerJob === job.id ? (e.state.rorkerLevel as Level | undefined) : undefined;
+      if (!l || sameLevel(l, levelNow.current)) return;
+      fromHistory.current = true;
+      setLevel(l);
+    };
+    window.addEventListener("popstate", pop);
+    return () => window.removeEventListener("popstate", pop);
+  }, [job.id, setLevel]);
+
+  // the browser tab says which job this is
+  useEffect(() => {
+    const was = document.title;
+    document.title = `${job.name} · Rorker`;
+    return () => { document.title = was; };
+  }, [job.name]);
+
   const stageOp = useCallback(async (fn: () => Promise<typeof stages>) => {
     const next = await guard(fn);
     if (next) setStages(next);
   }, [guard]);
 
   const pin = selectedPin ? pins.find((p) => p.id === selectedPin) ?? null : null;
+  // what the Back bar over the details goes back to
+  const backTo = (() => {
+    if (!view || tab !== "details") return null;
+    const fl = "floorId" in level ? view.floors.find((f) => f.id === level.floorId) : null;
+    const rm = fl && "roomId" in level ? fl.rooms.find((r) => r.id === level.roomId) : null;
+    if (pickedSomething) return rm?.name ?? fl?.name ?? (level.kind === "exterior" ? "the outside" : "the whole job");
+    if (level.kind === "wall") return rm?.name ?? "the room";
+    if (level.kind === "room") return fl?.name ?? "the floor";
+    if (level.kind === "floor") return "the outside";
+    if (level.kind === "exterior") return "the whole job";
+    return null;
+  })();
   const openPins = pins.filter((p) => p.status !== "done").length;
   const questions = plan?.data.questions.filter((q) => !q.answer).length ?? 0;
   const currentStage = stages.find((s) => s.status === "active");
@@ -355,7 +548,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         linkFor={data.canShare && api.personLink && api.shareUrl ? async (m) => `${api.shareUrl!((await api.personLink!(m)).token)}?pin=${pin.id}` : undefined}
         openLinkFor={data.canShare && api.personLink && api.openShare ? (m) => { void api.personLink!(m).then((l) => api.openShare!(l.token, pin.id)); } : undefined}
         onUpdate={(input) => updatePin(pin.id, input)}
-        onDelete={async () => { await api.deletePin(pin.id); setPins((l) => l.filter((x) => x.id !== pin.id)); setSelectedPin(null); }}
+        onDelete={() => deletePin(pin)}
         loadComments={() => api.listComments(pin.id)}
         addComment={async (body, photos) => {
           const c = await api.addComment(pin.id, body, photos);
@@ -374,7 +567,11 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     }
     if (tab === "stages") return (
       <StagesPanel stages={stages}
-        onStatus={(id, s) => stageOp(() => api.setStageStatus(id, s))}
+        onStatus={async (id, s) => {
+          const before = stages.find((x) => x.id === id);
+          await stageOp(() => api.setStageStatus(id, s));
+          if (before) undoable(`${before.name}: ${s === "active" ? "in progress" : s.replace("_", " ")}`, () => stageOp(() => api.setStageStatus(id, before.status)));
+        }}
         onAdd={(n) => stageOp(() => api.addStage(n))}
         onRename={(id, n) => stageOp(() => api.renameStage(id, n))}
         onDelete={(id) => stageOp(() => api.deleteStage(id))}
@@ -413,7 +610,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       edits={edits} onSaveEdit={saveEdit} items={items} selectedItem={selectedItem} onSelectItem={selectItem}
       onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind}
       buy={api.materials ? { lines: mlines.filter((l) => l.job_id === job.id && l.status !== "returned"), onQuick: quickBuy, onAll: quickBuyAll, onMore: (t) => openBuy(t), onOpen: openLine, onTick: (id) => { const l = mlines.find((x) => x.id === id); if (l) void updateMaterial(id, { status: NEXT_STATUS[l.status] }); } } : undefined} />;
-  }, [tab, buyDraft, buyFocus, mlines, mjobs, lastBuyer, job.id, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, data.canShare, say, showPin, updatePin, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
+  }, [tab, buyDraft, buyFocus, mlines, mjobs, lastBuyer, job.id, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, data.canShare, say, showPin, updatePin, deletePin, undoable, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
     edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext, billing, payouts, moneyKey, data.brand, job, guard]);
 
   // where the quick card sits inside the map, kept on screen
@@ -427,7 +624,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
 
 
   const tabBtn = (t: Tab, label: string, badge?: number) => (
-    <button key={t} onClick={() => { if (t === "buy" && tab === "buy") setBuyDraft(null); setTab(t); if (t !== "pins") setDraft(null); }} aria-selected={tab === t} role="tab"
+    <button key={t} onClick={() => openTab(t)} title={`${label} (${shownTabs.indexOf(t) + 1})`} aria-selected={tab === t} role="tab"
       className={`flex-1 h-12 text-[14px] font-display font-bold tracking-[0.1em] uppercase border-b-[3px] inline-flex items-center justify-center gap-1.5 ${tab === t ? "border-accent text-text" : "border-transparent text-muted hover:text-text"}`}>
       {label}{badge ? <span className={`font-mono text-[11px] rounded-[2px] px-1.5 min-w-[18px] ${t === "plan" ? "bg-accent text-accent-ink" : "bg-panel-3 text-text"}`}>{badge}</span> : null}
     </button>
@@ -455,12 +652,21 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
           {working && <span className="chip"><span className="dot bg-accent animate-pulse" />Reading plan…</span>}
           {lastRun?.status === "failed" && !working && <span className="chip text-red">Last read failed</span>}
           <span className="chip font-mono !text-text"><span className="w-2 h-2 bg-accent" />{openPins} open pin{openPins === 1 ? "" : "s"}</span>
+          {undoLabel && (
+            <button onClick={undo} className="btn btn-ghost btn-sm" title={`Undo: ${undoLabel} (Ctrl+Z)`} aria-label={`Undo: ${undoLabel}`}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></svg>
+              Undo
+            </button>
+          )}
           {data.canShare && api.createShareLink && (
             <button onClick={() => setSharing(true)} className="btn btn-ghost btn-sm" title="Send a sub or a crew member a link to their part of this job">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></svg>
               Share
             </button>
           )}
+          <button onClick={() => setHelp(true)} className="hidden md:inline-flex w-8 h-8 items-center justify-center text-muted hover:text-text" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
+            <kbd className="kbd !min-w-[22px] !h-[22px]">?</kbd>
+          </button>
         </div>
       </div>
 
@@ -494,7 +700,6 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
                 setDraft(null);
               } : undefined} />
           )}
-          {toast && <div role="status" className="absolute left-1/2 -translate-x-1/2 top-14 z-10 px-4 py-2 rounded-[3px] bg-panel-2 border border-line border-l-[3px] border-l-accent shadow-lg text-[14px]">{toast}</div>}
           {plan && questions > 0 && tab !== "plan" && (
             <button onClick={() => setTab("plan")} className="absolute left-1/2 -translate-x-1/2 bottom-3 z-10 btn btn-primary btn-sm shadow-lg">
               {questions} question{questions > 1 ? "s" : ""} about this plan
@@ -511,9 +716,28 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
             {billing && api.money && tabBtn("money", "Money", billing.quotes.filter((q) => q.status === "approved")
               .flatMap((q) => q.schedule).filter((d) => !d.invoice_id && stages.some((s) => s.status === "done" && s.name === d.stage_name)).length)}
           </div>
+          {backTo && (
+            <button onClick={back} className="shrink-0 h-10 px-4 flex items-center gap-2 border-b border-line text-[13.5px] text-muted hover:text-text hover:bg-panel-2 text-left" title="Back (Esc)">
+              <span aria-hidden className="text-[16px] leading-none">‹</span>
+              <span className="truncate">Back to {backTo}</span>
+              <kbd className="kbd ml-auto hidden md:inline-grid !h-5 !text-[10.5px]">Esc</kbd>
+            </button>
+          )}
           <div ref={panelRef} className="flex-1 min-h-0 overflow-y-auto scroll-thin">{panel}</div>
         </aside>
       </div>
+      {help && <ShortcutsDialog onClose={() => setHelp(false)} groups={[
+        { title: "Getting around", items: [
+          { keys: ["Esc"], does: "Back one step" },
+          { keys: ["1", "2", "3", "4"], does: "Details, Pins, Stages, Plan" },
+          { keys: ["Alt", "←"], does: "Browser back walks the map too" },
+        ] },
+        { title: "Doing things", items: [
+          { keys: ["P"], does: "Pick up a pin, click to drop it" },
+          { keys: ["Mod", "Z"], does: "Undo the last change" },
+          { keys: ["?"], does: "This list" },
+        ] },
+      ]} />}
       {sharing && <ShareDialog api={api} members={data.members} pins={pins} plan={view} onClose={() => setSharing(false)} />}
       {api.ask && <Assistant send={api.ask} context={askContext} onChanged={api.afterAssistant} open={askOpen} setOpen={setAskOpen} />}
     </div>

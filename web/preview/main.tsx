@@ -26,6 +26,7 @@ import { ShoppingRun } from "@/components/materials/ShoppingRun";
 import { EXTRA_JOBS, sampleMaterials } from "@/demo/materials-sample";
 import { pinSummary, qtyText, type MaterialLine, type MaterialsApi, type MaterialsJob } from "@/lib/materials/types";
 import { TeamContext } from "@/components/team/context";
+import { FeedbackProvider } from "@/components/ui/feedback";
 
 /** when this preview was built, so an out-of-date copy in the browser cache is easy to spot */
 declare const __BUILD__: string;
@@ -255,19 +256,46 @@ function plainJob(j: (typeof EXTRA_JOBS)[number], team: Member[]): WorkspaceData
   };
 }
 
+/** Each screen has its own address (#/jobs, #/job/hadley ...) so the browser's back button, a refresh
+ * and a copied link all land where you were. */
+function fromHash(): { page: Page; id?: string } {
+  const [a, b] = location.hash.replace(/^#\/?/, "").split("/");
+  if (a === "jobs" || a === "team" || a === "new" || a === "shared" || a === "money" || a === "shop") return { page: a };
+  return { page: "job", id: a === "job" ? b : undefined };
+}
+const hashFor = (page: Page, id: string) => (page === "job" ? `#/job/${id}` : `#/${page}`);
+const TITLES: Partial<Record<Page, string>> = { jobs: "Jobs", team: "Team", new: "New project", shared: "Shared link", money: "Money", shop: "Shopping", client: "Client view" };
+
 function App() {
-  const [page, setPage] = useState<Page>("job");
+  const sample = useMemo(seed, []);
+  const [page, setPageRaw] = useState<Page>(() => fromHash().page);
   const [share, setShare] = useState<{ token: string; pin?: string } | null>(null);
   const [client, setClient] = useState<ClientStart>(null);
   const [tier, setTier] = useState<Brand["tier"]>("standard");
-  const sample = useMemo(seed, []);
   const [jobs, setJobs] = useState<WorkspaceData[]>(() => [sample, ...EXTRA_JOBS.map((j) => plainJob(j, sample.members))]);
   const jobsRef = useRef(jobs);
   jobsRef.current = jobs;
   const mapi = useMemo(() => materialsApi(() => jobsRef.current), []);
   const mjobs: MaterialsJob[] = jobs.map((d) => ({ id: d.job.id, name: d.job.name, address: d.job.address }));
   const [, setMver] = useState(0);
-  const [activeId, setActiveId] = useState(sample.job.id);
+  const [activeId, setActiveIdRaw] = useState(() => fromHash().id ?? sample.job.id);
+  /** go somewhere: a new history entry first, so the screen that opens builds on it */
+  const go = (p: Page, id = activeId) => {
+    const h = hashFor(p, id);
+    if (location.hash !== h) history.pushState(null, "", h);
+    setPageRaw(p);
+    setActiveIdRaw(id);
+  };
+  const setPage = (p: Page) => go(p);
+  const goRef = useRef(go);
+  goRef.current = go;
+  useEffect(() => {
+    if (!location.hash) history.replaceState(history.state, "", hashFor(page, activeId));
+    const pop = () => { const r = fromHash(); setPageRaw(r.page); if (r.id) setActiveIdRaw(r.id); };
+    window.addEventListener("popstate", pop);
+    return () => window.removeEventListener("popstate", pop);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (TITLES[page]) document.title = `${TITLES[page]} · Rorker`; }, [page]);
   const active = jobs.find((j) => j.job.id === activeId) ?? jobs[0];
   // the assistant changes the job behind the screen's back: hand the workspace a fresh copy after
   const [ver, setVer] = useState(0);
@@ -275,18 +303,18 @@ function App() {
   const current = useMemo(() => ({ ...active, startOnMoney: fromClient, materials: { lines: materials.lines, jobs: mjobs } }), [active, ver, fromClient, jobs.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const api = useMemo(() => {
     const a = memoryApi(active);
-    return { ...a, ask: previewAsk(active, a), afterAssistant: () => setVer((n) => n + 1), openShare: (token: string, pin?: string) => { setShare({ token, pin }); setPage("shared"); },
-      money: a.money && { ...a.money, openClient: (start: ClientStart) => { setClient(start); setPage("client"); } },
-      materials: mapi, openShopping: () => setPage("shop") };
+    return { ...a, ask: previewAsk(active, a), afterAssistant: () => setVer((n) => n + 1), openShare: (token: string, pin?: string) => { setShare({ token, pin }); goRef.current("shared"); },
+      money: a.money && { ...a.money, openClient: (start: ClientStart) => { setClient(start); goRef.current("client"); } },
+      materials: mapi, openShopping: () => goRef.current("shop") };
   }, [active, mapi]);
   const team = useMemo(() => teamApi(sample), [sample]);
   const [, bump] = useState(0);
   useEffect(() => {
     const go = (e: Event) => {
       const href = (e as CustomEvent<string>).detail;
-      if (href === "/jobs/new") setPage("new");
-      else if (href.startsWith("/jobs/")) { setActiveId(href.split("/")[2]); setPage("job"); }
-      else setPage("jobs");
+      if (href === "/jobs/new") goRef.current("new");
+      else if (href.startsWith("/jobs/")) goRef.current("job", href.split("/")[2]);
+      else goRef.current("jobs");
       bump((n) => n + 1);
     };
     window.addEventListener("preview-nav", go);
@@ -295,8 +323,7 @@ function App() {
   const created = (r: NewProjectResult) => {
     const d = fromAssistant(r, sample.members);
     setJobs((js) => [d, ...js]);
-    setActiveId(d.job.id);
-    setPage("job");
+    go("job", d.job.id);
   };
   const tab = (p: Page, label: string) => (
     <button onClick={() => { setFromClient(false); setPage(p); }} className={`px-3 h-9 rounded-[3px] font-display text-[15px] font-bold tracking-[0.1em] uppercase ${page === p ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</button>
@@ -314,7 +341,7 @@ function App() {
       ) : page === "money" ? (
         <div className="flex-1 overflow-y-auto">
           <MoneyOverview rows={[...jobs.filter((j) => j.billing).map((j) => ({ jobId: j.job.id, jobName: j.job.name, clientName: j.job.client_name, address: j.job.address, billing: j.billing! })), ...otherJobs]}
-            onOpenJob={(id) => { if (jobs.some((j) => j.job.id === id)) { setActiveId(id); setVer((n) => n + 1); setPage("job"); } }} />
+            onOpenJob={(id) => { if (jobs.some((j) => j.job.id === id)) { setVer((n) => n + 1); go("job", id); } }} />
         </div>
       ) : page === "client" && active.billing ? (
         <div className="flex-1 min-h-0 flex flex-col">
@@ -337,7 +364,7 @@ function App() {
           <TeamContext.Provider value={{ members: sample.members, me: "m0" }}>
             <ShoppingRun lines={materials.lines} jobs={mjobs} members={sample.members} me="m0"
               onUpdate={(ids, patch) => { void Promise.all(ids.map((id) => mapi.update(id, patch))).then(() => { setMver((n) => n + 1); setVer((n) => n + 1); }); }}
-              onOpenJob={(id) => { setActiveId(id); setVer((n) => n + 1); setPage("job"); }} />
+              onOpenJob={(id) => { setVer((n) => n + 1); go("job", id); }} />
           </TeamContext.Provider>
         </div>
       ) : page === "team" ? (
@@ -370,4 +397,4 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
+createRoot(document.getElementById("root")!).render(<StrictMode><FeedbackProvider><App /></FeedbackProvider></StrictMode>);
