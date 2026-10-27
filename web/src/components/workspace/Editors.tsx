@@ -3,7 +3,7 @@
 // edits on top of the plan as read, so "Reset" always gets back to what the drawing said.
 import { useState } from "react";
 import type { ElementEdit, ItemInput, ItemKind, JobItem } from "@/lib/data/types";
-import { fixtureSize } from "@/lib/plan/edits";
+import { fixtureSize, turnedFacing } from "@/lib/plan/edits";
 import type { Fixture, Room, RoomType } from "@/lib/plan/types";
 import { fixtureBottom, fixtureHeight } from "@/components/plan/fixtures";
 import { ITEM_KINDS, ITEM_LABEL, mmIn } from "@/components/plan/items";
@@ -48,6 +48,8 @@ const num = (s: string) => (s.trim() === "" ? undefined : Math.round(Number(s)))
 const url = (s: string) => { const t = s.trim(); return !t ? undefined : /^https?:\/\//i.test(t) ? t : `https://${t}`; };
 
 /** What an object is and how big, with Edit → ✓. `focus` opens it straight on the product fields. */
+const FACES: Record<number, string> = { 0: "East", 90: "South", 180: "West", [-90]: "North" };
+
 export function FixtureCard({ f, edit, room, onSave, focus }: { f: Fixture; edit: ElementEdit | undefined; room: string; onSave: (patch: ElementEdit | null) => Promise<void>; focus?: "product" | null }) {
   const size = fixtureSize(f);
   const h = f.height_mm ?? fixtureHeight(f.kind);
@@ -90,6 +92,18 @@ export function FixtureCard({ f, edit, room, onSave, focus }: { f: Fixture; edit
       <Row k="Room" v={room} />
       <Row k="Size" v={`${Math.round(size.width)} wide × ${Math.round(size.depth)} deep × ${Math.round(h)} high mm`} />
       {bottom > 0 && <Row k="Mounted at" v={mmIn(bottom)} />}
+      <Row k="Front faces" v={
+        <span className="inline-flex items-center gap-1.5 flex-wrap">
+          <span className="mr-1">{f.facing == null ? "Any way" : FACES[turnedFacing(f, 0)]}</span>
+          {[90, 180, 270].map((d) => (
+            <button key={d} type="button" className="btn btn-sm" disabled={busy} title={`Turn it ${d}° clockwise${d === 90 ? " (R)" : ""}`}
+              onClick={() => { setBusy(true); onSave({ facing: turnedFacing(f, d) }).catch(() => setErr("Couldn't turn it.")).finally(() => setBusy(false)); }}>
+              ↻ {d}°
+            </button>
+          ))}
+        </span>
+      } />
+      {err && <p className="text-red text-[13px]">{err}</p>}
       {f.spec && <Row k="Spec" v={f.spec} />}
       {(f.product_name || f.product_url) && <Row k="Product" v={f.product_url ? <a className="text-chalk hover:underline" href={f.product_url} target="_blank" rel="noreferrer">{f.product_name || f.product_url} ↗</a> : f.product_name} />}
       {f.notes && <Row k="Notes" v={f.notes} />}

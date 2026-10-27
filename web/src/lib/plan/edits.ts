@@ -33,6 +33,13 @@ export function widthAxis(f: Fixture): "x" | "y" {
   return (a > 45 && a < 135) || (a > 225 && a < 315) ? "x" : "y";
 }
 
+/** Which way it faces after turning it `deg` degrees clockwise on the plan (90, 180, 270): 0 east, 90 south, 180 west, -90 north. */
+export function turnedFacing(f: Fixture, deg: number): number {
+  const now = f.facing ?? (widthAxis(f) === "x" ? 90 : 0);
+  const a = (((Math.round(now / 90) * 90 + deg) % 360) + 360) % 360;
+  return a === 270 ? -90 : a;
+}
+
 export function fixtureSize(f: Fixture) {
   const ax = widthAxis(f);
   const wx = f.bbox[2] - f.bbox[0], wy = f.bbox[3] - f.bbox[1];
