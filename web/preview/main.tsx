@@ -16,6 +16,10 @@ import { previewAsk } from "./assistant";
 import { SharedWorkView } from "@/components/share/SharedJob";
 import { newToken, shareWork } from "@/lib/share";
 import { NewProject, type NewProjectResult } from "@/components/newjob/NewProject";
+import { ClientMoneyView } from "@/components/billing/ClientMoneyView";
+import type { ClientStart } from "@/components/billing/MoneyPanel";
+import type { Brand } from "@/lib/billing/types";
+import { SAMPLE_BRAND, sampleBilling } from "@/demo/billing-sample";
 
 /** when this preview was built, so an out-of-date copy in the browser cache is easy to spot */
 declare const __BUILD__: string;
@@ -50,6 +54,7 @@ function seed(): WorkspaceData {
     items: sampleItems(plan).map((it, i) => ({ id: `i${i + 1}`, job_id: jobId, label: null, note: null, created_at: now(), ...it }) as JobItem),
     runs: [{ id: "r1", job_id: jobId, kind: "read", file_name: "house.dwg", status: "needs_answers", error: null, plan_id: "plan1", created_at: now(), finished_at: now(), metrics: {} }],
     members, me: "m0", aiAvailable: false, canShare: true,
+    billing: sampleBilling(jobId), brand: SAMPLE_BRAND, payoutsConnected: false,
   };
 }
 
@@ -139,6 +144,10 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
       return l;
     },
     shareUrl: (token) => `https://app.rorker.com/s/${token}`,
+    money: {
+      save(b) { d.billing = b; },
+      async connectPayouts() { await new Promise((r) => setTimeout(r, 600)); d.payoutsConnected = true; },
+    },
   };
 }
 
@@ -185,14 +194,17 @@ function fromAssistant(r: NewProjectResult, team: Member[]): WorkspaceData {
     pins: [], states: [], edits: {}, can3d: true, items: [],
     runs: planRow ? [{ id: uid(), job_id: jobId, kind: "read", file_name: r.plan!.source.filename || "Your files", status: r.plan!.questions.length ? "needs_answers" : "done", error: null, plan_id: planRow.id, created_at: now(), finished_at: now(), metrics: {} }] : [],
     members: team, me: "m0", aiAvailable: false, canShare: true,
+    billing: { quotes: [], invoices: [], payments: [] }, brand: SAMPLE_BRAND, payoutsConnected: false,
   };
 }
 
-type Page = "jobs" | "job" | "team" | "shared" | "new";
+type Page = "jobs" | "job" | "team" | "shared" | "new" | "client";
 
 function App() {
   const [page, setPage] = useState<Page>("job");
   const [share, setShare] = useState<{ token: string; pin?: string } | null>(null);
+  const [client, setClient] = useState<ClientStart>(null);
+  const [tier, setTier] = useState<Brand["tier"]>("standard");
   const sample = useMemo(seed, []);
   const [jobs, setJobs] = useState<WorkspaceData[]>(() => [sample]);
   const [activeId, setActiveId] = useState(sample.job.id);
@@ -202,7 +214,8 @@ function App() {
   const current = useMemo(() => ({ ...active }), [active, ver]); // eslint-disable-line react-hooks/exhaustive-deps
   const api = useMemo(() => {
     const a = memoryApi(active);
-    return { ...a, ask: previewAsk(active, a), afterAssistant: () => setVer((n) => n + 1), openShare: (token: string, pin?: string) => { setShare({ token, pin }); setPage("shared"); } };
+    return { ...a, ask: previewAsk(active, a), afterAssistant: () => setVer((n) => n + 1), openShare: (token: string, pin?: string) => { setShare({ token, pin }); setPage("shared"); },
+      money: { ...a.money!, openClient: (start: ClientStart) => { setClient(start); setPage("client"); } } };
   }, [active]);
   const team = useMemo(() => teamApi(sample), [sample]);
   const [, bump] = useState(0);
@@ -236,6 +249,18 @@ function App() {
       </header>
       {page === "new" ? (
         <NewProject onCreate={created} onCancel={() => setPage("jobs")} />
+      ) : page === "client" && active.billing ? (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-2 border-b border-line bg-panel text-[13px]">
+            <span className="text-muted">Branding on client documents:</span>
+            {(["standard", "premium"] as const).map((t) => (
+              <button key={t} onClick={() => setTier(t)} className={`btn btn-sm ${tier === t ? "btn-primary" : ""}`}>{t === "standard" ? "Standard (Powered by Rorker)" : "Premium (white label)"}</button>
+            ))}
+          </div>
+          <ClientMoneyView key={`${client?.id ?? "home"}-${tier}`} billing={active.billing} brand={{ ...(active.brand ?? SAMPLE_BRAND), tier }} start={client}
+            job={{ name: active.job.name, address: active.job.address, client_name: active.job.client_name, client_email: active.job.client_email, client_phone: active.job.client_phone }}
+            onChange={(b) => { active.billing = b; }} onBack={() => { setVer((n) => n + 1); setPage("job"); }} />
+        </div>
       ) : page === "shared" && share ? (
         <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">
           {(() => { const v = sharedWork(jobs, share.token, pinPhotos); return v ? <SharedWorkView key={share.token + share.pin} work={v} pin={share.pin} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} onBack={() => { setVer((n) => n + 1); setPage("job"); }} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}

@@ -21,8 +21,9 @@ import { PinDetail, PinForm, PinsList, QuickPin } from "./PinsPanel";
 import { PlanPanel, UploadBox } from "./PlanPanel";
 import { ShareDialog } from "./ShareDialog";
 import { StagesPanel, StageStrip } from "./StagesPanel";
+import { MoneyPanel } from "@/components/billing/MoneyPanel";
 
-type Tab = "details" | "pins" | "stages" | "plan";
+type Tab = "details" | "pins" | "stages" | "plan" | "money";
 
 export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; api: WorkspaceApi; onAllJobs: () => void }) {
   const [plan, setPlan] = useState(data.plan);
@@ -47,6 +48,9 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const [flyTo, setFlyTo] = useState<{ ids: string[]; n: number } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const job = data.job;
+  const [billing, setBilling] = useState(data.billing);
+  const [payouts, setPayouts] = useState(!!data.payoutsConnected);
+  const [moneyKey, setMoneyKey] = useState(0);
 
   const say = useCallback((m: string) => { setToast(m); setTimeout(() => setToast((t) => (t === m ? null : t)), 3200); }, []);
   const guard = useCallback(async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
@@ -78,6 +82,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     if (firstData.current === data) return;
     firstData.current = data;
     setPlan(data.plan); setRuns(data.runs); setStages(data.stages); setPins(data.pins); setItems(data.items); setEdits(data.edits);
+    setBilling(data.billing); setMoneyKey((k) => k + 1);
     setStates(new Map(data.states.map((s) => [s.element_id, s.status] as [string, ElementStatus])));
   }, [data]);
   const [askOpen, setAskOpen] = useState(false);
@@ -277,6 +282,13 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         onDelete={(id) => stageOp(() => api.deleteStage(id))}
         onMove={(id, d) => stageOp(() => api.moveStage(id, d))} />
     );
+    if (tab === "money" && billing && data.brand && api.money) {
+      const money = api.money;
+      return <MoneyPanel key={moneyKey} initial={billing} brand={data.brand} jobId={job.id} plan={view} stages={stages} connected={payouts}
+        job={{ name: job.name, address: job.address, client_name: job.client_name, client_email: job.client_email, client_phone: job.client_phone }}
+        onConnect={() => void guard(async () => { await money.connectPayouts(); setPayouts(true); say("Payouts are on. Clients can now pay by card or bank."); })}
+        api={{ say, openClient: money.openClient, save: (b) => { setBilling(b); money.save(b); } }} />;
+    }
     if (tab === "plan") return (
       <div className="space-y-3">
       {api.ask && view && (
@@ -301,7 +313,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       edits={edits} onSaveEdit={saveEdit} items={items} selectedItem={selectedItem} onSelectItem={selectItem}
       onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind} />;
   }, [tab, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, data.canShare, say, showPin, updatePin, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
-    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext]);
+    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext, billing, payouts, moneyKey, data.brand, job, guard]);
 
   // where the quick card sits inside the map, kept on screen
   const quick = (() => {
@@ -387,6 +399,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
             {tabBtn("pins", "Pins", openPins)}
             {tabBtn("stages", "Stages")}
             {tabBtn("plan", "Plan", questions)}
+            {billing && api.money && tabBtn("money", "Money", billing.quotes.filter((q) => q.status === "approved")
+              .flatMap((q) => q.schedule).filter((d) => !d.invoice_id && stages.some((s) => s.status === "done" && s.name === d.stage_name)).length)}
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto scroll-thin">{panel}</div>
         </aside>

@@ -1,5 +1,6 @@
 // Sample money for the Hadley Road house in the preview: an approved quote (kitchen, both upstairs
 // bathrooms, the lavatory), its payment plan, a paid deposit and a progress invoice waiting on the client.
+// Marking "Rough-in" done in Stages brings up the next draw to bill.
 import type { Billing, Brand, Draw, LineItem } from "@/lib/billing/types";
 
 const L = (id: string, group: string, room_id: string | null, description: string, qty: number, unit: LineItem["unit"], dollars: number, element_ids: string[] = [], extra: Partial<LineItem> = {}): LineItem =>
@@ -26,8 +27,9 @@ const lines: LineItem[] = [
 
 const schedule: Draw[] = [
   { id: "d1", label: "Deposit at signing", pct: 0.3, stage_name: null, invoice_id: "inv1" },
-  { id: "d2", label: "Rough-in done", pct: 0.4, stage_name: "Rough-in", invoice_id: "inv2" },
-  { id: "d3", label: "Final, at handover", pct: 0.3, stage_name: "Handover", invoice_id: null },
+  { id: "d2", label: "Demolition done", pct: 0.2, stage_name: "Demolition", invoice_id: "inv2" },
+  { id: "d3", label: "Rough-in done", pct: 0.3, stage_name: "Rough-in: plumbing, electrical, HVAC", invoice_id: null },
+  { id: "d4", label: "Final, at handover", pct: 0.2, stage_name: "Handover", invoice_id: null },
 ];
 
 const day = (offset: number) => new Date(Date.now() + offset * 864e5).toISOString();
@@ -49,8 +51,8 @@ export function sampleBilling(jobId: string): Billing {
   const total = 4230642;
   const inv1 = bill("inv1", "INV-1001", "Deposit", "deposit", schedule[0], "paid", -18);
   inv1.lines[0].unit_price = Math.round(total * 0.3);
-  const inv2 = bill("inv2", "INV-1002", "Rough-in done", "progress", schedule[1], "sent", -2);
-  inv2.lines[0].unit_price = Math.round(total * 0.4);
+  const inv2 = bill("inv2", "INV-1002", "Demolition done", "progress", schedule[1], "sent", -2);
+  inv2.lines[0].unit_price = Math.round(total * 0.2);
   return {
     quotes: [quote],
     invoices: [inv1, inv2],
