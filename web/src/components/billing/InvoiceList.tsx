@@ -36,7 +36,7 @@ export function InvoiceList({ invoices, payments, onOpen, onNew }: {
       {invoices.length === 0 ? (
         <div className="card px-4 py-6 text-center">
           <p className="text-[14px]">No invoices yet</p>
-          <p className="text-[12.5px] text-muted mt-1">When a quote is approved, the deposit invoice shows up here. You can also bill extra work any time.</p>
+          <p className="text-[12.5px] text-muted mt-1">The deposit invoice lands here when a quote is signed. Bill extra work any time.</p>
         </div>
       ) : (
         <ul className="space-y-1.5">
@@ -46,7 +46,7 @@ export function InvoiceList({ invoices, payments, onOpen, onNew }: {
             const off = status === "void";
             return (
               <li key={inv.id}>
-                <button onClick={() => onOpen(inv.id)} className={`card !rounded-[3px] w-full text-left px-3 py-2.5 hover:bg-panel-2 ${status === "overdue" ? "!border-red/50" : ""}`}>
+                <button onClick={() => onOpen(inv.id)} className={`card !rounded-[3px] w-full text-left px-3 py-2.5 hover:bg-panel-2 ${status === "overdue" ? "overdue-edge !border-red/50" : ""}`}>
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[12px] text-muted shrink-0">{inv.number}</span>
                     <span className={`flex-1 min-w-0 truncate text-[14px] ${off ? "text-muted line-through" : ""}`}>{inv.title || "Untitled invoice"}</span>

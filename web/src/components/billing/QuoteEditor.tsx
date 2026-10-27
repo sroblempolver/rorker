@@ -13,9 +13,9 @@ import { drawAmounts, groupLines, monthlyPayment, niceDate, packageTotals, pctLa
 const UNITS: Unit[] = ["ea", "sqft", "lf", "hr", "day", "lot"];
 const WHOLE = "Whole house";
 const PACKAGES: Omit<QuoteOption, "id">[] = [
-  { name: "Good", blurb: "Solid, budget-friendly finishes" },
-  { name: "Better", blurb: "Our most popular mix of value and finish" },
-  { name: "Best", blurb: "Premium materials throughout" },
+  { name: "Good", blurb: "Builder-grade finishes" },
+  { name: "Better", blurb: "Mid-grade finishes. Most clients pick this." },
+  { name: "Best", blurb: "High-end finishes throughout" },
 ];
 
 /** What happened to the quote, oldest first: the stored activity, or one built from its dates. */
@@ -117,7 +117,7 @@ function PriceBookPicker({ targets, start, options, onAdd, onClose }: {
       </div>
       {added && <p className="text-[12.5px] text-green">{added}</p>}
       <div className="max-h-[340px] overflow-y-auto -mx-1 px-1 space-y-3">
-        {groups.length === 0 && <p className="text-[13px] text-muted">Nothing matches. Try another word, or add a line by hand.</p>}
+        {groups.length === 0 && <p className="text-[13px] text-muted">Nothing matches. Try another word or add it by hand.</p>}
         {groups.map((g) => (
           <section key={g.group}>
             <p className="eyebrow !mb-1">{g.group}{g.fits && !words.length && <span className="text-accent normal-case tracking-normal"> · fits {target.group}</span>}</p>
@@ -215,7 +215,7 @@ export function QuoteEditor({ quote: q, plan, stageNames, onChange, onSend, onBa
         </div>
 
         {q.ai_drafted && !locked && (
-          <p className="chip !text-accent !border-accent/40">✦ Drafted by the assistant. Check prices before sending.</p>
+          <p className="chip !h-auto !whitespace-normal py-1.5 !text-accent !border-accent/40">✦ Drafted from the plan. Check prices before it goes out.</p>
         )}
         {banner && (
           <div className={`card !rounded-[3px] px-3 py-2.5 text-[13.5px] ${q.status === "approved" ? "!border-green/50 text-green" : q.status === "declined" ? "!border-red/50 text-red" : "!border-amber/50 text-amber"}`}>
@@ -260,7 +260,7 @@ export function QuoteEditor({ quote: q, plan, stageNames, onChange, onSend, onBa
               <p className="eyebrow !mb-0">Packages</p>
               {!locked && <span className="ml-auto"><Toggle label="Offer packages" on={!!pkgs} onChange={togglePackages} /></span>}
             </div>
-            {!pkgs && <p className="text-[12.5px] text-muted">Give the client three choices, like laminate, quartz or quartzite counters. Clients often pick the middle one.</p>}
+            {!pkgs && <p className="text-[12.5px] text-muted">Three price points, like laminate, quartz or quartzite counters. Most clients pick the middle.</p>}
             {pkgs && (
               <div className="grid gap-2">
                 {pkgs.list.map((o, i) => {
@@ -296,7 +296,7 @@ export function QuoteEditor({ quote: q, plan, stageNames, onChange, onSend, onBa
         {/* lines, by room */}
         <div className="space-y-3">
           <p className="eyebrow">Lines</p>
-          {q.lines.length === 0 && <p className="text-[13.5px] text-muted">No lines yet. Add what you will do, room by room.</p>}
+          {q.lines.length === 0 && <p className="text-[13.5px] text-muted">No lines yet. Add the work room by room.</p>}
           {groupLines(q.lines).map((g) => (
             <section key={g.key} className="space-y-1">
               <div className="flex items-center gap-2">
@@ -307,7 +307,7 @@ export function QuoteEditor({ quote: q, plan, stageNames, onChange, onSend, onBa
               {g.lines.map((l) => open === l.id && !locked ? (
                 <div key={l.id} className="card !rounded-[3px] p-3 space-y-2.5 !border-accent/50">
                   <div className="flex gap-2">
-                    <textarea className="input !text-[14px]" rows={2} autoFocus placeholder="What you will do" value={l.description} onChange={(e) => setLine(l.id, { description: e.target.value })} />
+                    <textarea className="input !text-[14px]" rows={2} autoFocus placeholder="The work" value={l.description} onChange={(e) => setLine(l.id, { description: e.target.value })} />
                     <button className="w-8 h-8 shrink-0 rounded-[2px] text-muted hover:bg-panel-3 hover:text-red" title="Remove line"
                       onClick={() => setLines(q.lines.filter((x) => x.id !== l.id))}>×</button>
                   </div>

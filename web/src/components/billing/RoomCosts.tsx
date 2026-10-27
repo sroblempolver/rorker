@@ -38,7 +38,7 @@ export function RoomCosts({ billing, plan, onShowRoom }: { billing: Billing; pla
       {!approved.length || !list.length ? (
         <div className="card px-4 py-6 text-center">
           <p className="text-[14px]">No approved quote yet</p>
-          <p className="text-[12.5px] text-muted mt-1">Once the client approves a quote, you will see what each room costs here.</p>
+          <p className="text-[12.5px] text-muted mt-1">Once a quote is signed, you see what each room costs here.</p>
         </div>
       ) : (
         <>

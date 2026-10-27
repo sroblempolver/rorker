@@ -80,14 +80,14 @@ export function MoneyPanel({ initial, brand, job, jobId, plan, stages, api, conn
   const invoice = view === "invoices" && open ? b.invoices.find((i) => i.id === open) : null;
   const co = view === "changes" && open ? cos.find((c) => c.id === open) : null;
   const tab = (v: View, label: string, n?: number) => (
-    <button onClick={() => { setView(v); setOpen(null); }} className={`flex-1 h-9 rounded-[3px] text-[13px] font-semibold inline-flex items-center justify-center gap-1.5 ${view === v ? "bg-panel-3 text-text" : "text-muted hover:text-text"}`}>
+    <button onClick={() => { setView(v); setOpen(null); }} className={`flex-1 h-12 rounded-[3px] font-display text-[15px] font-bold uppercase tracking-[0.08em] inline-flex items-center justify-center gap-1.5 ${view === v ? "bg-panel-3 text-text" : "text-muted hover:text-text"}`}>
       {label}{n ? <span className="font-mono text-[11px] bg-accent text-accent-ink rounded-[2px] px-1.5">{n}</span> : null}
     </button>
   );
   const unpaid = b.invoices.filter((i) => i.status !== "draft" && i.status !== "void" && amountDue(i, b.payments) > 0).length;
 
   return (
-    <div className="p-4 space-y-3">
+    <div className="rugged p-4 space-y-3">
       <div className="flex gap-1 p-1 rounded-[4px] bg-panel-2 border border-line">
         {tab("quotes", "Quotes", b.quotes.filter((q) => q.status === "draft").length)}
         {tab("changes", "Changes", cos.filter((c) => c.status === "sent").length)}
@@ -96,10 +96,10 @@ export function MoneyPanel({ initial, brand, job, jobId, plan, stages, api, conn
       </div>
 
       {due.map(({ q, d }) => (
-        <div key={d.id} className="card p-3 border-l-[3px] !border-l-accent">
-          <p className="text-[14px]"><b>{d.stage_name}</b> is done. Bill the next payment?</p>
+        <div key={d.id} className="card p-3 border-l-[6px] !border-l-accent">
+          <p className="text-[15px]"><b>{d.stage_name}</b> is done. Time to bill.</p>
           <p className="text-[13px] text-muted mb-2">{d.label}: {Math.round(d.pct * 100)}% of {q.number}, {fmt(Math.round(quoteTotals(q).total * d.pct))}</p>
-          <button className="btn btn-primary btn-sm" onClick={() => billDraw(q, d.id)}>Make the invoice</button>
+          <button className="btn btn-primary btn-sm" onClick={() => billDraw(q, d.id)}>Bill it</button>
         </div>
       ))}
 
@@ -116,7 +116,7 @@ export function MoneyPanel({ initial, brand, job, jobId, plan, stages, api, conn
             update({ ...b, quotes: [q, ...b.quotes] }); setOpen(q.id);
           }}
           onDraft={() => {
-            if (!plan) { api.say("Add the plan first, then the assistant can price it room by room"); return; }
+            if (!plan) { api.say("Add the plan first. Then it can price the job room by room."); return; }
             const q = draftQuote(plan, jobId, quoteNos, stageNames);
             update({ ...b, quotes: [q, ...b.quotes] }); setOpen(q.id);
             api.say(`Drafted ${q.number} from the plan: ${q.lines.length} lines. Check the prices before sending.`);

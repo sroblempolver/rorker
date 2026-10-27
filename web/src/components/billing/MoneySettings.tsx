@@ -87,7 +87,7 @@ export function MoneySettings({ value, onChange }: { value: MoneySettingsValue; 
               ))}
             </div>
           </div>
-          <Row title="Follow up on unanswered quotes" note="Send the client a friendly nudge if they have not answered.">
+          <Row title="Follow up on unanswered quotes" note="Auto-nudge the client if they haven't answered.">
             <Num value={value.quoteFollowUpDays} onChange={(v) => set("quoteFollowUpDays", Math.round(v))} suffix="days" max={60} label="Follow up after days" />
           </Row>
           <Row title="Offer monthly payments on quotes" note='Shows "as low as $X a month" on the quote.'>

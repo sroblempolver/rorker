@@ -16,8 +16,8 @@ export function draftQuote(plan: Plan, jobId: string, existingNumbers: string[],
   let smallSqft = 0;
   // good / better / best for the first kitchen's counters and the first bathroom's fixtures
   const options: QuoteOption[] = [
-    { id: newId(), name: "Good", blurb: "Solid, budget-friendly finishes" },
-    { id: newId(), name: "Better", blurb: "Our most popular mix of value and finish" },
+    { id: newId(), name: "Good", blurb: "Builder-grade finishes" },
+    { id: newId(), name: "Better", blurb: "Mid-grade finishes. Most clients pick this." },
     { id: newId(), name: "Best", blurb: "Premium stone and fixtures throughout" },
   ];
   const [good, better, best] = options.map((o) => o.id);

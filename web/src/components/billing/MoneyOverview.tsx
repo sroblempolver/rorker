@@ -42,7 +42,7 @@ export function MoneyOverview({ rows, onOpenJob }: { rows: JobMoneyRow[]; onOpen
   ];
 
   return (
-    <div className="px-4 sm:px-6 py-6 max-w-6xl w-full mx-auto space-y-5">
+    <div className="rugged px-4 sm:px-6 py-6 max-w-6xl w-full mx-auto space-y-5">
       <div>
         <p className="eyebrow">All jobs</p>
         <h1 className="font-display text-[34px] font-extrabold uppercase leading-none tracking-[0.01em]">Money</h1>
@@ -104,7 +104,7 @@ export function MoneyOverview({ rows, onOpenJob }: { rows: JobMoneyRow[]; onOpen
               </ul>
             </>
           ) : (
-            <p className="text-[13px] text-muted">Every sent invoice is paid. Nice.</p>
+            <p className="text-[13px] text-muted">All paid up.</p>
           )}
         </section>
       </div>
@@ -117,7 +117,7 @@ export function MoneyOverview({ rows, onOpenJob }: { rows: JobMoneyRow[]; onOpen
         {m.attention.length ? (
           <ul className="space-y-1.5">
             {m.attention.map((a) => (
-              <li key={`${a.kind}-${a.id}`} className={`card !rounded-[3px] px-3 py-2.5 flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-2 ${a.kind === "overdue" ? "border-l-[3px] !border-l-red" : ""}`}>
+              <li key={`${a.kind}-${a.id}`} className={`card !rounded-[3px] px-3 py-2.5 flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-2 ${a.kind === "overdue" ? "overdue-edge" : ""}`}>
                 <span className={`dot ${ATTN_DOT[a.kind]} shrink-0`} />
                 <span className="min-w-0 flex-1">
                   <span className="block text-[14px] truncate">{a.jobName}<span className="text-muted"> · {a.clientName ?? "No client"}</span></span>
@@ -129,7 +129,7 @@ export function MoneyOverview({ rows, onOpenJob }: { rows: JobMoneyRow[]; onOpen
             ))}
           </ul>
         ) : (
-          <p className="card !rounded-[3px] px-3 py-4 text-[13px] text-muted">Nothing late, nothing waiting. Quotes and invoices that need a nudge show up here.</p>
+          <p className="card !rounded-[3px] px-3 py-4 text-[13px] text-muted">Nothing late. Nothing waiting.</p>
         )}
       </section>
 

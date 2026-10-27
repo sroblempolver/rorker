@@ -51,7 +51,7 @@ export function ChangeOrderList({ changeOrders, contract, onOpen, onNew }: {
       {changeOrders.length === 0 ? (
         <div className="card border-dashed p-4 text-[14px] text-muted space-y-1">
           <p className="text-text">No change orders yet.</p>
-          <p>When the client asks for more, or you find something on site, write it up here. The client approves it before you do the work.</p>
+          <p>Extra work, or a surprise behind the wall? Write it up. The client signs before you start.</p>
         </div>
       ) : (
         <ul className="space-y-1.5">

@@ -103,7 +103,7 @@ function DraftForm({ invoice, total, onChange, onSend }: { invoice: Invoice; tot
         </div>
         <div className="col-span-2">
           <label className="label" htmlFor="inv-notes">Notes for the client</label>
-          <textarea id="inv-notes" className="input !h-20 py-2 resize-none" placeholder="Thanks for your business!" value={invoice.notes ?? ""}
+          <textarea id="inv-notes" className="input !h-20 py-2 resize-none" placeholder="Checks payable to your company, or pay online" value={invoice.notes ?? ""}
             onChange={(e) => set({ notes: e.target.value || null })} />
         </div>
       </div>
@@ -167,7 +167,7 @@ function Summary({ invoice, payments, onVoid, onRecordPayment, onRemind }: {
           <button className="btn" onClick={onRecordPayment}>Record a payment</button>
         </div>
       )}
-      {open && <p className="text-[12.5px] text-muted -mt-2">Got cash or a check? Record it so the balance stays right.</p>}
+      {open && <p className="text-[12.5px] text-muted -mt-2">Got cash or a check? Log it.</p>}
 
       {open && (confirming ? (
         <div className="card !rounded-[3px] !border-red/50 p-3 space-y-2">

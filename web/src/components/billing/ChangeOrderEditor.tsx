@@ -111,7 +111,7 @@ export function ChangeOrderEditor({ co, plan, onChange, onSend, onBack, onDelete
                   onClick={() => { setOtherReason(!otherReason); set({ reason: null }); }}>Other</button>
               </div>
               {otherReason && (
-                <input className="input mt-2 !h-9 !text-[14px]" autoFocus placeholder="Say why in a few words" value={co.reason ?? ""}
+                <input className="input mt-2 !h-9 !text-[14px]" autoFocus placeholder="Why, in a few words" value={co.reason ?? ""}
                   onChange={(e) => set({ reason: e.target.value || null })} />
               )}
             </div>
@@ -132,7 +132,7 @@ export function ChangeOrderEditor({ co, plan, onChange, onSend, onBack, onDelete
               {g.lines.map((l) => open === l.id && !locked ? (
                 <div key={l.id} className="card !rounded-[3px] p-3 space-y-2.5 !border-accent/50">
                   <div className="flex gap-2">
-                    <textarea className="input !text-[14px]" rows={2} autoFocus placeholder="What you will do" value={l.description} onChange={(e) => setLine(l.id, { description: e.target.value })} />
+                    <textarea className="input !text-[14px]" rows={2} autoFocus placeholder="The work" value={l.description} onChange={(e) => setLine(l.id, { description: e.target.value })} />
                     <button className="w-8 h-8 shrink-0 rounded-[2px] text-muted hover:bg-panel-3 hover:text-red" title="Remove line"
                       onClick={() => setLines(co.lines.filter((x) => x.id !== l.id))}>×</button>
                   </div>
@@ -146,7 +146,7 @@ export function ChangeOrderEditor({ co, plan, onChange, onSend, onBack, onDelete
                     </div>
                     <div><span className="label !mb-1 !text-[12px]">Unit price</span><Num prefix="$" value={l.unit_price / 100} onChange={(n) => setLine(l.id, { unit_price: Math.round(n * 100) })} /></div>
                   </div>
-                  <p className="text-[12px] text-muted">Use a minus price for a credit, like work you no longer do.</p>
+                  <p className="text-[12px] text-muted">Use a minus price for a credit, like work you dropped.</p>
                   <div>
                     <span className="label !mb-1 !text-[12px]">Room</span>
                     <select className="input !h-9 !text-[14px]" value={l.room_id ?? ""} onChange={(e) => pickRoom(l, e.target.value)}>

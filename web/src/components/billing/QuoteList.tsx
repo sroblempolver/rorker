@@ -39,7 +39,7 @@ export function QuoteList({ quotes, onOpen, onNew, onDraft }: { quotes: Quote[];
       {quotes.length === 0 ? (
         <div className="card border-dashed p-4 text-[14px] text-muted space-y-1">
           <p className="text-text">No quotes yet.</p>
-          <p>Start one from scratch, or let the assistant draft it from the rooms in the plan. You can edit everything before it goes out.</p>
+          <p>Build one by hand, or draft it from the plan room by room. Check the prices before it goes out.</p>
         </div>
       ) : (
         <ul className="space-y-1.5">

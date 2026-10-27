@@ -42,8 +42,8 @@ export function PaymentsPanel({ billing, onOpenInvoice, onConnect, connected }: 
       ) : (
         <div className="card !rounded-[3px] border-l-[3px] !border-l-accent p-3 space-y-2.5">
           <div>
-            <p className="text-[14.5px] font-semibold">Get paid online</p>
-            <p className="text-[13px] text-muted">Connect your payout account so clients can pay by card or bank. Money goes straight to your bank.</p>
+            <p className="text-[14.5px] font-semibold">Get paid by card and bank</p>
+            <p className="text-[13px] text-muted">Hook up your bank once. Clients pay by card or bank and the money lands in 2 business days.</p>
           </div>
           <button className="btn btn-primary btn-sm" onClick={onConnect}>Connect payouts</button>
         </div>
@@ -85,7 +85,7 @@ export function PaymentsPanel({ billing, onOpenInvoice, onConnect, connected }: 
           })}
         </ul>
       ) : (
-        <p className="text-[13px] text-muted">No payments yet. When a client pays an invoice, or you record a check, it shows here.</p>
+        <p className="text-[13px] text-muted">No payments yet. Card, bank and checks you log show up here.</p>
       )}
     </div>
   );
