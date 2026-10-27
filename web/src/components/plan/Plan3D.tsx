@@ -195,7 +195,10 @@ function buildScene(p: Props, mt: Materials): Built {
   // the outside worked out from the house rules: roofs, porches, the lot. Drawn in the whole building.
   const ex = planExterior(p.plan);
   const outside = p.mode === "building";
-  const dressed = outside && p.wallMode === "full";
+  // the outside finish stays on when you step into a floor, so zooming in never changes the house's look
+  const skin = !prog && !p.room;
+  const finish = outside || skin;
+  const dressed = skin && p.wallMode === "full";
   const pick = (o: THREE.Object3D, data: Pick) => { o.userData.pick = data; picks.push(o); byId.set(data.id, o); };
 
   const roomBox = p.room ? p.room.polygon.reduce((a, q) => [Math.min(a[0], q[0] - 300), Math.min(a[1], q[1] - 300), Math.max(a[2], q[0] + 300), Math.max(a[3], q[1] + 300)], [Infinity, Infinity, -Infinity, -Infinity]) : [0, 0, 0, 0];
@@ -225,20 +228,21 @@ function buildScene(p: Props, mt: Materials): Built {
         const lb = lf.elevation_mm || li * (p.plan.building.exterior.storey_height_mm || 3000);
         const lh = Math.max(200, base - lb);
         const rings = lf.footprint.length ? lf.footprint : [[[lf.bounds[0], lf.bounds[1]], [lf.bounds[2], lf.bounds[1]], [lf.bounds[2], lf.bounds[3]], [lf.bounds[0], lf.bounds[3]]] as Pt[]];
-        for (const ring of rings) {
-          const block = new THREE.Mesh(extrude(ring, lb - base, lb - base + lh - 20), wallMaterial(li % 2 ? "#3b3a36" : "#45433e"));
+        for (const ring of skin ? ex.rings[li] ?? rings : rings) {
+          const block = new THREE.Mesh(extrude(ring, lb - base, lb - base + lh - 20), skin ? sidingMaterial(FINISH.siding, lb) : wallMaterial(li % 2 ? "#3b3a36" : "#45433e"));
           block.receiveShadow = true;
           g.add(block);
+          if (skin) g.add(new THREE.Mesh(extrude(ring, lb - base - (li ? 200 : ex.rules.plinth), lb - base), wallMaterial(li ? FINISH.trim : FINISH.foundation)));
         }
       });
     }
     // slab under the floor, so stacked floors read as storeys
-    if (p.mode === "building" || fi > 0) {
+    if (finish || fi > 0) {
       // outside, the ground floor stands on its foundation and the floors above show a band board
-      const rings = outside ? ex.rings[fi] ?? [] : fl.footprint.length ? fl.footprint : [[[fl.bounds[0], fl.bounds[1]], [fl.bounds[2], fl.bounds[1]], [fl.bounds[2], fl.bounds[3]], [fl.bounds[0], fl.bounds[3]]] as Pt[]];
+      const rings = finish ? ex.rings[fi] ?? [] : fl.footprint.length ? fl.footprint : [[[fl.bounds[0], fl.bounds[1]], [fl.bounds[2], fl.bounds[1]], [fl.bounds[2], fl.bounds[3]], [fl.bounds[0], fl.bounds[3]]] as Pt[]];
       for (const ring of rings) {
-        const m = wallMaterial(outside ? (fi === 0 ? FINISH.foundation : FINISH.trim) : "#8e877a");
-        const slab = new THREE.Mesh(extrude(ring, outside && fi === 0 ? -ex.rules.plinth : -200, 0), m);
+        const m = wallMaterial(finish ? (fi === 0 ? FINISH.foundation : FINISH.trim) : "#8e877a");
+        const slab = new THREE.Mesh(extrude(ring, finish && fi === 0 ? -ex.rules.plinth : -200, 0), m);
         slab.receiveShadow = true;
         g.add(slab);
         const b = floorBBox(fl);
@@ -272,8 +276,8 @@ function buildScene(p: Props, mt: Materials): Built {
       // a wall with no room on either side is a porch post, a balcony baluster or the porch's edge
       const role = ex.walls.get(w.id);
       if (role && role.height <= 0) continue;
-      const color = statusTint(w.id, role?.kind === "column" ? FINISH.trim : role?.kind === "post" ? FINISH.rail : w.exterior && outside ? FINISH.siding : "#efe8da");
-      const m = w.exterior && outside && !role && !prog ? sidingMaterial(color) : wallMaterial(color);
+      const color = statusTint(w.id, role?.kind === "column" ? FINISH.trim : role?.kind === "post" ? FINISH.rail : w.exterior && finish ? FINISH.siding : "#efe8da");
+      const m = w.exterior && finish && !role && !prog ? sidingMaterial(color) : wallMaterial(color);
       const mesh = new THREE.Mesh(extrude(w.polygon, 0, role ? Math.min(role.height, wallH) : wallH), m);
       mesh.castShadow = mesh.receiveShadow = true;
       g.add(mesh);
@@ -287,9 +291,9 @@ function buildScene(p: Props, mt: Materials): Built {
       // the open front of a porch: posts either side, nothing across
       if (ex.gaps.has(o.id)) continue;
       const og = new THREE.Group();
-      const face = o.exterior && outside && !prog;
+      const face = o.exterior && finish && !prog;
       const [bot, top] = openingSpan(o, fl);
-      const m = face ? sidingMaterial(FINISH.siding, top) : wallMaterial(statusTint(o.id, o.exterior && outside ? FINISH.siding : "#efe8da"));
+      const m = face ? sidingMaterial(FINISH.siding, top) : wallMaterial(statusTint(o.id, o.exterior && finish ? FINISH.siding : "#efe8da"));
       if (top < wallH) { const h = new THREE.Mesh(extrude(o.polygon, top, wallH), m); h.castShadow = true; og.add(h); }
       const sm = face ? sidingMaterial(FINISH.siding, 0) : m;
       if (bot > 0) og.add(new THREE.Mesh(extrude(o.polygon, 0, Math.min(bot, wallH)), sm));
@@ -310,7 +314,8 @@ function buildScene(p: Props, mt: Materials): Built {
         const dx = o.b[0] - o.a[0], dy = o.b[1] - o.a[1], L = Math.hypot(dx, dy) || 1;
         const nx = -dy / L, ny = dx / L, t = 20;
         const leaf: Pt[] = [[o.a[0] + nx * t, o.a[1] + ny * t], [o.b[0] + nx * t, o.b[1] + ny * t], [o.b[0] - nx * t, o.b[1] - ny * t], [o.a[0] - nx * t, o.a[1] - ny * t]];
-        if (p.mode === "building" || o.kind === "garage_door") og.add(new THREE.Mesh(extrude(leaf, 0, Math.min(top, wallH)), dm));
+        // inside a floor the doors between rooms stay open; the outside doors are drawn shut
+        if (p.mode === "building" || o.kind === "garage_door" || face) og.add(new THREE.Mesh(extrude(leaf, 0, Math.min(top, wallH)), dm));
         fades.push({ mats: [dm], centre: new THREE.Vector3(((o.a[0] + o.b[0]) / 2) * S, (base + 1000) * S, ((o.a[1] + o.b[1]) / 2) * S), floorIndex: fi, role: "wall" });
       }
       g.add(og);
@@ -412,23 +417,25 @@ function buildScene(p: Props, mt: Materials): Built {
   }
 
   // the outside, built to the house rules: roofs with eaves and gutters, porches and balconies, the lot
-  if (outside && floorsAll.length) {
+  // a floor on its own keeps the lot and the porches up to its level, so the house looks the same zoomed in
+  const top = p.mode === "floor" && p.floor ? floorsAll.indexOf(p.floor) : floorsAll.length - 1;
+  if (finish && floorsAll.length) {
     root.add(buildSite(ex, floorsAll[0]));
     for (const z of ex.zones) {
       const fi = floorsAll.findIndex((f) => f.id === z.floorId);
-      if (fi < 0) continue;
+      if (fi < 0 || fi > top) continue;
       const zg = new THREE.Group();
       zg.position.y = ex.base(fi) * S;
       root.add(zg);
       const c = new THREE.Vector3(((z.rect[0] + z.rect[2]) / 2) * S, ex.base(fi) * S, ((z.rect[1] + z.rect[3]) / 2) * S);
-      buildZone(z, ex, dressed, (o, mats, role) => { zg.add(o); if (mats.length) fades.push({ mats, centre: c, floorIndex: fi, role }); });
+      buildZone(z, ex, outside && dressed, (o, mats, role) => { zg.add(o); if (mats.length) fades.push({ mats, centre: c, floorIndex: fi, role }); });
     }
-    if (dressed) {
-      const top = floorsAll[floorsAll.length - 1];
+    if (outside && dressed) {
+      const last = floorsAll[floorsAll.length - 1];
       buildRoofs(ex, (o, mats, centre, floorIndex, main) => {
         root.add(o);
         fades.push({ mats, centre, floorIndex, role: "roof" });
-        o.traverse((x) => { if ((x as THREE.Mesh).isMesh) pick(x, { type: "roof", id: x === main ? "roof" : `roof-${x.id}`, floorId: top.id }); });
+        o.traverse((x) => { if ((x as THREE.Mesh).isMesh) pick(x, { type: "roof", id: x === main ? "roof" : `roof-${x.id}`, floorId: last.id }); });
       });
     }
   }
@@ -443,7 +450,7 @@ function buildScene(p: Props, mt: Materials): Built {
   roomTint.forEach((m) => { const holder = new THREE.Object3D(); holder.userData.ownMaterials = m; root.add(holder); });
   const pinLabels: THREE.Sprite[] = [];
   root.traverse((o) => { if (o.userData.pinLabel) pinLabels.push(o as THREE.Sprite); });
-  return { root, picks, byId, fades, floors: floorsMeta, centre, radius, pinLabels, groundY: outside ? -(ex.rules.plinth + 5) * S : -0.21 };
+  return { root, picks, byId, fades, floors: floorsMeta, centre, radius, pinLabels, groundY: finish ? -(ex.rules.plinth + 5) * S : -0.21 };
 }
 
 function pinPosition(plan: Plan, fl: Floor, sides: Map<string, WallSide>, pin: Pin): { x: number; y: number; z: number; side?: WallSide } | null {
