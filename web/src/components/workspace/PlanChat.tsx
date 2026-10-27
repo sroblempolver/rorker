@@ -54,25 +54,21 @@ export function PlanChat({ send, context, rooms, onChanged }: { send: AssistantS
   useEffect(() => { if (typing) input.current?.focus(); }, [typing]);
   useEffect(() => () => { ctl.current?.abort(); stopSpeaking(); }, []);
 
-  const tapMic = () => {
-    if (!voice) return setTyping(true);
-    if (dict.listening) return dict.stop();
-    dict.start();
-  };
+  const press = voice ? dict.hold() : { onClick: () => setTyping(true) };
   const shown = turns.slice(-6);
 
   return (
     <section className="card p-3 space-y-2.5 border-l-[3px] border-l-accent" aria-label="Change the plan">
       <div className="flex items-center gap-3">
-        <button onClick={tapMic} aria-pressed={dict.listening} disabled={busy}
-          aria-label={!voice ? "Type what to change" : dict.listening ? "Stop listening" : "Talk to change the plan"}
-          title={!voice ? "Type what to change" : dict.listening ? "Listening… tap to stop" : "Tap and talk"}
+        <button {...press} aria-pressed={dict.listening} disabled={busy}
+          aria-label={!voice ? "Type what to change" : "Hold to talk and change the plan"}
+          title={!voice ? "Type what to change" : dict.listening ? "Listening… let go when you're done" : "Hold and talk, let go to send"}
           className={`shrink-0 w-12 h-12 rounded-full grid place-items-center shadow-lg transition-colors disabled:opacity-60 ${dict.listening ? "bg-red text-white animate-pulse" : "bg-accent text-accent-ink hover:brightness-110"}`}>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3" fill={dict.listening ? "currentColor" : "none"} /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
         </button>
         <div className="min-w-0 flex-1">
           <p className="eyebrow">Change the plan</p>
-          <p className="text-[12.5px] text-muted leading-snug">Talk or type, and the plan changes.</p>
+          <p className="text-[12.5px] text-muted leading-snug">Hold the mic and talk, or type, and the plan changes.</p>
         </div>
         <button onClick={() => setTyping(!typing)} aria-pressed={typing} aria-label="Type instead" title="Type instead"
           className={`shrink-0 w-9 h-9 rounded-full grid place-items-center border ${typing ? "bg-panel-3 border-accent text-accent" : "bg-panel-2 border-line text-text hover:border-accent"}`}>
