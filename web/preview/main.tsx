@@ -49,8 +49,10 @@ function seed(): WorkspaceData {
   }));
   const pins = samplePins(plan, members).filter((p) => p.kind !== "material").map((p, i) => ({
     id: `p${i + 1}`, job_id: jobId, number: i + 1, element_id: null, floor_id: null, x: null, y: null, kind: "task", title: "", body: null,
-    status: "open", priority: 1, due_date: null, tagged: [], close_requirement: "confirm", stage_id: null, links: [], created_by: null,
+    status: "open", priority: 1, due_date: null, tagged: [], close_requirement: "confirm", links: [], created_by: null,
     created_at: now(), closed_at: null, comment_count: 0, ...p,
+    // spread over a few stages so the Stages tab has layers to show; the rest are on the whole house
+    stage_id: ["s2", "s3", "s6", null][i % 4],
   })) as Pin[];
   // the viewer (the owner) is on the issue too, so "Tagged to me" has something in it
   const issue = pins.find((p) => p.kind === "issue");
@@ -63,7 +65,7 @@ function seed(): WorkspaceData {
       pin_id = `pm${i}`;
       pins.push({ id: pin_id, job_id: jobId, number: pins.length + 1, element_id: m.element_id, floor_id: m.floor_id, x: null, y: null, kind: "material", title: `Buy ${qtyText(m.qty, m.unit)} ${m.name}`,
         body: null, status: PIN_STATUS[m.status], priority: 1, due_date: m.needed_by, tagged: [...new Set([m.buyer, m.installer].filter(Boolean) as string[])], close_requirement: "confirm",
-        stage_id: null, links: [], created_by: null, created_at: now(), closed_at: null, comment_count: 0 });
+        stage_id: m.stage_id, links: [], created_by: null, created_at: now(), closed_at: null, comment_count: 0 });
     }
     return { ...m, id: `ml${i}`, pin_id, receipts: [], created_at: now() };
   });
