@@ -118,6 +118,9 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
       const p = d.plan!;
       const data = structuredClone(p.data);
       data.questions.forEach((q) => { if (answers[q.id]) q.answer = answers[q.id]; });
+      // the roof answer changes the 3D straight away, as the plan reader's rules would
+      const roof = data.questions.find((q) => q.element_ids.includes("roof") && q.answer)?.answer?.toLowerCase().match(/hip|gable|flat/)?.[0];
+      if (roof) data.building.exterior.roof = roof;
       d.plan = { ...p, data };
     },
     async refreshPlan() { return { runs: d.runs, plan: d.plan }; },
