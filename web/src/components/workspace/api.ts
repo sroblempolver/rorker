@@ -1,6 +1,9 @@
 // What the job workspace needs from the outside world. The app wires it to server actions; the
 // standalone preview wires it to memory, so the same screens run in both.
 import type { AssistantSend } from "@/components/assistant/Assistant";
+import type { ClientStart } from "@/components/billing/MoneyPanel";
+import type { Billing, Brand } from "@/lib/billing/types";
+import type { MaterialLine, MaterialsApi, MaterialsJob } from "@/lib/materials/types";
 import type { ElementEdit, ElementState, ItemInput, Job, JobItem, JobStage, Member, Pin, PinComment, PinInput, PinStatus, PlanRow, PlanRun, ShareLink, ShareLinkInput, StageStatus } from "@/lib/data/types";
 
 export interface WorkspaceData {
@@ -20,6 +23,16 @@ export interface WorkspaceData {
   can3d?: boolean;
   /** admins can send no-sign-in links to the job */
   canShare?: boolean;
+  /** quotes, invoices and payments for this job; left out, the Money tab is hidden */
+  billing?: Billing;
+  /** how the company looks on documents the client gets */
+  brand?: Brand;
+  /** the company's payout account is connected, so clients can pay online */
+  payoutsConnected?: boolean;
+  /** open on the Money tab (coming back from the client's page) */
+  startOnMoney?: boolean;
+  /** the materials list: lines on every job this person can see, and those jobs (to split an add) */
+  materials?: { lines: MaterialLine[]; jobs: MaterialsJob[] };
 }
 
 export interface WorkspaceApi {
@@ -55,4 +68,15 @@ export interface WorkspaceApi {
   ask?: AssistantSend;
   /** the assistant changed something: fetch the job again (a new `data` prop follows) */
   afterAssistant?: () => void;
+  /** money for the job: every change to quotes, invoices or payments goes out through save */
+  money?: {
+    save(b: Billing): void;
+    /** show what the client sees on their link */
+    openClient?(start: ClientStart): void;
+    connectPayouts(): Promise<void>;
+  };
+  /** the materials list; left out, the Buy tab is hidden */
+  materials?: MaterialsApi;
+  /** open the shopping run across every job */
+  openShopping?: () => void;
 }

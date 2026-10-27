@@ -1,5 +1,6 @@
 // Front elevations of the things that stand against a wall: what you would see facing that wall.
 // Shapes are generic per kind and drawn to the fixture's real width; heights are typical values.
+import { bottomOf, CATALOG, drawnAs, partsOf, topOf, typicalHeight, type Part } from "@/lib/plan/catalog";
 import type { Fixture } from "@/lib/plan/types";
 
 const INK = "#1b1a17";
@@ -8,32 +9,16 @@ const TIMBER = "#a07850";
 const STEEL = "#b9bec4";
 const FABRIC = "#6f7486";
 
-/** Typical top height in mm, used for the label and hit box. */
-export function fixtureHeight(kind: string): number {
-  const h: Record<string, number> = {
-    toilet: 800, washbasin: 900, vanity: 900, bathtub: 580, shower: 2050, base_cabinet: 900, kitchen_sink: 900, cooktop: 900,
-    range: 900, dishwasher: 900, oven: 900, island: 900, wall_cabinet: 700, range_hood: 600, filler: 900, tall_cabinet: 2200, fridge: 1850, wardrobe: 2200,
-    bookshelf: 2000, washing_machine: 850, dryer: 850, water_heater: 1500, bed: 1050, sofa: 850, armchair: 850, chair: 900,
-    desk: 750, table: 750, dining_table: 750, nightstand: 550, lamp: 1600, plant: 1200, tv: 1700, fireplace: 1150,
-    towel_radiator: 1500, other: 850,
-  };
-  return h[kind] ?? 850;
-}
+/** Typical height in mm, from the catalogue of real objects. */
+export const fixtureHeight = typicalHeight;
 
-/** Kinds that are linework of something else: never drawn as objects. */
 /** Top-view fill per kind: the object's real colour, so the plan reads like a model from above. */
-export const TOP_FILL: Record<string, string> = {
-  base_cabinet: "#5b5750", kitchen_sink: "#5b5750", dishwasher: "#5b5750", filler: "#5b5750", range: "#232426", fridge: "#b9bec4", oven: "#232426", cooktop: "#232426",
-  island: "#5b5750", tall_cabinet: "#d9d2c4", toilet: "#f4efe6", washbasin: "#f4efe6", bathtub: "#f4efe6", shower: "#cfe6ee", vanity: "#a07850",
-  washing_machine: "#f4efe6", dryer: "#f4efe6", water_heater: "#e6e1d6", bed: "#e9e3d6", nightstand: "#8a6a48", wardrobe: "#8a6a48", sofa: "#6f7486",
-  armchair: "#6f7486", chair: "#a07850", dining_table: "#a07850", table: "#a07850", desk: "#a07850", bookshelf: "#8a6a48", sideboard: "#8a6a48",
-  tv: "#151618", lamp: "#f3c56b", plant: "#3f7a4a", car: "#55606b", fireplace: "#8d8a83",
-};
+export const TOP_FILL: Record<string, string> = { filler: "#5b5750", ...Object.fromEntries(Object.entries(CATALOG).map(([k, s]) => [k, s.fill])) };
 
 export const HIDDEN_KINDS = new Set(["door_leaf", "part"]);
 
-export const fixtureBottom = (f: Fixture) => f.elevation_mm || (f.kind === "wall_cabinet" ? 1450 : f.kind === "range_hood" ? 1600 : 0);
-export const fixtureTop = (f: Fixture) => fixtureBottom(f) + (f.height_mm ?? fixtureHeight(f.kind));
+export const fixtureBottom = (f: Fixture) => bottomOf(f);
+export const fixtureTop = (f: Fixture) => topOf(f);
 /** Mounted up on the wall (wall cabinets, hoods): dashed in the top view, under-counter clear. */
 export const isWallMounted = (f: Fixture) => fixtureBottom(f) >= 1000;
 
@@ -127,15 +112,123 @@ function Cabinet({ f, x0, x1, lw, tint }: { f: Fixture; x0: number; x1: number; 
 
 const CABINET_KINDS = new Set(["base_cabinet", "wall_cabinet", "kitchen_sink", "dishwasher", "range", "fridge", "range_hood", "filler"]);
 
-export function FixtureElevation({ f, x0, x1, lw, tint }: { f: Fixture; x0: number; x1: number; lw: number; tint?: string | null }) {
+/** Drawn at their own fixed height on the wall, not lifted. */
+const ABSOLUTE = new Set(["wall_cabinet", "range_hood"]);
+
+type ElevProps = { f: Fixture; x0: number; x1: number; lw: number; tint?: string | null };
+
+export function FixtureElevation(p: ElevProps) {
+  const { f } = p;
+  if (HIDDEN_KINDS.has(f.kind)) return null;
+  if (CABINET_KINDS.has(f.kind) && (f.height_mm || f.front)) return <Cabinet {...p} />;
+  // things on a desk or a wall are drawn from their own bottom, then lifted to where they are
+  const lift = ABSOLUTE.has(f.kind) ? 0 : fixtureBottom(f);
+  const h = f.height_mm ?? fixtureHeight(f.kind);
+  const own = f.parts?.length ? f.parts : partsOf(f.kind, Math.max(p.x1 - p.x0, 50), CATALOG[f.kind]?.d ?? 500, h);
+  const shape = own ? <Parts {...p} parts={own} /> : <Shape {...p} f={drawnAs(f.kind) === f.kind ? f : { ...f, kind: drawnAs(f.kind) }} />;
+  return lift ? <g transform={`translate(0 ${-lift})`}>{shape}</g> : shape;
+}
+
+/** Something built from parts, seen from the front: each part's front face. */
+function Parts({ x0, x1, lw, tint, parts: all }: ElevProps & { parts: Part[] }) {
+  const cx = (x0 + x1) / 2;
+  const parts = [...all].sort((a, b) => a.z - a.d / 2 - (b.z - b.d / 2)); // back first
+  return (
+    <g stroke={INK} strokeWidth={1.2 * lw} strokeLinejoin="round">
+      {parts.map((q, i) => q.shape === "box"
+        ? <rect key={i} x={cx + q.x - q.w / 2} y={-q.y - q.h} width={q.w} height={q.h} fill={tint ?? q.color ?? BODY} />
+        : <ellipse key={i} cx={cx + q.x} cy={-q.y - q.h / 2} rx={q.w / 2} ry={q.h / 2} fill={tint ?? q.color ?? BODY} />)}
+    </g>
+  );
+}
+
+function Shape({ f, x0, x1, lw, tint }: ElevProps) {
   const w = Math.max(x1 - x0, 200);
   const cx = x0 + w / 2;
   const s = 1.2 * lw;
   const body = tint ?? BODY;
   const line = { stroke: INK, strokeWidth: s, strokeLinejoin: "round" as const };
-  if (HIDDEN_KINDS.has(f.kind)) return null;
-  if (CABINET_KINDS.has(f.kind) && (f.height_mm || f.front)) return <Cabinet f={f} x0={x0} x1={x1} lw={lw} tint={tint} />;
+  const h = f.height_mm ?? fixtureHeight(f.kind);
+  const dark = tint ?? "#232426";
   switch (f.kind) {
+    case "computer": {
+      const mw = Math.min(w * 0.7, 620), mh = Math.min(h, 460) * 0.78;
+      return (
+        <g {...line}>
+          <rect x={cx - 25 - mw * 0.1} y={-mh * 0.32} width={50} height={mh * 0.32} fill={STEEL} />
+          <rect x={cx - mw / 2 - mw * 0.1} y={-h} width={mw} height={mh * 0.75} rx={12} fill={dark} />
+          <rect x={cx - mw / 2 - mw * 0.1 + 18} y={-h + 18} width={mw - 36} height={mh * 0.75 - 36} fill="#3a6ea5" fillOpacity={0.55} />
+          <rect x={cx - mw * 0.45} y={-22} width={mw * 0.7} height={22} rx={6} fill="#3b3c40" />
+          <rect x={x1 - Math.min(200, w * 0.22)} y={-h * 0.95} width={Math.min(190, w * 0.2)} height={h * 0.95} rx={8} fill={dark} />
+          <circle cx={x1 - Math.min(200, w * 0.22) + Math.min(95, w * 0.1)} cy={-h * 0.85} r={10} fill="#55b2ff" />
+        </g>
+      );
+    }
+    case "monitor": case "tv": {
+      const screenH = f.kind === "tv" ? Math.min(h, w * 0.58) : h * 0.72;
+      const stand = f.kind === "monitor" || fixtureBottom(f) < 1000;
+      return (
+        <g {...line}>
+          {stand && <><rect x={cx - 25} y={-(h - screenH)} width={50} height={h - screenH} fill={STEEL} /><rect x={cx - w * 0.18} y={-14} width={w * 0.36} height={14} rx={6} fill={STEEL} /></>}
+          <rect x={x0} y={-h} width={w} height={screenH} rx={10} fill={dark} />
+          <rect x={x0 + 14} y={-h + 14} width={w - 28} height={screenH - 40} fill="#3a6ea5" fillOpacity={0.4} />
+        </g>
+      );
+    }
+    case "laptop":
+      return <g {...line}><rect x={x0} y={-h} width={w} height={h - 20} rx={8} fill="#9da3aa" /><rect x={x0 + 14} y={-h + 14} width={w - 28} height={h - 54} fill="#3a6ea5" fillOpacity={0.5} /><rect x={x0 - 20} y={-20} width={w + 40} height={20} rx={6} fill="#9da3aa" /></g>;
+    case "printer":
+      return <g {...line}><rect x={x0} y={-h} width={w} height={h} rx={14} fill={tint ?? "#e6e1d6"} /><rect x={x0 + w * 0.15} y={-h * 0.55} width={w * 0.7} height={h * 0.12} fill="#3b3c40" /><rect x={x0 + w * 0.2} y={-h - 60} width={w * 0.6} height={60} fill="#fff" /></g>;
+    case "microwave":
+      return <g {...line}><rect x={x0} y={-h} width={w} height={h} rx={12} fill={tint ?? STEEL} /><rect x={x0 + 20} y={-h + 25} width={w * 0.68} height={h - 50} rx={8} fill="#1d1e21" /><rect x={x1 - w * 0.22} y={-h + 30} width={w * 0.16} height={h * 0.3} fill="#2a2b2e" /></g>;
+    case "coffee_machine":
+      return <g {...line}><rect x={x0} y={-h} width={w} height={h} rx={14} fill={dark} /><rect x={x0 + w * 0.2} y={-h * 0.62} width={w * 0.6} height={h * 0.38} fill="#111" /><rect x={cx - 40} y={-h * 0.3} width={80} height={h * 0.25} rx={10} fill="#f4efe6" /></g>;
+    case "kettle":
+      return <g {...line}><path d={`M${x0 + w * 0.1} 0H${x1 - w * 0.2}L${x1 - w * 0.3} ${-h}H${x0 + w * 0.2}Z`} fill={tint ?? STEEL} /><path d={`M${x1 - w * 0.25} ${-h * 0.85}Q${x1} ${-h * 0.6} ${x1 - w * 0.2} ${-h * 0.2}`} fill="none" strokeWidth={4 * s} /></g>;
+    case "toaster":
+      return <g {...line}><rect x={x0} y={-h} width={w} height={h} rx={40} fill={tint ?? STEEL} /><path d={`M${x0 + w * 0.3} ${-h}V${-h + 12}M${x1 - w * 0.3} ${-h}V${-h + 12}`} strokeWidth={4 * s} /></g>;
+    case "bar_stool":
+      return <g {...line}><ellipse cx={cx} cy={-h + 30} rx={w * 0.45} ry={30} fill={tint ?? TIMBER} /><path d={`M${cx - w * 0.3} 0L${cx - w * 0.2} ${-h + 40}M${cx + w * 0.3} 0L${cx + w * 0.2} ${-h + 40}M${cx - w * 0.27} ${-h * 0.35}H${cx + w * 0.27}`} stroke={INK} strokeWidth={30} /></g>;
+    case "office_chair":
+      return (
+        <g {...line}>
+          <rect x={cx - w * 0.32} y={-h} width={w * 0.64} height={h * 0.45} rx={60} fill={dark} />
+          <rect x={cx - w * 0.4} y={-h * 0.5} width={w * 0.8} height={90} rx={40} fill={dark} />
+          <path d={`M${cx} ${-h * 0.42}V-80M${x0 + 40} -40L${cx} -80L${x1 - 40} -40`} stroke={INK} strokeWidth={30} fill="none" />
+          <circle cx={x0 + 40} cy={-25} r={25} fill={INK} /><circle cx={x1 - 40} cy={-25} r={25} fill={INK} />
+        </g>
+      );
+    case "mirror":
+      return <g {...line}><rect x={x0} y={-h} width={w} height={h} rx={20} fill="#8fd3f0" fillOpacity={0.45} /><path d={`M${x0 + w * 0.2} ${-h * 0.2}L${x0 + w * 0.5} ${-h * 0.8}`} stroke="#fff" strokeOpacity={0.6} /></g>;
+    case "picture":
+      return <g {...line}><rect x={x0} y={-h} width={w} height={h} fill={tint ?? "#c9a46a"} /><rect x={x0 + 40} y={-h + 40} width={w - 80} height={h - 80} fill="#5d7f9e" /><path d={`M${x0 + 40} -40L${cx} ${-h * 0.6}L${x1 - 40} -40Z`} fill="#3f7a4a" /></g>;
+    case "wall_shelf":
+      return <g {...line}><rect x={x0} y={-h} width={w} height={h} fill={tint ?? TIMBER} /><rect x={x0 + w * 0.1} y={-h - 220} width={w * 0.25} height={220} fill="#7d6a8a" /><rect x={x0 + w * 0.6} y={-h - 160} width={w * 0.12} height={160} fill="#3f7a4a" /></g>;
+    case "dresser": case "filing_cabinet": {
+      const n = f.kind === "dresser" ? 3 : Math.max(2, Math.round(h / 300));
+      return (
+        <g {...line}>
+          <rect x={x0} y={-h} width={w} height={h} fill={tint ?? (f.kind === "dresser" ? TIMBER : "#7d8187")} />
+          {Array.from({ length: n }, (_, i) => { const y = -h + 30 + ((h - 60) / n) * i; return <g key={i}><rect x={x0 + 25} y={y} width={w - 50} height={(h - 60) / n - 20} fill="none" strokeOpacity={0.7} /><path d={`M${cx - 70} ${y + 50}H${cx + 70}`} stroke="#6d6a63" strokeWidth={20} strokeLinecap="round" /></g>; })}
+        </g>
+      );
+    }
+    case "crib":
+      return <g {...line} fill="none"><rect x={x0} y={-h} width={w} height={h - 150} stroke={tint ?? "#d9d2c4"} strokeWidth={30} />{Array.from({ length: Math.max(3, Math.round(w / 90)) }, (_, i) => <path key={i} d={`M${x0 + (w / Math.max(3, Math.round(w / 90))) * i} ${-h}V-150`} stroke={tint ?? "#d9d2c4"} strokeWidth={16} />)}<path d={`M${x0} 0V-150M${x1} 0V-150`} stroke={INK} strokeWidth={30} /></g>;
+    case "coffee_table":
+      return <g {...line}><rect x={x0} y={-h} width={w} height={45} fill={tint ?? TIMBER} /><path d={`M${x0 + 50} ${-h + 45}V0M${x1 - 50} ${-h + 45}V0`} stroke={INK} strokeWidth={40} /></g>;
+    case "table_lamp":
+      return <g {...line}><path d={`M${cx - w * 0.3} 0H${cx + w * 0.3}M${cx} 0V${-h * 0.55}`} stroke={INK} strokeWidth={24} /><path d={`M${cx - w * 0.5} ${-h * 0.55}H${cx + w * 0.5}L${cx + w * 0.32} ${-h}H${cx - w * 0.32}Z`} fill="#f3c56b" /></g>;
+    case "piano":
+      return <g {...line}><rect x={x0} y={-h} width={w} height={h} fill={tint ?? "#151618"} /><rect x={x0 + 60} y={-h * 0.58} width={w - 120} height={70} fill="#fff" />{Array.from({ length: Math.round((w - 120) / 60) }, (_, i) => <path key={i} d={`M${x0 + 60 + i * 60} ${-h * 0.58}V${-h * 0.58 + 70}`} strokeWidth={lw} />)}</g>;
+    case "rug":
+      return <rect x={x0} y={-Math.max(h, 10)} width={w} height={Math.max(h, 10)} fill={tint ?? "#7a5a4a"} {...line} />;
+    case "treadmill":
+      return <g {...line}><rect x={x0} y={-180} width={w} height={180} rx={20} fill={dark} /><path d={`M${x0 + 60} -180V${-h}M${x1 - 60} -180V${-h}`} stroke={INK} strokeWidth={40} /><rect x={x0 + 20} y={-h - 40} width={w - 40} height={160} rx={20} fill={dark} /></g>;
+    case "ceiling_fan": case "pendant_light":
+      return f.kind === "ceiling_fan"
+        ? <g {...line}><path d={`M${cx} ${-h}V${-h * 0.4}`} stroke={INK} strokeWidth={30} /><rect x={x0} y={-h * 0.4} width={w} height={40} rx={20} fill={tint ?? "#d9d2c4"} /><ellipse cx={cx} cy={-h * 0.25} rx={120} ry={80} fill="#f3c56b" /></g>
+        : <g {...line}><path d={`M${cx} ${-h}V${-h * 0.5}`} stroke={INK} strokeWidth={14} /><path d={`M${cx - w / 2} 0Q${cx} ${-h * 0.75} ${cx + w / 2} 0Z`} fill="#f3c56b" /></g>;
     case "toilet": {
       const pw = Math.min(w, 420);
       return (
@@ -280,8 +373,6 @@ export function FixtureElevation({ f, x0, x1, lw, tint }: { f: Fixture; x0: numb
           <ellipse cx={cx} cy={-780} rx={Math.min(w, 700) / 2} ry={420} fill="#3f7a4a" />
         </g>
       );
-    case "tv":
-      return <rect x={x0} y={-1700} width={w} height={Math.min(w * 0.56, 800)} fill="#151618" {...line} />;
     case "fireplace":
       return (
         <g {...line}>

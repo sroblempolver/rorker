@@ -1,4 +1,5 @@
 // Mirror of agent/rorker_agent/schema.py. Millimetres, x right, y down, one frame for all floors.
+import type { Part } from "./catalog";
 export type Pt = [number, number];
 export type BBox = [number, number, number, number];
 
@@ -29,6 +30,12 @@ export interface Fixture {
   /** Real size and placement for the wall view and 3D; typical values for the kind when missing. */
   height_mm?: number | null; elevation_mm?: number; facing?: number | null; front?: string | null; spec?: string | null;
   product_name?: string | null; product_url?: string | null; notes?: string | null;
+  /** weight, kg; the catalogue's typical weight for the kind when missing */
+  weight_kg?: number | null;
+  /** built from simple shapes, for things that aren't in the catalogue (see lib/plan/catalog.ts) */
+  parts?: Part[] | null;
+  /** the object it sits on (a computer on its desk), and where that one stood when this was put on it */
+  on?: string | null; on_at?: Pt | null;
 }
 export interface Stair { id: string; polygon: Pt[]; room_id: string | null; outline: Pt[][] }
 export interface Floor {
@@ -38,10 +45,16 @@ export interface Floor {
 export interface Question {
   id: string; text: string; element_ids: string[]; options: string[]; default: string | null;
   kind: string; answer: string | null;
+  /** where on the building the question is about, for the blinking dot (mm; z above that floor) */
+  point?: { floor_id: string; x: number; y: number; z: number; outside: boolean } | null;
 }
 export interface Plan {
   schema_version: number; units: "mm";
-  building: { name: string; size_mm: [number, number]; exterior: { estimated: boolean; storey_height_mm: number; roof: string; notes: string | null } };
+  building: { name: string; size_mm: [number, number]; exterior: {
+    estimated: boolean; storey_height_mm: number; roof: string; notes: string | null;
+    /** set when the drawing or an answer says so; the house rules fill in the rest */
+    roof_pitch_deg?: number | null; eave_mm?: number | null; plinth_mm?: number | null;
+  } };
   floors: Floor[]; questions: Question[];
   flags: { code: string; message: string; element_ids: string[]; severity: string }[];
   source: { kind: string; filename: string; pipeline_version: string; model: string | null; ai_used: boolean };

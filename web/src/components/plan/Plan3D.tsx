@@ -12,12 +12,16 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { JobItem, Pin, PinInput } from "@/lib/data/types";
 import { floorBBox, frontView, labelPoint, pointInPoly, roomSides, sidePoint, unionBBox, type WallSide } from "@/lib/plan/geometry";
-import type { ElementStatus, Floor, Opening, Plan, Pt, Room } from "@/lib/plan/types";
+import type { ElementStatus, Floor, Plan, Pt, Room } from "@/lib/plan/types";
 import type { ColorMode } from "./FloorCanvas";
 import { hitTest } from "./FloorCanvas";
 import { HIDDEN_KINDS, TOP_FILL, isWallMounted } from "./fixtures";
 import { ITEM_SIZE } from "./items";
 import { fixtureObject, Materials, SHARED_GEOMETRY } from "./models3d";
+import { buildRoofs, buildSite, buildZone, garagePanels, openingTrim, sidingMaterial, trimMaterial, type Fade } from "./exterior3d";
+import { planExterior } from "@/lib/plan/exterior";
+import { FINISH, openingSpan } from "@/lib/plan/rules";
+import { getMarks, useMarks } from "@/lib/plan/marks";
 import { CHALK, GLASS, MATERIAL_BASE, PIN_COLOR, ROOM_MATERIAL, STATUS_COLOR, type Material } from "./style";
 import type { Controls, PinTarget, ScreenPoint } from "./target";
 
@@ -58,7 +62,6 @@ interface Props {
 }
 
 type Pick = { type: "fixture" | "wall" | "opening" | "room" | "stair" | "item" | "pin" | "roof"; id: string; floorId: string };
-type Fade = { mats: THREE.Material[]; centre: THREE.Vector3; floorIndex: number; role: "wall" | "roof" | "slab" | "thing" };
 
 // --------------------------------------------------------------------------- geometry helpers
 
@@ -100,9 +103,6 @@ function label(text: string, opts: { color?: string; bg?: string; size?: number 
   sp.renderOrder = 10;
   return sp;
 }
-
-const openTop = (o: Opening) => (o.kind === "garage_door" ? 2300 : o.kind === "opening" ? 2400 : 2100);
-const openBottom = (o: Opening) => (o.kind === "window" ? 900 : 0);
 
 // the 2D plan's floor patterns (boards, tiles, carpet), drawn once to a canvas and laid at true size
 const PATTERN: Record<Material, { w: number; h: number; draw: (g: CanvasRenderingContext2D, k: number) => void }> = {
@@ -173,6 +173,8 @@ interface Built {
   radius: number;
   /** pin labels, resized every frame: nearer pins read bigger, farther ones smaller */
   pinLabels: THREE.Sprite[];
+  /** where the grade is, metres: below the foundation in the whole building, under the slab otherwise */
+  groundY: number;
 }
 
 function wallMaterial(color: string) {
@@ -190,6 +192,10 @@ function buildScene(p: Props, mt: Materials): Built {
   const prog = p.colorMode === "progress";
   const statusTint = (id: string, fallback: string) => (prog ? (p.states.get(id) ? STATUS_COLOR[p.states.get(id)!] : "#5d5a53") : fallback);
   const floorsMeta: Built["floors"] = [];
+  // the outside worked out from the house rules: roofs, porches, the lot. Drawn in the whole building.
+  const ex = planExterior(p.plan);
+  const outside = p.mode === "building";
+  const dressed = outside && p.wallMode === "full";
   const pick = (o: THREE.Object3D, data: Pick) => { o.userData.pick = data; picks.push(o); byId.set(data.id, o); };
 
   const roomBox = p.room ? p.room.polygon.reduce((a, q) => [Math.min(a[0], q[0] - 300), Math.min(a[1], q[1] - 300), Math.max(a[2], q[0] + 300), Math.max(a[3], q[1] + 300)], [Infinity, Infinity, -Infinity, -Infinity]) : [0, 0, 0, 0];
@@ -228,21 +234,15 @@ function buildScene(p: Props, mt: Materials): Built {
     }
     // slab under the floor, so stacked floors read as storeys
     if (p.mode === "building" || fi > 0) {
-      for (const ring of fl.footprint.length ? fl.footprint : [[[fl.bounds[0], fl.bounds[1]], [fl.bounds[2], fl.bounds[1]], [fl.bounds[2], fl.bounds[3]], [fl.bounds[0], fl.bounds[3]]] as Pt[]]) {
-        const m = wallMaterial("#8e877a");
-        const slab = new THREE.Mesh(extrude(ring, -200, 0), m);
+      // outside, the ground floor stands on its foundation and the floors above show a band board
+      const rings = outside ? ex.rings[fi] ?? [] : fl.footprint.length ? fl.footprint : [[[fl.bounds[0], fl.bounds[1]], [fl.bounds[2], fl.bounds[1]], [fl.bounds[2], fl.bounds[3]], [fl.bounds[0], fl.bounds[3]]] as Pt[]];
+      for (const ring of rings) {
+        const m = wallMaterial(outside ? (fi === 0 ? FINISH.foundation : FINISH.trim) : "#8e877a");
+        const slab = new THREE.Mesh(extrude(ring, outside && fi === 0 ? -ex.rules.plinth : -200, 0), m);
         slab.receiveShadow = true;
         g.add(slab);
         const b = floorBBox(fl);
         fades.push({ mats: [m], centre: new THREE.Vector3(((b[0] + b[2]) / 2) * S, base * S, ((b[1] + b[3]) / 2) * S), floorIndex: fi, role: "slab" });
-        // a flat roof over this floor wherever the floor above doesn't cover it (a garage, a porch)
-        if (p.mode === "building" && fi < floorsAll.length - 1 && p.wallMode === "full") {
-          const rm = wallMaterial("#4a4844");
-          const roofSlab = new THREE.Mesh(extrude(ring, H, H + 160), rm);
-          roofSlab.castShadow = true;
-          g.add(roofSlab);
-          fades.push({ mats: [rm], centre: new THREE.Vector3(((b[0] + b[2]) / 2) * S, (base + H) * S, ((b[1] + b[3]) / 2) * S), floorIndex: fi, role: "roof" });
-        }
       }
     }
 
@@ -269,9 +269,12 @@ function buildScene(p: Props, mt: Materials): Built {
     // walls
     const near = (poly: Pt[]) => !p.room || poly.some((q) => q[0] >= roomBox[0] && q[0] <= roomBox[2] && q[1] >= roomBox[1] && q[1] <= roomBox[3]);
     for (const w of walls ? fl.walls.filter((x) => near(x.polygon)) : []) {
-      const color = statusTint(w.id, w.exterior && p.mode === "building" ? "#d6ccb9" : "#efe8da");
-      const m = wallMaterial(color);
-      const mesh = new THREE.Mesh(extrude(w.polygon, 0, wallH), m);
+      // a wall with no room on either side is a porch post, a balcony baluster or the porch's edge
+      const role = ex.walls.get(w.id);
+      if (role && role.height <= 0) continue;
+      const color = statusTint(w.id, role?.kind === "column" ? FINISH.trim : role?.kind === "post" ? FINISH.rail : w.exterior && outside ? FINISH.siding : "#efe8da");
+      const m = w.exterior && outside && !role && !prog ? sidingMaterial(color) : wallMaterial(color);
+      const mesh = new THREE.Mesh(extrude(w.polygon, 0, role ? Math.min(role.height, wallH) : wallH), m);
       mesh.castShadow = mesh.receiveShadow = true;
       g.add(mesh);
       pick(mesh, { type: "wall", id: w.id, floorId: fl.id });
@@ -281,17 +284,29 @@ function buildScene(p: Props, mt: Materials): Built {
 
     // doors and windows: header above, sill below, glass in a window
     for (const o of walls ? fl.openings.filter((x) => near(x.polygon)) : []) {
+      // the open front of a porch: posts either side, nothing across
+      if (ex.gaps.has(o.id)) continue;
       const og = new THREE.Group();
-      const m = wallMaterial(statusTint(o.id, o.exterior && p.mode === "building" ? "#d6ccb9" : "#efe8da"));
-      const top = openTop(o), bot = openBottom(o);
+      const face = o.exterior && outside && !prog;
+      const [bot, top] = openingSpan(o, fl);
+      const m = face ? sidingMaterial(FINISH.siding, top) : wallMaterial(statusTint(o.id, o.exterior && outside ? FINISH.siding : "#efe8da"));
       if (top < wallH) { const h = new THREE.Mesh(extrude(o.polygon, top, wallH), m); h.castShadow = true; og.add(h); }
-      if (bot > 0) og.add(new THREE.Mesh(extrude(o.polygon, 0, Math.min(bot, wallH)), m));
-      const gm = new THREE.MeshStandardMaterial({ color: GLASS, transparent: true, opacity: 0.32, roughness: 0.1, metalness: 0.1, depthWrite: false });
+      const sm = face ? sidingMaterial(FINISH.siding, 0) : m;
+      if (bot > 0) og.add(new THREE.Mesh(extrude(o.polygon, 0, Math.min(bot, wallH)), sm));
+      const gm = new THREE.MeshStandardMaterial({ color: face ? FINISH.glass : GLASS, transparent: true, opacity: face ? 0.55 : 0.32, roughness: 0.05, metalness: face ? 0.4 : 0.1, depthWrite: false });
+      // outside: casing, sill and sash frame on every door and window
+      const extra: THREE.Material[] = [];
+      if (face && dressed) {
+        const tm = trimMaterial(), fm2 = wallMaterial(FINISH.frame);
+        extra.push(tm, fm2, sm);
+        for (const t of openingTrim(o, fl, [bot, top], wallH, o === ex.entry, tm, fm2)) { t.castShadow = true; og.add(t); }
+      }
       if (o.kind === "window" || o.kind === "sliding_door") {
         if (Math.min(top, wallH) > bot) og.add(new THREE.Mesh(extrude(o.polygon, bot, Math.min(top, wallH)), gm));
       } else if (o.kind === "door" || o.kind === "double_door" || o.kind === "garage_door") {
-        // a thin closed door in the frame, so doors read as doors
-        const dm = new THREE.MeshStandardMaterial({ color: o.kind === "garage_door" ? "#c9c2b4" : "#8a6a48", roughness: 0.7, transparent: true });
+        // a thin closed door in the frame, so doors read as doors; the way in gets its own colour
+        const dm = new THREE.MeshStandardMaterial({ color: o.kind === "garage_door" ? (face ? FINISH.garageDoor : "#c9c2b4") : face && o === ex.entry ? FINISH.frontDoor : FINISH.door, roughness: 0.7, transparent: true });
+        if (face && o.kind === "garage_door") { dm.map = garagePanels(); }
         const dx = o.b[0] - o.a[0], dy = o.b[1] - o.a[1], L = Math.hypot(dx, dy) || 1;
         const nx = -dy / L, ny = dx / L, t = 20;
         const leaf: Pt[] = [[o.a[0] + nx * t, o.a[1] + ny * t], [o.b[0] + nx * t, o.b[1] + ny * t], [o.b[0] - nx * t, o.b[1] - ny * t], [o.a[0] - nx * t, o.a[1] - ny * t]];
@@ -301,7 +316,7 @@ function buildScene(p: Props, mt: Materials): Built {
       g.add(og);
       pick(og, { type: "opening", id: o.id, floorId: fl.id });
       const c = [(o.a[0] + o.b[0]) / 2, (o.a[1] + o.b[1]) / 2];
-      fades.push({ mats: [m, gm], centre: new THREE.Vector3(c[0] * S, (base + H / 2) * S, c[1] * S), floorIndex: fi, role: "wall" });
+      fades.push({ mats: [m, gm, ...extra], centre: new THREE.Vector3(c[0] * S, (base + H / 2) * S, c[1] * S), floorIndex: fi, role: "wall" });
     }
 
     // stairs: a flight of steps across the stair outline
@@ -396,51 +411,26 @@ function buildScene(p: Props, mt: Materials): Built {
     }
   }
 
-  // roof over the top floor, in the shape the reader guessed (gable, hip or flat). A top floor that
-  // isn't close to a rectangle gets a flat roof that follows its outline instead of a box over the air.
-  if (p.mode === "building" && floorsAll.length && p.wallMode === "full") {
-    const top = floorsAll[floorsAll.length - 1];
-    const ti = floorsAll.length - 1;
-    const b = floorBBox(top);
-    const base = (top.elevation_mm || ti * (p.plan.building.exterior.storey_height_mm || 3000)) + (top.height_mm || 2700);
-    const rings = top.footprint.length ? top.footprint : [[[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]] as Pt[]];
-    const area = rings.reduce((a, r) => a + Math.abs(r.reduce((q, pt, i) => { const n = r[(i + 1) % r.length]; return q + pt[0] * n[1] - n[0] * pt[1]; }, 0)) / 2, 0);
-    const boxy = area / Math.max(1, (b[2] - b[0]) * (b[3] - b[1])) > 0.85;
-    const kind = p.plan.building.exterior.roof;
-    const m = new THREE.MeshStandardMaterial({ color: "#3a3a3c", roughness: 0.8, transparent: true, side: THREE.DoubleSide });
-    const roof = new THREE.Group();
-    if (kind === "flat" || !boxy) {
-      for (const ring of rings) { const slab = new THREE.Mesh(extrude(ring, 0, 220), m); slab.castShadow = true; roof.add(slab); }
-      roof.position.set(0, base * S, 0);
-    } else {
-      const w = (b[2] - b[0] + 900) * S, d = (b[3] - b[1] + 900) * S;
-      const alongX = w >= d;
-      const span = alongX ? d : w, len = alongX ? w : d;
-      const peak = Math.min(3.2, span * 0.35);
-      let geo: THREE.BufferGeometry;
-      if (kind === "hip") {
-        const L = len / 2, H2 = span / 2, r = Math.max(0, len - span) / 2;
-        const A = [-L, 0, -H2], B = [L, 0, -H2], C = [L, 0, H2], D = [-L, 0, H2], R1 = [-r, peak, 0], R2 = [r, peak, 0];
-        const tris = [D, C, R2, D, R2, R1, B, A, R1, B, R1, R2, A, D, R1, C, B, R2];
-        geo = new THREE.BufferGeometry();
-        geo.setAttribute("position", new THREE.Float32BufferAttribute(tris.flat(), 3));
-        geo.computeVertexNormals();
-      } else {
-        const tri = new THREE.Shape([new THREE.Vector2(-span / 2, 0), new THREE.Vector2(span / 2, 0), new THREE.Vector2(0, peak)]);
-        geo = new THREE.ExtrudeGeometry(tri, { depth: len, bevelEnabled: false });
-        geo.translate(0, 0, -len / 2);
-        geo.rotateY(Math.PI / 2);
-      }
-      const mesh = new THREE.Mesh(geo, m);
-      mesh.castShadow = true;
-      // hip geometry runs along x already; the gable was turned to run along x above
-      if (!alongX) mesh.rotation.y = Math.PI / 2;
-      roof.add(mesh);
-      roof.position.set(((b[0] + b[2]) / 2) * S, base * S, ((b[1] + b[3]) / 2) * S);
+  // the outside, built to the house rules: roofs with eaves and gutters, porches and balconies, the lot
+  if (outside && floorsAll.length) {
+    root.add(buildSite(ex, floorsAll[0]));
+    for (const z of ex.zones) {
+      const fi = floorsAll.findIndex((f) => f.id === z.floorId);
+      if (fi < 0) continue;
+      const zg = new THREE.Group();
+      zg.position.y = ex.base(fi) * S;
+      root.add(zg);
+      const c = new THREE.Vector3(((z.rect[0] + z.rect[2]) / 2) * S, ex.base(fi) * S, ((z.rect[1] + z.rect[3]) / 2) * S);
+      buildZone(z, ex, dressed, (o, mats, role) => { zg.add(o); if (mats.length) fades.push({ mats, centre: c, floorIndex: fi, role }); });
     }
-    root.add(roof);
-    fades.push({ mats: [m], centre: new THREE.Vector3(((b[0] + b[2]) / 2) * S, base * S, ((b[1] + b[3]) / 2) * S), floorIndex: floorsAll.length, role: "roof" });
-    roof.traverse((o) => { if ((o as THREE.Mesh).isMesh) pick(o, { type: "roof", id: o === roof.children[0] ? "roof" : `roof-${o.id}`, floorId: top.id }); });
+    if (dressed) {
+      const top = floorsAll[floorsAll.length - 1];
+      buildRoofs(ex, (o, mats, centre, floorIndex, main) => {
+        root.add(o);
+        fades.push({ mats, centre, floorIndex, role: "roof" });
+        o.traverse((x) => { if ((x as THREE.Mesh).isMesh) pick(x, { type: "roof", id: x === main ? "roof" : `roof-${x.id}`, floorId: top.id }); });
+      });
+    }
   }
 
   // framing
@@ -453,7 +443,7 @@ function buildScene(p: Props, mt: Materials): Built {
   roomTint.forEach((m) => { const holder = new THREE.Object3D(); holder.userData.ownMaterials = m; root.add(holder); });
   const pinLabels: THREE.Sprite[] = [];
   root.traverse((o) => { if (o.userData.pinLabel) pinLabels.push(o as THREE.Sprite); });
-  return { root, picks, byId, fades, floors: floorsMeta, centre, radius, pinLabels };
+  return { root, picks, byId, fades, floors: floorsMeta, centre, radius, pinLabels, groundY: outside ? -(ex.rules.plinth + 5) * S : -0.21 };
 }
 
 function pinPosition(plan: Plan, fl: Floor, sides: Map<string, WallSide>, pin: Pin): { x: number; y: number; z: number; side?: WallSide } | null {
@@ -516,6 +506,8 @@ export function Plan3D(p: Props) {
   const three = useRef<{
     renderer: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.PerspectiveCamera; controls: OrbitControls;
     built: Built | null; mt: Materials; sel: THREE.Box3Helper; focus: number; hoverFloor: string | null; sun: THREE.DirectionalLight; lockUntil: number;
+    /** the assistant's blinking dots */
+    dots: THREE.Group;
   } | null>(null);
 
   // one renderer for the life of the view
@@ -539,6 +531,7 @@ export function Plan3D(p: Props) {
     sun.shadow.bias = -0.0005;
     scene.add(sun, sun.target);
     const ground = new THREE.Mesh(new THREE.CircleGeometry(120, 48), new THREE.MeshStandardMaterial({ color: "#1d1f1b", roughness: 1 }));
+    ground.name = "ground";
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.21;
     ground.receiveShadow = true;
@@ -561,7 +554,9 @@ export function Plan3D(p: Props) {
     sel.add(glow);
     scene.add(sel);
     const mt = new Materials();
-    three.current = { renderer, scene, camera, controls, built: null, mt, sel, focus: 0, hoverFloor: null, sun, lockUntil: 0 };
+    const dots = new THREE.Group();
+    scene.add(dots);
+    three.current = { renderer, scene, camera, controls, built: null, mt, sel, focus: 0, hoverFloor: null, sun, lockUntil: 0, dots };
 
     const resize = () => {
       const w = el.clientWidth || 1, h = el.clientHeight || 1;
@@ -589,6 +584,18 @@ export function Plan3D(p: Props) {
           sp.scale.copy(sp.userData.base as THREE.Vector3).multiplyScalar(Math.min(1.9, Math.max(0.5, ref / d)));
         }
       }
+      // the assistant's dots pulse: the ball blinks, the ring on the floor spreads out
+      const now = performance.now() / 1000;
+      for (const d of dots.children) {
+        const [ball, ring] = d.children as THREE.Mesh[];
+        // about the same size on screen near and far, so close up they don't hide what they point at
+        const z = THREE.MathUtils.clamp(camera.position.distanceTo(ball.position) / 12, 0.2, 2.2);
+        ball.scale.setScalar(z);
+        (ball.material as THREE.MeshBasicMaterial).opacity = 0.55 + 0.45 * Math.abs(Math.sin(now * 3.4));
+        const k = (now * 0.7) % 1;
+        ring.scale.setScalar(z * (1 + k * 3));
+        (ring.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - k);
+      }
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);
     };
@@ -598,6 +605,7 @@ export function Plan3D(p: Props) {
       ro.disconnect();
       controls.dispose();
       if (three.current?.built) dispose(three.current.built.root);
+      dispose(dots);
       mt.dispose();
       renderer.dispose();
       renderer.domElement.remove();
@@ -657,6 +665,7 @@ export function Plan3D(p: Props) {
     const built = buildScene(cb.current, t.mt);
     t.built = built;
     t.scene.add(built.root);
+    t.scene.getObjectByName("ground")!.position.y = built.groundY;
     // light and shadows sized to the model
     const R = built.radius;
     t.sun.position.set(built.centre.x + R * 1.2, R * 2.4 + 8, built.centre.z + R * 0.9);
@@ -672,7 +681,41 @@ export function Plan3D(p: Props) {
       t.focus = 0;
     }
     highlight();
+    placeDots();
   }, [key]);  
+
+  /** Put a blinking dot (and its name) on each place the assistant is pointing at, on the floors shown. */
+  const { n: markN } = useMarks();
+  function placeDots() {
+    const t = three.current;
+    if (!t?.built) return;
+    dispose(t.dots);
+    t.dots.clear();
+    for (const m of getMarks().marks) {
+      const fl = t.built.floors.find((f) => f.id === m.floor_id);
+      if (!fl || (m.outside && cb.current.mode !== "building")) continue;
+      const g = new THREE.Group();
+      const color = new THREE.Color(m.color);
+      const top = fl.y0 + m.z * S + 0.35;
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.16, 20, 14), new THREE.MeshBasicMaterial({ color, transparent: true, depthTest: false }));
+      ball.position.set(m.x * S, top, m.y * S);
+      ball.renderOrder = 30;
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.16, 0.24, 40), new THREE.MeshBasicMaterial({ color, transparent: true, depthTest: false, side: THREE.DoubleSide }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(m.x * S, fl.y0 + 0.03, m.y * S);
+      ring.renderOrder = 29;
+      // a dot on the outside (over the roof) has no floor to stand on: just a short stem under it
+      ring.visible = !m.outside;
+      const foot = m.outside ? top - 1.2 : fl.y0;
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, top - foot, 6), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, depthTest: false }));
+      stem.position.set(m.x * S, (foot + top) / 2, m.y * S);
+      stem.renderOrder = 28;
+      g.add(ball, ring, stem);
+      if (m.label) { const sp = label(m.label, { color: m.color, bg: "#141513cc", size: 0.03 }); sp.position.set(m.x * S, top + 0.75, m.y * S); sp.renderOrder = 31; g.add(sp); }
+      t.dots.add(g);
+    }
+  }
+  useEffect(placeDots, [markN]);
 
   function frame(reset: boolean) {
     const t = three.current;

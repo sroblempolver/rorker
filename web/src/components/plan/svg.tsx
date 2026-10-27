@@ -149,3 +149,20 @@ export function useWorldDrag(toWorld: (cx: number, cy: number) => { x: number; y
   };
   return { drag, start };
 }
+
+/** A blinking dot where the assistant is pointing ("the bedroom with the blue dot"), with its name. */
+export function MarkDot({ x, y, color, label, px }: { x: number; y: number; color: string; label: string; px: number }) {
+  const r = 9 * px;
+  return (
+    <g pointerEvents="none">
+      <circle cx={x} cy={y} r={r} fill="none" stroke={color} strokeWidth={3 * px}>
+        <animate attributeName="r" values={`${r};${r * 4}`} dur="1.4s" repeatCount="indefinite" />
+        <animate attributeName="opacity" values="0.9;0" dur="1.4s" repeatCount="indefinite" />
+      </circle>
+      <circle cx={x} cy={y} r={r} fill={color} stroke="#141513" strokeWidth={2.5 * px}>
+        <animate attributeName="opacity" values="1;0.35;1" dur="0.9s" repeatCount="indefinite" />
+      </circle>
+      {label && <text x={x} y={y - r - 8 * px} textAnchor="middle" fontSize={12 * px} fontWeight={600} fontFamily="var(--font-sans, sans-serif)" fill={color} stroke="#141513" strokeWidth={3.5 * px} style={{ paintOrder: "stroke" }}>{label}</text>}
+    </g>
+  );
+}

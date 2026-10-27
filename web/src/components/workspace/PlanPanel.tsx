@@ -62,7 +62,8 @@ function QuestionField({ q, value, text, onPick, onText, onShow }: {
   );
 }
 
-export function QuestionsCard({ plan, onAnswer, onShow }: { plan: PlanRow; onAnswer: (answers: Record<string, string>) => Promise<void>; onShow: (ids: string[]) => void }) {
+type Q = PlanRow["data"]["questions"][number];
+export function QuestionsCard({ plan, onAnswer, onShow }: { plan: PlanRow; onAnswer: (answers: Record<string, string>) => Promise<void>; onShow: (ids: string[], q?: Q) => void }) {
   const open = plan.data.questions.filter((q) => !q.answer);
   const [answers, setAnswers] = useState<Record<string, string>>(() => Object.fromEntries(open.map((q) => [q.id, q.default ?? q.options[0] ?? ""])));
   const [own, setOwn] = useState<Record<string, string>>({});
@@ -77,7 +78,7 @@ export function QuestionsCard({ plan, onAnswer, onShow }: { plan: PlanRow; onAns
         <p className="text-[13px] text-muted">The plan reader wasn&apos;t sure about these. Tap an answer or just tell it, and it fixes the plan.</p>
       </div>
       {open.map((q) => (
-        <QuestionField key={q.id} q={q} value={answers[q.id] ?? ""} text={own[q.id] ?? ""} onShow={() => onShow(q.element_ids)}
+        <QuestionField key={q.id} q={q} value={answers[q.id] ?? ""} text={own[q.id] ?? ""} onShow={() => onShow(q.element_ids, q)}
           onPick={(o) => setAnswers((a) => ({ ...a, [q.id]: o }))} onText={(t) => setOwn((x) => ({ ...x, [q.id]: t }))} />
       ))}
       <button className="btn btn-primary w-full" disabled={busy} onClick={async () => { setBusy(true); try { await onAnswer(final()); } finally { setBusy(false); } }}>
@@ -88,7 +89,7 @@ export function QuestionsCard({ plan, onAnswer, onShow }: { plan: PlanRow; onAns
 }
 
 export function PlanPanel({ plan, runs, aiAvailable, onUpload, onAnswer, onShow }: {
-  plan: PlanRow | null; runs: PlanRun[]; aiAvailable: boolean; onUpload: (f: File) => Promise<void>; onAnswer: (a: Record<string, string>) => Promise<void>; onShow: (ids: string[]) => void;
+  plan: PlanRow | null; runs: PlanRun[]; aiAvailable: boolean; onUpload: (f: File) => Promise<void>; onAnswer: (a: Record<string, string>) => Promise<void>; onShow: (ids: string[], q?: Q) => void;
 }) {
   const s = plan?.data.source;
   const unidentified = plan ? plan.data.floors.reduce((n, f) => n + ((plan.data.stats[f.id] as { unidentified?: number } | undefined)?.unidentified ?? 0), 0) : 0;

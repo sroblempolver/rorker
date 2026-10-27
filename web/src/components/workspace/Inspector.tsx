@@ -12,6 +12,10 @@ import { ITEM_HEIGHT, ITEM_LABEL } from "@/components/plan/items";
 import { FixtureCard, ItemPanel, RoomEdit } from "./Editors";
 import { PinRow } from "./PinsPanel";
 import { StageStrip } from "./StagesPanel";
+import { BuyHere, type BuyTarget } from "@/components/materials/MaterialsPanel";
+import { itemSuggestions, suggestFor, wallSuggestions, type Suggestion } from "@/lib/materials/suggest";
+import type { MaterialLine } from "@/lib/materials/types";
+import { useTeam } from "@/components/team/context";
 
 const SOURCE: Record<string, string> = {
   drawing: "Read from the drawing", ai: "Named by the plan reader", contents: "Guessed from what is inside", contractor: "Confirmed by you", vision: "Read from the image",
@@ -126,6 +130,16 @@ interface Props {
   onUpdateItem: (id: string, input: Partial<ItemInput>) => Promise<void>;
   onDeleteItem: (id: string) => Promise<void>;
   onPinKind: (k: PinKind) => void;
+  /** the materials list: this job's lines, one-tap add, the full add sheet, open a line */
+  buy?: { lines: MaterialLine[]; onQuick: (t: BuyTarget, s: Suggestion) => void; onAll: (t: BuyTarget, list: Suggestion[]) => void; onMore: (t: BuyTarget) => void; onOpen: (id: string) => void; onTick?: (id: string) => void };
+}
+
+/** "Buy for this" on any picked spot, with the lines already on the list for it. */
+function Buy({ p, target, here }: { p: Props; target: BuyTarget; here: (l: MaterialLine) => boolean }) {
+  const { members } = useTeam();
+  if (!p.buy) return null;
+  const b = p.buy;
+  return <BuyHere target={target} lines={b.lines.filter(here)} members={members} onQuick={(s) => b.onQuick(target, s)} onAll={(list) => b.onAll(target, list)} onMore={() => b.onMore(target)} onOpen={b.onOpen} onTick={b.onTick} />;
 }
 
 function pinsFor(plan: Plan, pins: Pin[], e: Element) {
@@ -208,10 +222,13 @@ export function Inspector(p: Props) {
     const f = plan.floors.find((x) => x.id === item.floor_id);
     const room = f?.rooms.find((r) => r.id === item.side.split(":")[0]);
     const side = f && room ? roomSides(f, room).find((s) => s.key === item.side) : null;
-    return <ItemPanel key={item.id} item={item} wallLabel={side && room ? `${side.label}, ${room.name}` : "Wall"} wallLength={side?.length ?? null}
+    const itemAnchor = { view: "wall" as const, side: item.side, x: item.x, y: -item.y };
+    return <><ItemPanel key={item.id} item={item} wallLabel={side && room ? `${side.label}, ${room.name}` : "Wall"} wallLength={side?.length ?? null}
       onUpdate={(input) => p.onUpdateItem(item.id, input)} onDelete={() => p.onDeleteItem(item.id)}
       onShow={() => f && room && p.setLevel({ kind: "wall", floorId: f.id, roomId: room.id, sideKey: item.side })}
-      onPin={() => p.onAddPin({ elementId: null, floorId: item.floor_id, anchor: { view: "wall", side: item.side, x: item.x, y: -item.y }, preset: { kind: "task", title: `${item.label || ITEM_LABEL[item.kind]}: ` } })} />;
+      onPin={() => p.onAddPin({ elementId: null, floorId: item.floor_id, anchor: { view: "wall", side: item.side, x: item.x, y: -item.y }, preset: { kind: "task", title: `${item.label || ITEM_LABEL[item.kind]}: ` } })} />
+      <div className="px-4 pb-4"><Buy p={p} target={{ element_id: null, floor_id: item.floor_id, anchor: itemAnchor, where: `${item.label || ITEM_LABEL[item.kind]} · ${side && room ? `${side.label}, ${room.name}` : "Wall"}`, suggestions: itemSuggestions(item.kind) }}
+        here={(l) => l.anchor?.side === item.side && Math.abs((l.anchor?.x ?? -1e9) - item.x) < 60} /></div></>;
   }
 
   if (e) {
@@ -290,6 +307,14 @@ export function Inspector(p: Props) {
           </div>
         )}
 
+        <Buy p={p} target={{ element_id: e.el.id, floor_id: e.floor.id, anchor: wallAnchor, where: `${name} · ${e.floor.name}`, suggestions: suggestFor(e) }}
+          here={(l) => {
+            if (l.element_id === e.el.id) return true;
+            if (e.kind !== "room") return false;
+            const le = l.element_id ? findElement(plan, l.element_id) : null;
+            return le ? roomOf(le) === e.el.id : l.anchor?.side?.split(":")[0] === e.el.id;
+          }} />
+
         {att && (att.openings.length > 0 || att.fixtures.length > 0) && (
           <div>
             <p className="eyebrow mb-2">Attached to this wall</p>
@@ -349,6 +374,8 @@ export function Inspector(p: Props) {
           }} />
           <p className="text-[12px] text-muted mt-2">Outlets, switches and lights go on the wall for you to drag into place. For anything else, pick up a pin and click the exact spot, or right-click it.</p>
         </div>
+        <Buy p={p} target={{ element_id: main?.id ?? null, floor_id: f.id, anchor: { view: "wall", side: side.key, x: Math.round(side.length / 2), y: -1400 }, where: `${side.label}, ${r.name}`, suggestions: wallSuggestions(side.length, H, 1, opArea) }}
+          here={(l) => l.anchor?.side === side.key || side.segments.some((s) => s.id === l.element_id)} />
         <div>
           <p className="eyebrow mb-2">On this wall</p>
           <Chips items={sideItems(f, side)} states={states} onSelect={(id) => p.onSelect(id)} />

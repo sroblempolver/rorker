@@ -3,6 +3,7 @@
 // rename, reorder or remove its own stages without touching the template.
 import { useState } from "react";
 import type { JobStage, StageStatus } from "@/lib/data/types";
+import { useFeedback } from "@/components/ui/feedback";
 
 const NEXT: Record<StageStatus, StageStatus> = { not_started: "active", active: "done", done: "not_started" };
 const LABEL: Record<StageStatus, string> = { not_started: "Not started", active: "In progress", done: "Done" };
@@ -26,6 +27,7 @@ export function StagesPanel({ stages, onStatus, onAdd, onRename, onDelete, onMov
   onDelete: (id: string) => Promise<void>;
   onMove: (id: string, dir: -1 | 1) => Promise<void>;
 }) {
+  const { confirm } = useFeedback();
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [name, setName] = useState("");
@@ -60,7 +62,7 @@ export function StagesPanel({ stages, onStatus, onAdd, onRename, onDelete, onMov
             <div className="flex items-center gap-0.5 shrink-0 text-muted">
               <button className="w-7 h-7 rounded-[2px] hover:bg-panel-3 disabled:opacity-30" disabled={i === 0} onClick={() => onMove(s.id, -1)} title="Move up">↑</button>
               <button className="w-7 h-7 rounded-[2px] hover:bg-panel-3 disabled:opacity-30" disabled={i === stages.length - 1} onClick={() => onMove(s.id, 1)} title="Move down">↓</button>
-              <button className="w-7 h-7 rounded-[2px] hover:bg-panel-3 hover:text-red" onClick={() => { if (confirm(`Remove “${s.name}” from this job?`)) onDelete(s.id); }} title="Remove">×</button>
+              <button className="w-7 h-7 rounded-[2px] hover:bg-panel-3 hover:text-red" onClick={async () => { if (await confirm({ title: `Remove “${s.name}”?`, body: "It comes off this job's stages. Pins on this stage stay.", confirm: "Remove stage", danger: true })) onDelete(s.id); }} title="Remove">×</button>
             </div>
           </li>
         ))}

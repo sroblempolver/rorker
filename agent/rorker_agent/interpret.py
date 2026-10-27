@@ -302,6 +302,13 @@ def apply_answers(plan: Plan, answers: dict[str, str], ai: bool | None = None) -
     answered = [q for q in plan.questions if q.answer]
     if not answered:
         return plan
+    # building questions (the roof...) are settled by rules, whatever the mode
+    from .selfcheck import apply_exterior_answer
+    used = {q.id for q in answered if q.id in answers and q.kind == "exterior" and apply_exterior_answer(plan, q)}
+    answers = {k: v for k, v in answers.items() if k not in used}
+    answered = [q for q in answered if q.id not in used]
+    if not answered:
+        return plan
     if ai is None:
         ai = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
     if not ai:

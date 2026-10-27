@@ -5,6 +5,7 @@
 import { useState } from "react";
 import type { Member, MemberInput, MemberRole } from "@/lib/data/types";
 import { Avatar } from "./Avatar";
+import { useFeedback } from "@/components/ui/feedback";
 
 export interface TeamApi {
   add(input: MemberInput): Promise<Member[]>;
@@ -31,6 +32,7 @@ function RolePick({ value, onChange, disabled }: { value: MemberRole; onChange: 
 }
 
 export function TeamManager({ initial, canManage, meId, api }: { initial: Member[]; canManage: boolean; meId: string | null; api: TeamApi }) {
+  const { confirm } = useFeedback();
   const [members, setMembers] = useState(initial);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -90,7 +92,7 @@ export function TeamManager({ initial, canManage, meId, api }: { initial: Member
                 {canManage && (
                   <div className="flex gap-1">
                     <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(m.id); setEdit({ full_name: m.full_name, title: m.title ?? "", email: m.email ?? "", phone: m.phone ?? "", role: m.role }); }}>Edit</button>
-                    {!m.is_owner && <button className="btn btn-ghost btn-sm hover:!text-red" disabled={busy} onClick={() => { if (confirm(`Remove ${m.full_name} from the team? They'll be untagged from every pin.`)) run(() => api.remove(m.id)); }}>Remove</button>}
+                    {!m.is_owner && <button className="btn btn-ghost btn-sm hover:!text-red" disabled={busy} onClick={async () => { if (await confirm({ title: `Remove ${m.full_name}?`, body: "They come off the team and are untagged from every pin.", confirm: "Remove", danger: true })) run(() => api.remove(m.id)); }}>Remove</button>}
                   </div>
                 )}
               </div>

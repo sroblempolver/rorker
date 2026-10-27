@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type { Member, Pin, ShareLink } from "@/lib/data/types";
 import type { Plan } from "@/lib/plan/types";
 import { linkLive, linkPins } from "@/lib/share";
+import { useEscape } from "@/components/ui/hotkeys";
 import type { WorkspaceApi } from "./api";
 import { PinBadge, where } from "./PinsPanel";
 
@@ -23,11 +24,7 @@ export function ShareDialog({ api, members, pins, plan, onClose }: { api: Worksp
 
   useEffect(() => { api.listShareLinks?.().then(setLinks).catch((e) => setErr(e.message)); }, [api]);
   useEffect(() => { setDays(who === "sub" ? 30 : 0); }, [who]);
-  useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", k);
-    return () => window.removeEventListener("keydown", k);
-  }, [onClose]);
+  useEscape(onClose);
 
   const member = members.find((m) => m.id === who) ?? null;
   const theirs = member ? pins.filter((p) => p.tagged.includes(member.id) && p.status !== "done") : [];
@@ -67,7 +64,7 @@ export function ShareDialog({ api, members, pins, plan, onClose }: { api: Worksp
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 grid place-items-center p-3" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <section role="dialog" aria-label="Share this job" className="w-full max-w-[560px] max-h-[calc(100vh-24px)] flex flex-col bg-panel border border-line border-t-[3px] border-t-accent rounded-[6px] shadow-2xl">
+      <section role="dialog" aria-modal="true" aria-label="Share this job" className="w-full max-w-[560px] max-h-[calc(100vh-24px)] flex flex-col bg-panel border border-line border-t-[3px] border-t-accent rounded-[6px] shadow-2xl">
         <header className="flex items-center gap-2 px-4 h-12 border-b border-line shrink-0">
           <h2 className="font-display font-extrabold uppercase tracking-[0.08em] text-[15px]">Share this job</h2>
           <button onClick={onClose} aria-label="Close" className="ml-auto w-8 h-8 grid place-items-center text-muted hover:text-text">✕</button>

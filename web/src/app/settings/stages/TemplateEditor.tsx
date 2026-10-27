@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { StageTemplate } from "@/lib/data/types";
 import { JOB_TYPES } from "@/lib/data/templates";
 import { deleteTemplate, saveTemplate } from "../actions";
+import { useFeedback } from "@/components/ui/feedback";
 
 type Draft = { id?: string; name: string; job_type: string; stages: { name: string }[] };
 
@@ -51,6 +52,7 @@ function Editor({ initial, onDone }: { initial: Draft; onDone: () => void }) {
 }
 
 export function TemplateEditor({ templates }: { templates: StageTemplate[] }) {
+  const { confirm } = useFeedback();
   const [editing, setEditing] = useState<string | "new" | null>(null);
   return (
     <div className="space-y-3">
@@ -64,7 +66,7 @@ export function TemplateEditor({ templates }: { templates: StageTemplate[] }) {
             <p className="text-[13px] text-muted mt-1.5 line-clamp-2">{t.stages.map((s) => s.name).join(" → ")}</p>
           </div>
           <button className="btn btn-sm" onClick={() => setEditing(t.id)}>Edit</button>
-          <button className="btn btn-sm btn-ghost hover:text-red" onClick={async () => { if (confirm(`Delete the “${t.name}” template?`)) await deleteTemplate(t.id); }}>Delete</button>
+          <button className="btn btn-sm btn-ghost hover:text-red" onClick={async () => { if (await confirm({ title: `Delete “${t.name}”?`, body: "Jobs that already use it keep their stages.", confirm: "Delete template", danger: true })) await deleteTemplate(t.id); }}>Delete</button>
         </div>
       ))}
       {editing === "new" ? <Editor initial={{ name: "", job_type: "renovation", stages: [{ name: "" }] }} onDone={() => setEditing(null)} />
