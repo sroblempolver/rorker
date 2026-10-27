@@ -16,6 +16,8 @@ export interface Room {
   id: string; name: string; type: RoomType; polygon: Pt[]; area_m2: number; label_source: string;
   confidence: number; outdoor: boolean; wall_ids: string[]; opening_ids: string[];
   drawing_labels: string[]; drawing_area_m2: number | null; notes: string | null;
+  /** the home it belongs to, when one drawing has several (a terrace of townhouses, a duplex) */
+  unit?: string | null;
 }
 export interface Wall {
   id: string; polygon: Pt[]; length_mm: number; thickness_mm: number; exterior: boolean; room_ids: string[];

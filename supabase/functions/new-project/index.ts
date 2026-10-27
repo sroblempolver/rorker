@@ -58,12 +58,20 @@ const TOOLS: Anthropic.Tool[] = [
         building_name: { type: "string" },
         storey_height_mm: { type: "number" },
         roof: { type: "string", enum: ["gable", "hip", "flat", "unknown"] },
+        scale: { type: "string", description: "How you got from the drawing to millimetres, in a few words (\"written dimensions\", \"1:100 scale bar\", \"from door widths and the stair, about 9.5 mm per overview pixel\")" },
+        units: { type: "array", description: "Only when the drawing has several homes (townhouses, semi-detached, duplex, flats): every unit, in order along the drawing. Draw a unit in full (its rooms carry its name in unit), or, when it is the same as another unit or its mirror image, give copy_of instead and the app copies that unit's rooms, doors, windows and fixtures.", items: { type: "object", properties: {
+          name: { type: "string", description: "\"Unit 1\", \"Unit 2\" … or the names on the drawing" },
+          copy_of: { type: "string", description: "The unit this one repeats" },
+          mirror: { type: "boolean", description: "True when it is that unit flipped left to right (handed)" },
+          offset_mm: { ...PT, description: "How far this unit's left edge sits from copy_of's left edge, [dx, dy] in mm" },
+        }, required: ["name"] } },
         floors: { type: "array", items: { type: "object", properties: {
           name: { type: "string" }, level: { type: "integer", description: "0 ground, 1 first floor up, -1 basement" },
           rooms: { type: "array", items: { type: "object", properties: {
             name: { type: "string" },
             type: { type: "string", enum: ["kitchen", "bathroom", "wc", "bedroom", "living", "dining", "family", "study", "office", "hallway", "foyer", "stair_hall", "laundry", "utility", "closet", "garage", "storage", "balcony", "porch", "terrace", "other"] },
             polygon: { type: "array", items: PT, minItems: 3, description: "Corners in order, mm, on the wall centre lines" },
+            unit: { type: "string", description: "When the drawing has several homes: the unit this room belongs to, exactly as named in units" },
           }, required: ["name", "type", "polygon"] } },
           doors: { type: "array", items: { type: "object", properties: {
             rooms: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 2, description: "The two room names it joins; \"outside\" for an outside door" },
@@ -93,6 +101,9 @@ The sketch (only when there's a drawing, plan, sketch or photo of a layout):
 - Coordinates are millimetres, x to the right, y down, north up the page unless the drawing says otherwise. For a DXF picture, use the scale and frame given with it and the text labels' positions. For other pictures, measure from the dimensions written on the drawing; if there are none, use typical room sizes.
 - Rooms are polygons on the wall centre lines, almost always rectangles or L-shapes with straight walls at right angles. Neighbouring rooms must share their edges exactly (same coordinates), and together the rooms should cover the whole floor, hallways and stair halls included. Use the room names written on the drawing, cleaned up ("DINING ROM" -> "Dining room").
 - Each floor is its own entry, even when several floors are drawn side by side in one picture; give each floor's coordinates in its own place in the picture (the app lines floors up).
+- PDFs come as an overview picture of the drawing area plus close-up tiles; each says where it sits in the overview. Read the details from the close-ups and place everything in one frame per page (the overview's).
+- Scale: first look for written dimensions, then a scale bar or ratio, then the grid. If there are none, measure from things of known size: door leaves 800 to 900 mm, a straight stair about 900 to 1000 mm wide with 250 mm treads, a dining table for 6 about 1600 x 900, a double bed 1400 to 1600 x 2000, a car 1800 x 4500, a WC about 400 x 700. Use several of them, settle on one mm-per-pixel, and say how in scale. When the scale is a guess, ask in the sketch's questions to confirm one main size (a unit's width or the house's length).
+- Several homes in one drawing (a terrace of townhouses, semi-detached houses, a duplex, flats): count the homes before anything else. A home is a separate dwelling (its own household or tenant): look across the whole drawing for unit labels ("Unit A", "Lot 3", "Apt 2", "Townhouse 1"), party or demising walls (thick walls running the full depth with no door through them), separate front entrances, a kitchen in each, separate meters or services, and the same layout repeated or mirrored. Rooms joined by an internal door are one home; a second kitchen behind the same front door is still one home unless the drawing calls it a unit. List each one in units and make every one of them; never squeeze them into one house. Start each room's name with its unit ("Unit 2 living room") so names stay unique, and set its unit. Doors between a unit and outside are outside doors. Neighbouring units share the party wall line exactly. Draw the first unit in full; a unit that is the same or the mirror image of one already drawn is a copy_of entry (mirror for handed pairs, offset_mm from that unit's left edge to its own). Draw a unit in full when it differs (end units with an extra window, a different layout). Say how many units you found in the summary. Name the building after the drawing ("Townhouses 1-6") when it has no name.
 - Doors: every door between two rooms and every outside door, by the two room names (and the side of the house for an outside door). Windows: by room and the side of the house they're on. Open passages are kind "opening".
 - Fixtures: the main things drawn (kitchen run as base cabinets with the sink, range and fridge; toilets, basins, tubs, showers; beds, sofas, dining table; a car in a garage). Centre in mm, real size, and which way the front faces.
 - Put the things you weren't sure about in the sketch's questions (at most 5, each with quick answers when there are obvious ones). The contractor sees them next to the design.
@@ -109,7 +120,7 @@ type Part = { kind: "image"; name?: string; media_type: string; data: string; no
 
 function firstTurn(description: string, parts: Part[], today: string): Anthropic.ContentBlockParam[] {
   const out: Anthropic.ContentBlockParam[] = [];
-  for (const p of parts.slice(0, 8)) {
+  for (const p of parts.slice(0, 24)) {
     if (p.kind === "pdf" && typeof p.data === "string") {
       out.push({ type: "text", text: `File: ${String(p.name ?? "plans.pdf").slice(0, 120)}` });
       out.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: p.data } });
@@ -172,7 +183,7 @@ Deno.serve(async (req) => {
         // round pays for them at the cheap cached rate
         const params = {
           // Sonnet 5.5 thinks at "high" unless told; "medium" keeps a read inside the function's time limit
-          model: MODEL, max_tokens: 32000, thinking: { type: "adaptive" }, output_config: { effort: "medium" },
+          model: MODEL, max_tokens: 64000, thinking: { type: "adaptive" }, output_config: { effort: "medium" },
           system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }], tools: TOOLS, messages,
           cache_control: { type: "ephemeral" },
         };

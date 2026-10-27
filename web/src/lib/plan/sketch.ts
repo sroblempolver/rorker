@@ -6,13 +6,15 @@ import type { BBox, Fixture, Floor, Opening, OpeningKind, Plan, Pt, Question, Ro
 import { bboxOf, polyArea } from "./geometry";
 
 export type Side = "north" | "south" | "east" | "west";
-export interface SketchRoom { name: string; type?: string; polygon: Pt[] }
+export interface SketchRoom { name: string; type?: string; polygon: Pt[]; unit?: string }
 export interface SketchDoor { rooms: [string, string]; kind?: OpeningKind; width_mm?: number; at?: number; /** an outside door: which side of the house */ side?: Side }
 export interface SketchWindow { room: string; side: Side; width_mm?: number; count?: number }
 export interface SketchFixture { kind: string; name?: string; room?: string; center: Pt; width_mm?: number; depth_mm?: number; facing?: Side | null }
 export interface SketchFloor { name?: string; level: number; height_mm?: number; rooms: SketchRoom[]; doors?: SketchDoor[]; windows?: SketchWindow[]; fixtures?: SketchFixture[] }
+/** One home in a drawing of several. A copy repeats another unit, flipped left to right when `mirror`. */
+export interface SketchUnit { name: string; copy_of?: string; mirror?: boolean; offset_mm?: Pt }
 export interface Sketch {
-  building_name?: string; storey_height_mm?: number; roof?: string; floors: SketchFloor[];
+  building_name?: string; storey_height_mm?: number; roof?: string; scale?: string; units?: SketchUnit[]; floors: SketchFloor[];
   questions?: { text: string; options?: string[]; rooms?: string[] }[];
 }
 export interface SketchSource { kind: string; filename: string }
@@ -22,7 +24,7 @@ const OUTDOOR = new Set<RoomType>(["balcony", "porch", "terrace"]);
 const OUTSIDE = /^(outside|exterior|out|garden|yard|street)$/i;
 const ANGLE: Record<Side, number> = { east: 0, south: 90, west: 180, north: -90 };
 const SNAP = 150;  // edges this close are the same line (a read drawing is never exact)
-const EXT_T = 250, INT_T = 120;
+const EXT_T = 250, INT_T = 120, PARTY_T = 250;
 
 const r10 = (v: number) => Math.round(v / 10) * 10;
 const key = (p: Pt) => `${p[0]},${p[1]}`;
@@ -83,6 +85,7 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
     return {
       id: `${code}-R${String(i + 1).padStart(2, "0")}`, name: r.name?.trim() || "Room", type, polygon: poly, area_m2: Math.round(polyArea(poly) / 1e5) / 10,
       label_source: "ai", confidence: 0.7, outdoor: OUTDOOR.has(type), wall_ids: [], opening_ids: [], drawing_labels: [], drawing_area_m2: null, notes: null,
+      ...(r.unit ? { unit: r.unit } : {}),
     };
   }).filter((r) => r.polygon.length >= 3 && r.area_m2 > 0.3);
   const byName = (n: string) => { const s = n.toLowerCase().trim(); return rooms.find((r) => r.name.toLowerCase() === s) ?? rooms.find((r) => r.name.toLowerCase().includes(s) || s.includes(r.name.toLowerCase())) ?? rooms.find((r) => r.id.toLowerCase() === s) ?? null; };
@@ -130,7 +133,9 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
       const exterior = inside.length === 1;
       const L = len(s.a, s.b);
       if (L < 200) continue;
-      const t = exterior ? EXT_T : INT_T;
+      // the wall between two homes is a party wall: as thick as an outside one
+      const units = new Set(inside.map((id) => rooms.find((r) => r.id === id)?.unit ?? null));
+      const t = exterior || units.size > 1 ? (exterior ? EXT_T : PARTY_T) : INT_T;
       const id = `${code}-W${String(walls.length + 1).padStart(2, "0")}`;
       walls.push({ id, polygon: band(s.a, s.b, t, t / 2), length_mm: Math.round(L), thickness_mm: t, exterior, room_ids: [...s.rooms] });
       (s as Seg & { id?: string }).id = id;
@@ -257,11 +262,59 @@ function outline(edges: Seg[], fallback: BBox): Pt[][] {
   return rings.length ? rings : [[[fallback[0], fallback[1]], [fallback[2], fallback[1]], [fallback[2], fallback[3]], [fallback[0], fallback[3]]]];
 }
 
+const FLIP: Record<Side, Side> = { east: "west", west: "east", north: "north", south: "south" };
+
+/**
+ * Several homes in one drawing: a unit given as a copy of another gets that unit's rooms, doors, windows
+ * and fixtures, flipped left to right when it is the mirror image, and moved by its offset. Room names
+ * that start with the source unit's name take the new unit's name ("Unit 1 kitchen" -> "Unit 2 kitchen").
+ */
+export function expandUnits(sk: Sketch, notes: string[] = []): SketchFloor[] {
+  const floors = (sk.floors ?? []).map((f) => ({ ...f, rooms: [...(f.rooms ?? [])], doors: [...(f.doors ?? [])], windows: [...(f.windows ?? [])], fixtures: [...(f.fixtures ?? [])] }));
+  const units = sk.units ?? [];
+  const drawn = new Set(floors.flatMap((f) => f.rooms.map((r) => r.unit)).filter(Boolean) as string[]);
+  const same = (a?: string, b?: string) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+  // copies of copies resolve in order, so each source is drawn (or copied) before it is used
+  for (const u of units) {
+    if (!u.copy_of || drawn.has(u.name)) continue;
+    const src = [...drawn].find((d) => same(d, u.copy_of));
+    if (!src) { notes.push(`${u.name} was meant to repeat ${u.copy_of}, which isn't drawn, so it was left out.`); continue; }
+    const pts = floors.flatMap((f) => f.rooms.filter((r) => r.unit === src).flatMap((r) => r.polygon));
+    if (!pts.length) continue;
+    const [bx0, , bx1] = bboxOf(pts);
+    const [dx, dy] = u.offset_mm ?? [bx1 - bx0, 0];
+    const move = (p: Pt): Pt => [(u.mirror ? bx0 + bx1 - p[0] : p[0]) + dx, p[1] + dy];
+    const re = new RegExp(`^${src.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
+    const rename = (n: string) => (re.test(n.trim()) ? n.trim().replace(re, u.name) : `${u.name} ${n.trim()}`);
+    for (const f of floors) {
+      const rooms = f.rooms.filter((r) => r.unit === src);
+      if (!rooms.length) continue;
+      const names = new Map(rooms.map((r) => [r.name.trim().toLowerCase(), rename(r.name)]));
+      const mine = (n?: string) => (n ? names.get(n.trim().toLowerCase()) : undefined);
+      const box = (n: string) => { const r = rooms.find((x) => x.name.trim().toLowerCase() === n.trim().toLowerCase()); return r ? bboxOf(r.polygon) : null; };
+      f.rooms.push(...rooms.map((r) => ({ ...r, name: rename(r.name), unit: u.name, polygon: (u.mirror ? [...r.polygon].reverse() : r.polygon).map(move) })));
+      for (const d of f.doors.filter((d) => d.rooms?.some((n) => mine(n)) && d.rooms.every((n) => mine(n) || OUTSIDE.test(n)))) {
+        // along a wall running left to right a mirrored door sits at the other end; up and down it stays put
+        const [a, b] = d.rooms.map(box);
+        const upright = a && b ? Math.abs((a[0] + a[2]) / 2 - (b[0] + b[2]) / 2) > Math.abs((a[1] + a[3]) / 2 - (b[1] + b[3]) / 2) : d.side === "east" || d.side === "west";
+        f.doors.push({ ...d, rooms: d.rooms.map((n) => mine(n) ?? n) as [string, string], side: u.mirror && d.side ? FLIP[d.side] : d.side, at: u.mirror && d.at != null && !upright ? 1 - d.at : d.at });
+      }
+      for (const w of f.windows.filter((w) => mine(w.room))) f.windows.push({ ...w, room: mine(w.room)!, side: u.mirror ? FLIP[w.side] ?? w.side : w.side });
+      const inUnit = (c: Pt) => rooms.some((r) => { const b = bboxOf(r.polygon); return c[0] >= b[0] && c[0] <= b[2] && c[1] >= b[1] && c[1] <= b[3]; });
+      for (const x of f.fixtures.filter((x) => (x.room ? mine(x.room) : Array.isArray(x.center) && inUnit(x.center)))) {
+        f.fixtures.push({ ...x, room: x.room ? mine(x.room) : undefined, center: move(x.center), facing: u.mirror && x.facing ? FLIP[x.facing] : x.facing });
+      }
+    }
+    drawn.add(u.name);
+  }
+  return floors;
+}
+
 export function planFromSketch(sk: Sketch, src: SketchSource): { plan: Plan; notes: string[] } {
   const storey = Math.max(2400, Math.min(4500, sk.storey_height_mm ?? 3000));
   const notes: string[] = [];
   const used = new Set<string>();
-  const floorsIn = [...(sk.floors ?? [])].filter((f) => f.rooms?.length).sort((a, b) => a.level - b.level);
+  const floorsIn = expandUnits(sk, notes).filter((f) => f.rooms?.length).sort((a, b) => a.level - b.level);
   const floors = floorsIn.map((f, i) => {
     // each floor from its own top-left corner, so floors drawn side by side stack up
     const b0 = bboxOf(f.rooms.flatMap((r) => r.polygon ?? []));
