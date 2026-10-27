@@ -1,7 +1,8 @@
 // Gets uploads ready for the New project assistant, in the browser: photos and scans are shrunk to a
-// sensible size, PDFs go as they are, DXF drawings are drawn as a picture with a known scale (so the
+// sensible size, PDFs are drawn as sharp pictures of just the drawing (see pdf.ts), DXF drawings are drawn as a picture with a known scale (so the
 // assistant can measure in millimetres) plus their text labels. DWG can't be read here yet.
 import { readDxf } from "./dxf";
+import { readPdf } from "./pdf";
 
 export type IntakePart =
   | { kind: "image"; name: string; media_type: "image/jpeg" | "image/png"; data: string; note?: string }
@@ -74,7 +75,21 @@ export async function prepareFiles(files: File[]): Promise<Prepared> {
         previews.push({ name: f.name, url });
       } else if (ext === "pdf" || f.type === "application/pdf") {
         if (f.size > MAX_PDF) { notes.push(`${f.name} is too big for the preview (over 9 MB). Try a smaller export or photos of the pages.`); continue; }
-        part = { kind: "pdf", name: f.name, data: b64(await f.arrayBuffer()) };
+        const buf = await f.arrayBuffer();
+        // drawn here when pdf.js can; sent as it is when it can't (the assistant then sees whole pages)
+        const pics = await readPdf(buf.slice(0), f.name).catch((e) => { console.warn("pdf", e); return []; });
+        if (pics.length) {
+          const add = pics.map((p): IntakePart => ({ kind: "image", name: p.name, media_type: p.url.startsWith("data:image/png") ? "image/png" : "image/jpeg", data: fromDataUrl(p.url), note: p.note }));
+          const size = add.reduce((n, p) => n + p.data.length, 0);
+          if (total + size <= MAX_TOTAL) {
+            total += size;
+            parts.push(...add);
+            previews.push({ name: f.name, url: pics[0].url });
+            if (!source.filename) source = { kind: "pdf", filename: f.name };
+            continue;
+          }
+        }
+        part = { kind: "pdf", name: f.name, data: b64(buf) };
       } else if (f.type.startsWith("image/") || ["png", "jpg", "jpeg", "webp", "gif", "bmp"].includes(ext)) {
         const url = await shrink(f);
         part = { kind: "image", name: f.name, media_type: "image/jpeg", data: fromDataUrl(url) };
