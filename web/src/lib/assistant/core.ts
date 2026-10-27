@@ -475,7 +475,8 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
       let n = 1;
       const added: unknown[] = [];
       const fit = (v: number, lo: number, hi: number) => (lo <= hi ? Math.min(hi, Math.max(lo, v)) : (lo + hi) / 2);
-      for (const o of list) {
+      const skipped: { what: string; problem: string }[] = [];
+      for (const o of list) try {
         let kind = str(o.kind);
         const parts = readParts(o.parts);
         const said = str(o.name);
@@ -495,6 +496,31 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
         let where = "";
         const dims = (fc: number | null) => { const across = fc === 0 || fc === 180; return { hx: (across ? depth : width) / 2, hy: (across ? width : depth) / 2 }; };
         const vec = (fc: number): [number, number] => [Math.round(Math.cos((fc * Math.PI) / 180)), Math.round(Math.sin((fc * Math.PI) / 180))];
+        const clearSpot = (fc: number | null, loose: boolean) => {
+          const solid = here.filter((q) => q.room_id === r.id && q.kind !== "rug" && bottomOf(q) < 400 && !["wall", "ceiling"].includes(specOf(q.kind)?.mount ?? ""));
+          const clash = (cx: number, cy: number, hx: number, hy: number) => solid.reduce((sum, q) =>
+            sum + Math.max(0, Math.min(cx + hx + 50, q.bbox[2]) - Math.max(cx - hx - 50, q.bbox[0])) * Math.max(0, Math.min(cy + hy + 50, q.bbox[3]) - Math.max(cy - hy - 50, q.bbox[1])), 0);
+          const walls: { at: [number, number]; facing: number | null }[] = [], open: typeof walls = [];
+          for (const wf of fc != null ? [fc] : [90, -90, 0, 180]) {
+            const { hx, hy } = dims(wf), side = wf === 0 || wf === 180;
+            const lo = side ? ey0 + hy : ex0 + hx, hi = side ? ey1 - hy : ex1 - hx;
+            if (lo > hi) continue;
+            const fixed = wf === 90 ? ey0 + hy + 20 : wf === -90 ? ey1 - hy - 20 : wf === 0 ? ex0 + hx + 20 : ex1 - hx - 20;
+            for (let k = 0; k <= (hi - lo) / 100; k++) {
+              const t = (lo + hi) / 2 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 100;
+              if (t >= lo && t <= hi) walls.push({ at: side ? [fixed, t] : [t, fixed], facing: wf });
+            }
+          }
+          for (let gx = ex0 + 200; gx <= ex1 - 200; gx += 200) for (let gy = ey0 + 200; gy <= ey1 - 200; gy += 200) open.push({ at: [gx, gy], facing: fc });
+          open.sort((p, q) => Math.hypot(p.at[0] - (ex0 + ex1) / 2, p.at[1] - (ey0 + ey1) / 2) - Math.hypot(q.at[0] - (ex0 + ex1) / 2, q.at[1] - (ey0 + ey1) / 2));
+          let best = { at: [(ex0 + ex1) / 2, (ey0 + ey1) / 2] as [number, number], facing: fc }, least = Infinity;
+          for (const c of loose ? [...open, ...walls] : [...walls, ...open]) {
+            const { hx, hy } = dims(c.facing), v = clash(c.at[0], c.at[1], hx, hy);
+            if (v < least) { least = v; best = c; }
+            if (!v) break;
+          }
+          return { ...best, crowded: least > 0 };
+        };
 
         // what it stands on: the piece named, else the nearest suitable one in the room
         let sup = str(o.on) ? byRef(str(o.on)) : null;
@@ -544,6 +570,13 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
             const reach = (pf == null ? (partner.bbox[3] - partner.bbox[1]) / 2 : ps.depth / 2) + depth / 2 - (kind === "sofa" || kind === "armchair" ? -700 : 120);
             x = partner.center[0] + pv[0] * reach; y = partner.center[1] + pv[1] * reach;
           }
+          // nowhere given: the first clear spot, backed up to a wall when it stands that way
+          if ((x == null || y == null) && !partner) {
+            const spot = clearSpot(facing, spec?.face === "any");
+            x = spot.at[0]; y = spot.at[1];
+            if (facing == null) facing = spot.facing;
+            if (spot.crowded) where = "no clear floor left in the room, so it overlaps something: tell the person and ask where it should go";
+          }
           x ??= (ex0 + ex1) / 2; y ??= (ey0 + ey1) / 2;
           if (facing == null && partner) facing = toward({ center: [x, y] }, partner);
           if (facing == null) facing = naturalFacing(f, here, addedFixture("probe", { floor_id: f.id, room_id: r.id, kind, name, center: [x, y], width, depth, facing: null }));
@@ -573,10 +606,15 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
         const kg = obj.weight_kg ?? spec?.kg ?? null;
         added.push({ id, what: name, kind, size_mm: `${obj.width} wide x ${obj.depth} deep x ${obj.height_mm} high`, ...(kg ? { weight_kg: kg } : {}), faces: facingWord(facing) ?? "no particular way", ...(where ? { where } : {}) });
         changed.marks = [...(changed.marks ?? []), { floor_id: f.id, x: obj.center[0], y: obj.center[1], z: obj.elevation_mm + obj.height_mm, label: name, color: MARK_COLORS[5][1], id }];
+      } catch (e) {
+        // one that can't go in doesn't stop the rest
+        if (list.length === 1) throw e;
+        skipped.push({ what: str(o.name) || str(o.kind), problem: e instanceof Error ? e.message : String(e) });
       }
+      if (!fresh.length) throw new Error(skipped.map((q) => q.problem).join(" "));
       changed.any = true;
       changed.focus = fresh.length === 1 ? fresh[0] : r.id;
-      return { added, room: `${r.name} (${r.id}), ${partOf(f, labelPoint(r.polygon))}` };
+      return { added, ...(skipped.length ? { not_added: skipped } : {}), room: `${r.name} (${r.id}), ${partOf(f, labelPoint(r.polygon))}` };
     }
     case "change_object": {
       const d = await resolveJob(b, ctx, input.job);

@@ -2,7 +2,7 @@
 // Each model is made in its own frame: width along x, depth along z with the front facing +z,
 // standing on y = 0, centred on the origin. Units are metres.
 import * as THREE from "three";
-import type { Part } from "@/lib/plan/catalog";
+import { drawnAs, partsOf, wideFront, type Part } from "@/lib/plan/catalog";
 import type { Fixture } from "@/lib/plan/types";
 import { fixtureSize } from "@/lib/plan/edits";
 import { fixtureBottom, fixtureHeight } from "./fixtures";
@@ -124,6 +124,10 @@ function counterUnit(g: THREE.Group, mt: Materials, f: Fixture, w: number, d: nu
 function model(f: Fixture, mt: Materials, w: number, d: number, h: number): THREE.Group {
   const g = new THREE.Group();
   if (f.parts?.length) { fromParts(g, mt, f.parts); return g; }
+  // catalogue things with a look of their own, stretched to this size, or drawn as the kind they're like
+  const own = partsOf(f.kind, w * 1000, d * 1000, h * 1000);
+  if (own) { fromParts(g, mt, own); return g; }
+  if (drawnAs(f.kind) !== f.kind) return model({ ...f, kind: drawnAs(f.kind) }, mt, w, d, h);
   const wood = mt.get(C.timber), white = mt.get(C.white, { rough: 0.3 }), fabric = mt.get(C.fabric, { rough: 0.95 });
   const steel = mt.get(C.steel, { metal: 0.55, rough: 0.35 });
   switch (f.kind) {
@@ -449,7 +453,7 @@ export function fixtureObject(f: Fixture, mt: Materials, base: number): THREE.Ob
   } else {
     w = (f.bbox[2] - f.bbox[0]) * S; d = (f.bbox[3] - f.bbox[1]) * S;
     // long things with no known front (sofas, beds) face across their short side
-    if (["sofa", "bed", "bathtub", "bookshelf", "sideboard", "wardrobe", "desk", "dresser", "piano"].includes(f.kind) && d > w * 1.15) { [w, d] = [d, w]; rot = Math.PI / 2; }
+    if ((wideFront(f.kind) || ["bed", "bathtub"].includes(f.kind)) && d > w * 1.15) { [w, d] = [d, w]; rot = Math.PI / 2; }
   }
   if (h <= 0) h = 0.85;
   const g = model(f, mt, Math.max(w, 0.05), Math.max(d, 0.05), h);

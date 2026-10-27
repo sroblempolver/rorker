@@ -1,6 +1,6 @@
 // Front elevations of the things that stand against a wall: what you would see facing that wall.
 // Shapes are generic per kind and drawn to the fixture's real width; heights are typical values.
-import { bottomOf, CATALOG, topOf, typicalHeight } from "@/lib/plan/catalog";
+import { bottomOf, CATALOG, drawnAs, partsOf, topOf, typicalHeight, type Part } from "@/lib/plan/catalog";
 import type { Fixture } from "@/lib/plan/types";
 
 const INK = "#1b1a17";
@@ -123,14 +123,16 @@ export function FixtureElevation(p: ElevProps) {
   if (CABINET_KINDS.has(f.kind) && (f.height_mm || f.front)) return <Cabinet {...p} />;
   // things on a desk or a wall are drawn from their own bottom, then lifted to where they are
   const lift = ABSOLUTE.has(f.kind) ? 0 : fixtureBottom(f);
-  const shape = f.parts?.length ? <Parts {...p} /> : <Shape {...p} />;
+  const h = f.height_mm ?? fixtureHeight(f.kind);
+  const own = f.parts?.length ? f.parts : partsOf(f.kind, Math.max(p.x1 - p.x0, 50), CATALOG[f.kind]?.d ?? 500, h);
+  const shape = own ? <Parts {...p} parts={own} /> : <Shape {...p} f={drawnAs(f.kind) === f.kind ? f : { ...f, kind: drawnAs(f.kind) }} />;
   return lift ? <g transform={`translate(0 ${-lift})`}>{shape}</g> : shape;
 }
 
 /** Something built from parts, seen from the front: each part's front face. */
-function Parts({ f, x0, x1, lw, tint }: ElevProps) {
+function Parts({ x0, x1, lw, tint, parts: all }: ElevProps & { parts: Part[] }) {
   const cx = (x0 + x1) / 2;
-  const parts = [...(f.parts ?? [])].sort((a, b) => a.z - a.d / 2 - (b.z - b.d / 2)); // back first
+  const parts = [...all].sort((a, b) => a.z - a.d / 2 - (b.z - b.d / 2)); // back first
   return (
     <g stroke={INK} strokeWidth={1.2 * lw} strokeLinejoin="round">
       {parts.map((q, i) => q.shape === "box"

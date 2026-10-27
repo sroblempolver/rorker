@@ -2,6 +2,7 @@
 // floor, on top of something, on a wall) and which way it faces. Drawings carry no furniture heights,
 // so every view and the assistant fall back on these. Sizes are millimetres, width across the front,
 // depth front to back, height from its own bottom; weight in kilograms.
+import { EXTRA } from "./catalog-extra";
 
 /** floor: stands on the floor. surface: sits on top of another object (a computer on a desk).
  *  wall: hangs on a wall with its bottom `at` mm up. ceiling: hangs from the ceiling. */
@@ -30,13 +31,17 @@ export interface ObjectSpec {
   words?: string[];
   /** top-view colour in the plan */
   fill: string;
+  /** looks like this other kind, stretched to its own size */
+  like?: string;
+  /** how it looks, built from simple shapes at the catalogue size (stretched to the real size) */
+  parts?: Part[];
 }
 
 const WOOD = "#a07850", DARK = "#8a6a48", CAB = "#5b5750", WHITE = "#f4efe6", STEEL = "#b9bec4", BLACK = "#232426", FABRIC = "#6f7486";
 const DESKS = ["desk", "table", "dining_table", "sideboard", "dresser", "nightstand"];
 const COUNTERS = ["base_cabinet", "island", "kitchen_sink", "sideboard", "table"];
 
-export const CATALOG: Record<string, ObjectSpec> = {
+const BASE: Record<string, ObjectSpec> = {
   // kitchen
   base_cabinet: { label: "Base cabinet", w: 600, d: 600, h: 900, kg: 35, mount: "floor", face: "room", fill: CAB },
   wall_cabinet: { label: "Wall cabinet", w: 600, d: 350, h: 700, kg: 18, mount: "wall", at: 1450, face: "room", fill: CAB },
@@ -99,10 +104,12 @@ export const CATALOG: Record<string, ObjectSpec> = {
   // laundry, services, outside
   washing_machine: { label: "Washing machine", w: 600, d: 600, h: 850, kg: 70, mount: "floor", face: "room", words: ["washer"], fill: WHITE },
   dryer: { label: "Dryer", w: 600, d: 600, h: 850, kg: 40, mount: "floor", face: "room", fill: WHITE },
-  water_heater: { label: "Water heater", w: 560, d: 560, h: 1500, kg: 60, mount: "floor", face: "room", words: ["boiler", "geyser"], fill: "#e6e1d6" },
+  water_heater: { label: "Water heater", w: 560, d: 560, h: 1500, kg: 60, mount: "floor", face: "room", words: ["geyser", "hot water tank"], fill: "#e6e1d6" },
   treadmill: { label: "Treadmill", w: 800, d: 1900, h: 1400, kg: 90, mount: "floor", face: "room", fill: "#2b2c30" },
   car: { label: "Car", w: 1800, d: 4500, h: 1500, kg: 1400, mount: "floor", face: "any", fill: "#55606b" },
 };
+
+export const CATALOG: Record<string, ObjectSpec> = { ...BASE, ...EXTRA };
 
 export const OBJECT_KINDS = [...Object.keys(CATALOG), "other"];
 
@@ -135,3 +142,15 @@ export function bottomOf(f: { kind: string; elevation_mm?: number | null }): num
 }
 export const topOf = (f: { kind: string; elevation_mm?: number | null; height_mm?: number | null }) => bottomOf(f) + (f.height_mm ?? typicalHeight(f.kind));
 export const weightOf = (f: { kind: string; weight_kg?: number | null }) => f.weight_kg ?? CATALOG[f.kind]?.kg ?? null;
+
+/** A catalogue kind's own parts, stretched to an object of w x d x h mm; null when it has none. */
+export function partsOf(kind: string, w: number, d: number, h: number): Part[] | null {
+  const s = CATALOG[kind];
+  if (!s?.parts?.length) return null;
+  const sx = w / s.w, sz = d / s.d, sy = h / s.h;
+  return s.parts.map((q) => ({ ...q, x: q.x * sx, w: q.w * sx, z: q.z * sz, d: q.d * sz, y: q.y * sy, h: q.h * sy }));
+}
+/** The kind it is drawn as: its own, or the one it looks like (a loveseat is drawn as a sofa). */
+export const drawnAs = (kind: string) => CATALOG[kind]?.like ?? kind;
+/** Long things whose front is along their long side (sofas, benches, desks). */
+export const wideFront = (kind: string) => { const s = CATALOG[drawnAs(kind)] ?? CATALOG[kind]; return !!s && s.w > s.d * 1.15; };
