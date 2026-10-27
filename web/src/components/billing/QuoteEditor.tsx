@@ -215,7 +215,7 @@ export function QuoteEditor({ quote: q, plan, stageNames, onChange, onSend, onBa
         </div>
 
         {q.ai_drafted && !locked && (
-          <p className="chip !h-auto !whitespace-normal py-1.5 !text-accent !border-accent/40">✦ Drafted from the plan. Check prices before it goes out.</p>
+          <p className="chip !h-auto !whitespace-normal py-1.5 !text-accent !border-accent/40">Drafted from the plan. Check prices before it goes out.</p>
         )}
         {banner && (
           <div className={`card !rounded-[3px] px-3 py-2.5 text-[13.5px] ${q.status === "approved" ? "!border-green/50 text-green" : q.status === "declined" ? "!border-red/50 text-red" : "!border-amber/50 text-amber"}`}>
