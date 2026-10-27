@@ -26,7 +26,17 @@ export interface LineItem {
   /** an add-on the client can tick or untick on the quote; not counted unless chosen */
   optional?: boolean;
   taxable?: boolean;
+  /** belongs to one package of a good / better / best quote; counted only when that package is picked */
+  option_id?: string | null;
+  /** a budget for something the client still chooses (tile, fixtures); the difference becomes a change order */
+  allowance?: boolean;
 }
+
+/** One package of a good / better / best quote. Lines with no option_id are in every package. */
+export interface QuoteOption { id: string; name: string; blurb: string | null }
+
+/** Something that happened to a quote, invoice or change order, shown as a timeline. */
+export interface Activity { at: string; what: string; who?: string | null }
 
 /** One payment step agreed on the quote: a deposit, a draw when a stage is done, the final payment. */
 export interface Draw {
@@ -49,6 +59,13 @@ export interface Quote {
   lines: LineItem[];
   /** optional lines the client picked, by line id */
   chosen: string[];
+  /** good / better / best packages; empty for a plain quote */
+  options?: QuoteOption[];
+  /** the package the client (or contractor) picked */
+  picked_option?: string | null;
+  /** show "as low as $X a month" financing on the client's quote */
+  financing?: boolean;
+  activity?: Activity[];
   /** e.g. 0.0825 */
   tax_rate: number;
   /** cents off the total */
@@ -88,6 +105,30 @@ export interface Invoice {
   due_date: string | null;
   notes: string | null;
   created_at: string;
+  activity?: Activity[];
+  /** the change order it bills, if any */
+  change_order_id?: string | null;
+}
+
+/** Extra or changed work after the quote is signed. The client approves it like a quote; then it's billed
+ *  on its own invoice right away, or added to the final payment. */
+export type ChangeOrderStatus = "draft" | "sent" | "approved" | "declined";
+export interface ChangeOrder {
+  id: string; job_id: string; quote_id: string;
+  /** "CO-1" */
+  number: string;
+  title: string;
+  /** why: "Client asked for", "Found on site", "Allowance difference" */
+  reason: string | null;
+  status: ChangeOrderStatus;
+  lines: LineItem[];
+  tax_rate: number;
+  /** extra days it adds to the schedule */
+  days_added: number;
+  bill: "now" | "final";
+  invoice_id: string | null;
+  created_at: string; sent_at: string | null; approved_at: string | null; signed_by: string | null;
+  activity?: Activity[];
 }
 
 export type PaymentMethod = "card" | "ach" | "check" | "cash" | "other";
@@ -107,7 +148,7 @@ export interface Payment {
 }
 
 /** Everything money for one job. */
-export interface Billing { quotes: Quote[]; invoices: Invoice[]; payments: Payment[] }
+export interface Billing { quotes: Quote[]; invoices: Invoice[]; payments: Payment[]; change_orders?: ChangeOrder[] }
 
 /** The job and client as shown on a document. */
 export interface DocJob { name: string; address: string | null; client_name: string | null; client_email: string | null; client_phone: string | null }

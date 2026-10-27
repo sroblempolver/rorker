@@ -2,6 +2,15 @@
 // The job's quotes in the side panel: number, title, total and where each one stands.
 import type { Quote, QuoteStatus } from "@/lib/billing/types";
 import { fmt, quoteTotals } from "@/lib/billing/money";
+import { packageTotals } from "./QuoteDocument";
+
+function Eye() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
 
 export const QUOTE_STATUS: Record<QuoteStatus, { label: string; color: string }> = {
   draft: { label: "Draft", color: "text-muted" },
@@ -34,7 +43,7 @@ export function QuoteList({ quotes, onOpen, onNew, onDraft }: { quotes: Quote[];
         </div>
       ) : (
         <ul className="space-y-1.5">
-          {quotes.map((q) => (
+          {quotes.map((q) => { const pk = packageTotals(q); const pickedName = q.options?.find((o) => o.id === q.picked_option)?.name; return (
             <li key={q.id}>
               <button onClick={() => onOpen(q.id)} className="card !rounded-[3px] w-full px-3 py-2.5 text-left hover:bg-panel-2 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
@@ -42,15 +51,22 @@ export function QuoteList({ quotes, onOpen, onNew, onDraft }: { quotes: Quote[];
                     <span className="font-mono text-[12px] text-muted shrink-0">{q.number}</span>
                     <span className="text-[14px] truncate">{q.title || "Untitled quote"}</span>
                   </div>
-                  <div className="mt-1 flex items-center gap-2 text-[13px]">
-                    <span className="font-semibold tabular-nums">{fmt(quoteTotals(q).total)}</span>
-                    <span className="text-muted">· {q.lines.length} {q.lines.length === 1 ? "line" : "lines"}</span>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px]">
+                    <span className="font-semibold tabular-nums">
+                      {pk && !pickedName ? (pk.min === pk.max ? fmt(pk.min) : `${fmt(pk.min)} to ${fmt(pk.max)}`) : fmt(quoteTotals(q).total)}
+                    </span>
+                    <span className="text-muted">
+                      · {pk ? (pickedName ? `${pickedName} package` : `${pk.list.length} packages`) : `${q.lines.length} ${q.lines.length === 1 ? "line" : "lines"}`}
+                    </span>
+                    {q.viewed_at && q.status !== "approved" && q.status !== "declined" && (
+                      <span className="inline-flex items-center gap-1 text-amber" title={`Opened ${new Date(q.viewed_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}><Eye />Viewed</span>
+                    )}
                   </div>
                 </div>
                 <QuoteStatusChip status={q.status} />
               </button>
             </li>
-          ))}
+          ); })}
         </ul>
       )}
     </div>

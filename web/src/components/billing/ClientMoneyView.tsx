@@ -9,9 +9,12 @@ import { ClientCheckout } from "./ClientCheckout";
 import { InvoiceDocument } from "./InvoiceDocument";
 import { PaymentReceipt } from "./PaymentReceipt";
 import { QuoteDocument } from "./QuoteDocument";
-import { approveQuote, type ClientStart } from "./MoneyPanel";
+import { approveQuote, logged, type ClientStart } from "./MoneyPanel";
+import { approveChangeOrder, contractTotal, signedFmt } from "@/lib/billing/changeOrders";
+import { changeOrderTotals } from "@/lib/billing/money";
+import { ChangeOrderDocument } from "./ChangeOrderDocument";
 
-type Screen = { kind: "home" } | { kind: "quote" | "invoice" | "pay"; id: string } | { kind: "receipt"; payment: Payment };
+type Screen = { kind: "home" } | { kind: "quote" | "invoice" | "pay" | "change"; id: string } | { kind: "receipt"; payment: Payment };
 
 export function ClientMoneyView({ billing, brand, job, start, onChange, onBack }: {
   billing: Billing; brand: Brand; job: DocJob; start: ClientStart; onChange(b: Billing): void; onBack?(): void;
@@ -23,15 +26,23 @@ export function ClientMoneyView({ billing, brand, job, start, onChange, onBack }
   // the client only sees what was sent to them
   const quotes = b.quotes.filter((q) => q.status !== "draft");
   const invoices = b.invoices.filter((i) => i.status !== "draft");
+  const changes = (b.change_orders ?? []).filter((c) => c.status !== "draft");
   const back = <button className="text-[14px] text-neutral-300 hover:text-white mb-3" onClick={() => go({ kind: "home" })}>‹ Everything for this job</button>;
 
   let body: React.ReactNode;
   if (screen.kind === "quote") {
     const q = b.quotes.find((x) => x.id === screen.id)!;
     body = <>{back}<QuoteDocument quote={q} brand={brand} job={job} mode="client"
+      onPick={(id) => update({ ...b, quotes: b.quotes.map((x) => (x.id === q.id ? { ...x, picked_option: id } : x)) })}
       onChoose={(lineId, on) => update({ ...b, quotes: b.quotes.map((x) => (x.id === q.id ? { ...x, chosen: on ? [...x.chosen, lineId] : x.chosen.filter((c) => c !== lineId) } : x)) })}
-      onDecline={() => update({ ...b, quotes: b.quotes.map((x) => (x.id === q.id ? { ...x, status: "declined", declined_at: new Date().toISOString() } : x)) })}
+      onDecline={() => update({ ...b, quotes: b.quotes.map((x) => (x.id === q.id ? logged({ ...x, status: "declined", declined_at: new Date().toISOString() }, "Declined") : x)) })}
       onApprove={(name) => { const r = approveQuote(b, q.id, name); update(r.billing); if (r.deposit) go({ kind: "invoice", id: r.deposit.id }); }} /></>;
+  } else if (screen.kind === "change") {
+    const c = (b.change_orders ?? []).find((x) => x.id === screen.id)!;
+    const q = b.quotes.find((x) => x.id === c.quote_id)!;
+    body = <>{back}<ChangeOrderDocument co={c} quote={q} brand={brand} job={job} contract={contractTotal(b, q.id)} mode="client"
+      onApprove={(name) => { const next = approveChangeOrder(b, c.id, name); update(next); const inv = next.change_orders?.find((x) => x.id === c.id)?.invoice_id; if (inv) go({ kind: "invoice", id: inv }); }}
+      onDecline={() => update({ ...b, change_orders: (b.change_orders ?? []).map((x) => (x.id === c.id ? logged({ ...x, status: "declined" }, "Declined") : x)) })} /></>;
   } else if (screen.kind === "invoice") {
     const i = b.invoices.find((x) => x.id === screen.id)!;
     body = <>{back}
@@ -66,6 +77,9 @@ export function ClientMoneyView({ billing, brand, job, start, onChange, onBack }
         {quotes.length > 0 && <><p className="text-[13px] uppercase tracking-wide text-neutral-500 mt-2">Quotes</p>
           {quotes.map((q) => row(q.id, `${q.title}`, q.number, fmt(quoteTotals(q).total),
             q.status === "approved" ? ["Approved", "text-green-700"] : q.status === "declined" ? ["Declined", "text-neutral-400"] : ["Waiting for you", "text-amber-600"], () => go({ kind: "quote", id: q.id })))}</>}
+        {changes.length > 0 && <><p className="text-[13px] uppercase tracking-wide text-neutral-500 mt-5">Changes to the work</p>
+          {changes.map((c) => row(c.id, c.title, c.number, signedFmt(changeOrderTotals(c).total, fmt),
+            c.status === "approved" ? ["Approved", "text-green-700"] : c.status === "declined" ? ["Declined", "text-neutral-400"] : ["Waiting for you", "text-amber-600"], () => go({ kind: "change", id: c.id })))}</>}
         {invoices.length > 0 && <><p className="text-[13px] uppercase tracking-wide text-neutral-500 mt-5">Invoices</p>
           {invoices.map((i) => { const st = invoiceStatus(i, b.payments); return row(i.id, i.title, `${i.number}${i.due_date ? ` · due ${new Date(i.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}`, fmt(invoiceTotals(i).total),
             st === "paid" ? ["Paid", "text-green-700"] : st === "void" ? ["Void", "text-neutral-400"] : st === "overdue" ? ["Overdue", "text-red-600"] : st === "partial" ? ["Part paid", "text-amber-600"] : ["To pay", "text-amber-600"], () => go({ kind: "invoice", id: i.id })); })}</>}

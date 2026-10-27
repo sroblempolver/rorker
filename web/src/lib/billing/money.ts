@@ -1,5 +1,5 @@
 // Money helpers shared by quotes, invoices and payments. Cents in, cents out.
-import type { Billing, Invoice, InvoiceStatus, LineItem, Payment, Quote } from "./types";
+import type { Billing, ChangeOrder, Invoice, InvoiceStatus, LineItem, Payment, Quote } from "./types";
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 /** 123456 -> "$1,234.56" */
@@ -21,7 +21,14 @@ export function totals(lines: LineItem[], taxRate: number, discount = 0, chosen:
   return { subtotal, discount: d, tax, total: subtotal - d + tax };
 }
 
-export const quoteTotals = (q: Quote) => totals(q.lines, q.tax_rate, q.discount, q.chosen);
+/** Lines that count on a quote: shared lines plus the picked package's (the first package until one is picked). */
+export const quoteLines = (q: Quote) => {
+  const pick = q.picked_option ?? q.options?.[0]?.id ?? null;
+  return q.lines.filter((l) => !l.option_id || l.option_id === pick);
+};
+export const quoteTotals = (q: Quote) => totals(quoteLines(q), q.tax_rate, q.discount, q.chosen);
+/** What a package would total if picked. */
+export const optionTotals = (q: Quote, optionId: string) => quoteTotals({ ...q, picked_option: optionId });
 export const invoiceTotals = (i: Invoice) => totals(i.lines, i.tax_rate, i.discount);
 
 /** What has been paid on an invoice (succeeded payments only). */
@@ -39,9 +46,12 @@ export function invoiceStatus(i: Invoice, payments: Payment[], today = new Date(
   return i.status === "viewed" ? "viewed" : "sent";
 }
 
+export const changeOrderTotals = (c: ChangeOrder) => totals(c.lines, c.tax_rate);
+
 /** Job money at a glance: quoted (approved), invoiced, collected, still owed. */
 export function jobMoney(b: Billing) {
-  const approved = b.quotes.filter((q) => q.status === "approved").reduce((s, q) => s + quoteTotals(q).total, 0);
+  const approved = b.quotes.filter((q) => q.status === "approved").reduce((s, q) => s + quoteTotals(q).total, 0)
+    + (b.change_orders ?? []).filter((c) => c.status === "approved").reduce((s, c) => s + changeOrderTotals(c).total, 0);
   const live = b.invoices.filter((i) => i.status !== "draft" && i.status !== "void");
   const invoiced = live.reduce((s, i) => s + invoiceTotals(i).total, 0);
   const collected = b.payments.filter((p) => p.status === "succeeded").reduce((s, p) => s + p.amount, 0);
@@ -49,8 +59,8 @@ export function jobMoney(b: Billing) {
 }
 
 /** "Q-1003" after "Q-1001", "Q-1002". */
-export function nextNumber(prefix: "Q" | "INV", existing: string[]) {
-  const n = Math.max(1000, ...existing.map((x) => parseInt(x.split("-")[1] ?? "", 10)).filter(Number.isFinite));
+export function nextNumber(prefix: "Q" | "INV" | "CO", existing: string[]) {
+  const n = Math.max(prefix === "CO" ? 0 : 1000, ...existing.map((x) => parseInt(x.split("-")[1] ?? "", 10)).filter(Number.isFinite));
   return `${prefix}-${n + 1}`;
 }
 

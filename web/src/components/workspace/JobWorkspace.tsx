@@ -287,7 +287,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       return <MoneyPanel key={moneyKey} initial={billing} brand={data.brand} jobId={job.id} plan={view} stages={stages} connected={payouts}
         job={{ name: job.name, address: job.address, client_name: job.client_name, client_email: job.client_email, client_phone: job.client_phone }}
         onConnect={() => void guard(async () => { await money.connectPayouts(); setPayouts(true); say("Payouts are on. Clients can now pay by card or bank."); })}
-        api={{ say, openClient: money.openClient, save: (b) => { setBilling(b); money.save(b); } }} />;
+        api={{ say, openClient: money.openClient, save: (b) => { setBilling(b); money.save(b); },
+          showRoom: (roomId) => { const f = view?.floors.find((fl) => fl.rooms.some((r) => r.id === roomId)); if (f) { setLevelRaw({ kind: "room", floorId: f.id, roomId }); setSelected(roomId); } } }} />;
     }
     if (tab === "plan") return (
       <div className="space-y-3">

@@ -1,21 +1,27 @@
 // Turning an approved quote's payment plan into invoices. The deposit is billed on approval; each
 // progress draw is suggested when its stage is marked done; the final draw closes out the quote.
-import { newId, nextNumber, quoteTotals } from "./money";
-import type { Draw, Invoice, InvoiceKind, LineItem, Quote } from "./types";
+import { changeOrderTotals, newId, nextNumber, quoteTotals } from "./money";
+import type { ChangeOrder, Draw, Invoice, InvoiceKind, LineItem, Quote } from "./types";
 
 const DAY = 864e5;
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 
 export const KIND_LABEL: Record<InvoiceKind, string> = { deposit: "Deposit", progress: "Progress", final: "Final", standard: "Invoice" };
 
-/** Each draw's share of the quote total in cents. The last draw takes the rounding remainder. */
-export function drawAmounts(quote: Quote): Record<string, number> {
+/** Approved change orders on this quote that wait for the final payment (not billed on their own). */
+export const finalChangeOrders = (quote: Quote, changeOrders: ChangeOrder[]) =>
+  changeOrders.filter((c) => c.quote_id === quote.id && c.status === "approved" && c.bill === "final" && !c.invoice_id);
+
+/** Each draw's share of the quote total in cents. The last draw takes the rounding remainder, plus the
+ *  approved change orders that were added to the final payment. */
+export function drawAmounts(quote: Quote, changeOrders: ChangeOrder[] = []): Record<string, number> {
   const total = quoteTotals(quote).total;
+  const extra = finalChangeOrders(quote, changeOrders).reduce((s, c) => s + changeOrderTotals(c).total, 0);
   const out: Record<string, number> = {};
   let used = 0;
   quote.schedule.forEach((d, i) => {
     const last = i === quote.schedule.length - 1;
-    out[d.id] = last ? total - used : Math.round(total * d.pct);
+    out[d.id] = last ? total - used + extra : Math.round(total * d.pct);
     used += out[d.id];
   });
   return out;
@@ -29,13 +35,15 @@ function drawKind(quote: Quote, draw: Draw): InvoiceKind {
 }
 
 /** One invoice for one draw. Tax is already in the quote total, so the line is not taxed again. */
-export function invoiceForDraw(quote: Quote, draw: Draw, existingNumbers: string[], opts: { issue?: boolean } = {}): Invoice {
+export function invoiceForDraw(quote: Quote, draw: Draw, existingNumbers: string[], opts: { issue?: boolean } = {}, changeOrders: ChangeOrder[] = []): Invoice {
   const now = new Date();
   const kind = drawKind(quote, draw);
   const id = newId();
+  const cos = kind === "final" ? finalChangeOrders(quote, changeOrders) : [];
+  const includes = cos.length ? `, includes ${cos.map((c) => c.number).join(", ")}` : "";
   const line: LineItem = {
-    id: newId(), group: "Payment plan", description: `${draw.label}: ${Math.round(draw.pct * 100)}% of ${quote.number}`,
-    qty: 1, unit: "lot", unit_price: drawAmounts(quote)[draw.id] ?? 0, room_id: null, element_ids: [], taxable: false,
+    id: newId(), group: "Payment plan", description: `${draw.label}: ${Math.round(draw.pct * 100)}% of ${quote.number}${includes}`,
+    qty: 1, unit: "lot", unit_price: drawAmounts(quote, changeOrders)[draw.id] ?? 0, room_id: null, element_ids: [], taxable: false,
   };
   return {
     id, job_id: quote.job_id, quote_id: quote.id, draw_id: draw.id, number: nextNumber("INV", existingNumbers),
