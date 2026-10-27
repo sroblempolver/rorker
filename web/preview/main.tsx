@@ -1,6 +1,6 @@
 // Standalone, clickable preview of the Rorker app on the house.dwg sample. Same screens as the real app;
 // data lives in memory, so nothing is saved. New project reads a drawing with the Rorker assistant.
-import { StrictMode, useEffect, useMemo, useState } from "react";
+import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import housePlan from "@/demo/house-plan.json";
 import { DEMO_CREW, sampleItems, samplePins, sampleStates } from "@/demo/sample";
@@ -16,6 +16,10 @@ import { previewAsk } from "./assistant";
 import { SharedWorkView } from "@/components/share/SharedJob";
 import { newToken, shareWork } from "@/lib/share";
 import { NewProject, type NewProjectResult } from "@/components/newjob/NewProject";
+import { ShoppingRun } from "@/components/materials/ShoppingRun";
+import { EXTRA_JOBS, sampleMaterials } from "@/demo/materials-sample";
+import { qtyText, type MaterialLine, type MaterialsApi, type MaterialsJob } from "@/lib/materials/types";
+import { TeamContext } from "@/components/team/context";
 
 /** when this preview was built, so an out-of-date copy in the browser cache is easy to spot */
 declare const __BUILD__: string;
@@ -35,7 +39,7 @@ function seed(): WorkspaceData {
     id: `s${i}`, job_id: jobId, position: i + 1, name: s.name, description: null,
     status: i < 2 ? "done" : i === 2 ? "active" : "not_started", started_at: null, completed_at: null,
   }));
-  const pins = samplePins(plan, members).map((p, i) => ({
+  const pins = samplePins(plan, members).filter((p) => p.kind !== "material").map((p, i) => ({
     id: `p${i + 1}`, job_id: jobId, number: i + 1, element_id: null, floor_id: null, x: null, y: null, kind: "task", title: "", body: null,
     status: "open", priority: 1, due_date: null, tagged: [], close_requirement: "confirm", stage_id: null, links: [], created_by: null,
     created_at: now(), closed_at: null, comment_count: 0, ...p,
@@ -43,6 +47,18 @@ function seed(): WorkspaceData {
   // the viewer (the owner) is on the issue too, so "Tagged to me" has something in it
   const issue = pins.find((p) => p.kind === "issue");
   if (issue) issue.tagged = ["m0", ...issue.tagged];
+  // the sample materials list; lines placed on the house get their teal pin on the map
+  const PIN_STATUS = { to_buy: "open", ordered: "open", got: "in_progress", installed: "done", returned: "done" } as const;
+  materials.lines = sampleMaterials(plan, jobId, members).map((m, i) => {
+    let pin_id: string | null = null;
+    if (m.job_id === jobId && m.element_id) {
+      pin_id = `pm${i}`;
+      pins.push({ id: pin_id, job_id: jobId, number: pins.length + 1, element_id: m.element_id, floor_id: m.floor_id, x: null, y: null, kind: "material", title: `Buy ${qtyText(m.qty, m.unit)} ${m.name}`,
+        body: null, status: PIN_STATUS[m.status], priority: 1, due_date: m.needed_by, tagged: [...new Set([m.buyer, m.installer].filter(Boolean) as string[])], close_requirement: "confirm",
+        stage_id: null, links: [], created_by: null, created_at: now(), closed_at: null, comment_count: 0 });
+    }
+    return { ...m, id: `ml${i}`, pin_id, receipts: [], created_at: now() };
+  });
   const planRow: PlanRow = { id: "plan1", job_id: jobId, version: 1, data: plan, created_at: now() };
   return {
     job: { id: jobId, company_id: "demo", name: "Hadley Road house", address: "14 Hadley Road", client_name: "Sam and Priya Okafor", client_email: null, client_phone: null, job_type: "renovation", status: "active", start_date: null, current_plan_id: "plan1", created_at: now() },
@@ -50,6 +66,29 @@ function seed(): WorkspaceData {
     items: sampleItems(plan).map((it, i) => ({ id: `i${i + 1}`, job_id: jobId, label: null, note: null, created_at: now(), ...it }) as JobItem),
     runs: [{ id: "r1", job_id: jobId, kind: "read", file_name: "house.dwg", status: "needs_answers", error: null, plan_id: "plan1", created_at: now(), finished_at: now(), metrics: {} }],
     members, me: "m0", aiAvailable: false, canShare: true,
+  };
+}
+
+/** The materials list across every job in the preview. */
+const materials: { lines: MaterialLine[] } = { lines: [] };
+function materialsApi(all: () => WorkspaceData[]): MaterialsApi {
+  const PIN_STATUS = { to_buy: "open", ordered: "open", got: "in_progress", installed: "done", returned: "done" } as const;
+  return {
+    async list() { return [...materials.lines]; },
+    async create(input) {
+      const made = input.map((i) => ({ receipts: [], pin_id: null, ...i, id: uid(), created_at: now() }) as MaterialLine);
+      materials.lines = [...materials.lines, ...made];
+      return made;
+    },
+    async update(id, patch) {
+      materials.lines = materials.lines.map((l) => (l.id === id ? { ...l, ...patch } as MaterialLine : l));
+      const l = materials.lines.find((x) => x.id === id)!;
+      // keep the line's pin in step, also when it's ticked off from the shopping run
+      const d = all().find((j) => j.job.id === l.job_id);
+      if (d && l.pin_id) d.pins = d.pins.map((p) => (p.id === l.pin_id ? { ...p, status: PIN_STATUS[l.status], title: `Buy ${qtyText(l.qty, l.unit)} ${l.name}` } : p));
+      return l;
+    },
+    async remove(id) { materials.lines = materials.lines.filter((l) => l.id !== id); },
   };
 }
 
@@ -188,22 +227,38 @@ function fromAssistant(r: NewProjectResult, team: Member[]): WorkspaceData {
   };
 }
 
-type Page = "jobs" | "job" | "team" | "shared" | "new";
+type Page = "jobs" | "job" | "team" | "shared" | "new" | "shop";
+
+/** A small job with no drawing yet (the materials sample spreads across these too). */
+function plainJob(j: (typeof EXTRA_JOBS)[number], team: Member[]): WorkspaceData {
+  const tpl = DEFAULT_TEMPLATES.find((t) => t.job_type === j.job_type) ?? DEFAULT_TEMPLATES[0];
+  return {
+    job: { ...j, company_id: "demo", client_email: null, client_phone: null, status: "active", start_date: null, current_plan_id: null, created_at: now() },
+    plan: null, stages: tpl.stages.map((s, i) => ({ id: uid(), job_id: j.id, position: i + 1, name: s.name, description: null, status: i === 0 ? "active" : "not_started", started_at: null, completed_at: null })),
+    pins: [], states: [], edits: {}, can3d: true, items: [], runs: [], members: team, me: "m0", aiAvailable: false, canShare: true,
+  };
+}
 
 function App() {
   const [page, setPage] = useState<Page>("job");
   const [share, setShare] = useState<{ token: string; pin?: string } | null>(null);
   const sample = useMemo(seed, []);
-  const [jobs, setJobs] = useState<WorkspaceData[]>(() => [sample]);
+  const [jobs, setJobs] = useState<WorkspaceData[]>(() => [sample, ...EXTRA_JOBS.map((j) => plainJob(j, sample.members))]);
+  const jobsRef = useRef(jobs);
+  jobsRef.current = jobs;
+  const mapi = useMemo(() => materialsApi(() => jobsRef.current), []);
+  const mjobs: MaterialsJob[] = jobs.map((d) => ({ id: d.job.id, name: d.job.name, address: d.job.address }));
+  const [, setMver] = useState(0);
   const [activeId, setActiveId] = useState(sample.job.id);
   const active = jobs.find((j) => j.job.id === activeId) ?? jobs[0];
   // the assistant changes the job behind the screen's back: hand the workspace a fresh copy after
   const [ver, setVer] = useState(0);
-  const current = useMemo(() => ({ ...active }), [active, ver]); // eslint-disable-line react-hooks/exhaustive-deps
+  const current = useMemo(() => ({ ...active, materials: { lines: materials.lines, jobs: mjobs } }), [active, ver, jobs.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const api = useMemo(() => {
     const a = memoryApi(active);
-    return { ...a, ask: previewAsk(active, a), afterAssistant: () => setVer((n) => n + 1), openShare: (token: string, pin?: string) => { setShare({ token, pin }); setPage("shared"); } };
-  }, [active]);
+    return { ...a, ask: previewAsk(active, a), afterAssistant: () => setVer((n) => n + 1), openShare: (token: string, pin?: string) => { setShare({ token, pin }); setPage("shared"); },
+      materials: mapi, openShopping: () => setPage("shop") };
+  }, [active, mapi]);
   const team = useMemo(() => teamApi(sample), [sample]);
   const [, bump] = useState(0);
   useEffect(() => {
@@ -228,10 +283,10 @@ function App() {
   );
   return (
     <div className="h-full flex flex-col">
-      <header className="h-14 shrink-0 border-b border-line bg-panel flex items-center gap-4 px-4">
+      <header className="h-14 shrink-0 border-b border-line bg-panel flex items-center gap-2 sm:gap-4 px-3 sm:px-4">
         <button onClick={() => setPage("jobs")} aria-label="All jobs"><Logo size={20} /></button>
-        <nav className="flex items-center gap-1 ml-2">{tab("jobs", "Jobs")}{tab("team", "Team")}</nav>
-        <button onClick={() => setPage("new")} className={`btn btn-sm ${page === "new" ? "btn-ghost" : "btn-primary"} ml-auto`}>+ New project</button>
+        <nav className="flex items-center gap-1 sm:ml-2 min-w-0">{tab("jobs", "Jobs")}{tab("shop", "Shopping")}{tab("team", "Team")}</nav>
+        <button onClick={() => setPage("new")} className={`btn btn-sm ${page === "new" ? "btn-ghost" : "btn-primary"} ml-auto`}>+<span className="hidden sm:inline"> New project</span></button>
         <span className="chip hidden md:inline-flex"><span>Preview · sample data, nothing is saved · build {__BUILD__}</span></span>
       </header>
       {page === "new" ? (
@@ -239,6 +294,14 @@ function App() {
       ) : page === "shared" && share ? (
         <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">
           {(() => { const v = sharedWork(jobs, share.token, pinPhotos); return v ? <SharedWorkView key={share.token + share.pin} work={v} pin={share.pin} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} onBack={() => { setVer((n) => n + 1); setPage("job"); }} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
+        </div>
+      ) : page === "shop" ? (
+        <div className="flex-1 overflow-y-auto">
+          <TeamContext.Provider value={{ members: sample.members, me: "m0" }}>
+            <ShoppingRun lines={materials.lines} jobs={mjobs} members={sample.members} me="m0"
+              onUpdate={(ids, patch) => { void Promise.all(ids.map((id) => mapi.update(id, patch))).then(() => { setMver((n) => n + 1); setVer((n) => n + 1); }); }}
+              onOpenJob={(id) => { setActiveId(id); setVer((n) => n + 1); setPage("job"); }} />
+          </TeamContext.Provider>
         </div>
       ) : page === "team" ? (
         <div className="flex-1 overflow-y-auto">

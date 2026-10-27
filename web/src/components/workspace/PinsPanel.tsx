@@ -319,9 +319,11 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
 
 /** The quick card that opens right where you dropped a pin: pick a kind, type a line, save. "More"
  *  moves to the full form in the side panel with what you typed. */
-export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel }: {
+export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel, onBuy }: {
   plan: Plan | null; target: PinTarget; left: number; top: number;
   onSave: (kind: PinKind, title: string, tagged: string[], photo: boolean) => Promise<void>; onMore: (kind: PinKind, title: string, tagged: string[], photo: boolean) => void; onCancel: () => void;
+  /** with a materials list, "Material" puts it on the list (and the map) instead of a plain pin */
+  onBuy?: (title: string, tagged: string[], more: boolean) => Promise<void> | void;
 }) {
   const { members } = useTeam();
   const [tagged, setTagged] = useState<string[]>([]);
@@ -329,6 +331,7 @@ export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel }: 
   const [choice, setChoice] = useState<PinKind | "photo">("note");
   const photo = choice === "photo";
   const kind: PinKind = photo ? "task" : choice;
+  const buy = kind === "material" && !!onBuy;
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [needWho, setNeedWho] = useState(false);
@@ -337,6 +340,11 @@ export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel }: 
   const save = async (ev: React.FormEvent) => {
     ev.preventDefault();
     const t = title.trim() || (photo ? "Photo of this spot" : "");
+    if (buy) {
+      setBusy(true);
+      try { await onBuy!(t, tagged, !t); } finally { setBusy(false); }
+      return;
+    }
     if (!t) return onMore(kind, "", tagged, photo);
     if (photo && !tagged.length) return setNeedWho(true);
     setBusy(true);
@@ -352,24 +360,24 @@ export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel }: 
       </div>
       <div className="grid grid-cols-5 gap-1">
         {KINDS.map((k) => (
-          <button type="button" key={k} onClick={() => setChoice(k)} aria-pressed={choice === k}
+          <button type="button" key={k} onClick={() => { setChoice(k); ref.current?.focus(); }} aria-pressed={choice === k}
             className={`h-7 rounded-[3px] border text-[12px] ${choice === k ? "border-transparent text-[#111] font-semibold" : "border-line bg-panel-2 hover:bg-panel-3"}`}
-            style={choice === k ? { background: PIN_COLOR[k] } : undefined}>{PIN_LABEL[k]}</button>
+            style={choice === k ? { background: PIN_COLOR[k] } : undefined}>{k === "material" && onBuy ? "Buy" : PIN_LABEL[k]}</button>
         ))}
         <button type="button" onClick={() => setChoice("photo")} aria-pressed={photo} title="Ask someone for a photo of this spot"
           className={`h-7 rounded-[3px] border text-[12px] ${photo ? "border-transparent text-[#111] font-semibold bg-chalk" : "border-line bg-panel-2 hover:bg-panel-3"}`}>Photo</button>
       </div>
       <input ref={ref} className="input !h-9" value={title} onChange={(e) => setTitle(e.target.value)}
-        placeholder={photo ? "Photo of this spot (what to show)" : kind === "note" ? "Note for this spot" : kind === "issue" ? "What is wrong here?" : kind === "material" ? "What goes here?" : "What needs doing here?"} />
+        placeholder={buy ? "What to buy? e.g. 2 outlets" : photo ? "Photo of this spot (what to show)" : kind === "note" ? "Note for this spot" : kind === "issue" ? "What is wrong here?" : kind === "material" ? "What goes here?" : "What needs doing here?"} />
       {members.length > 0 && (
         <div>
-          <p className={`text-[11.5px] mb-1 ${needWho && !tagged.length ? "text-amber" : "text-muted"}`}>{photo ? "Who takes it?" : "Tag staff"}</p>
+          <p className={`text-[11.5px] mb-1 ${needWho && !tagged.length ? "text-amber" : "text-muted"}`}>{photo ? "Who takes it?" : buy ? "Who gets it?" : "Tag staff"}</p>
           <div className="max-h-[96px] overflow-y-auto scroll-thin"><StaffPicker compact members={members} value={tagged} onChange={setTagged} /></div>
         </div>
       )}
       <div className="flex gap-1.5">
-        <button className="btn btn-primary btn-sm flex-1" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
-        <button type="button" className="btn btn-sm" onClick={() => onMore(kind, title, tagged, photo)}>More…</button>
+        <button className="btn btn-primary btn-sm flex-1" disabled={busy}>{busy ? "Saving…" : buy ? "Add to list" : "Save"}</button>
+        <button type="button" className="btn btn-sm" onClick={() => (buy ? onBuy!(title, tagged, true) : onMore(kind, title, tagged, photo))}>More…</button>
       </div>
     </form>
   );
