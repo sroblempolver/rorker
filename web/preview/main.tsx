@@ -326,7 +326,7 @@ function App() {
     go("job", d.job.id);
   };
   const tab = (p: Page, label: string) => (
-    <button onClick={() => { setFromClient(false); setPage(p); }} className={`px-3 h-9 rounded-[3px] font-display text-[15px] font-bold tracking-[0.1em] uppercase ${page === p ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</button>
+    <button onClick={() => { setFromClient(false); setPage(p); }} className={`shrink-0 px-1.5 sm:px-3 h-9 rounded-[3px] font-display text-[13px] sm:text-[15px] font-bold tracking-[0.06em] sm:tracking-[0.1em] uppercase ${page === p ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</button>
   );
   return (
     <div className="h-full flex flex-col">
