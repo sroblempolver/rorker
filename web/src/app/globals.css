@@ -98,16 +98,5 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M6 31V3' stroke='%23141310' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='M6 31V3' stroke='%23f4efe6' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M7 3h19l-4.5 6 4.5 6H7z' fill='%23ff6a1f' stroke='%23141310' stroke-width='1.5' stroke-linejoin='round'/%3E%3Ccircle cx='6' cy='30' r='2.2' fill='%23ff6a1f' stroke='%23141310'/%3E%3C/svg%3E") 6 30, crosshair !important;
 }
 
-/* Work-site sizing for the money screens: big, glove-friendly targets and type you can read on a
-   tailgate in the sun. Applied to the contractor's side only, never to client documents. */
-.rugged { font-size: 15.5px; }
-.rugged .btn { height: 46px; font-size: 15px; padding: 0 16px; }
-.rugged .btn-sm { height: 42px; font-size: 14px; padding: 0 14px; }
-.rugged .input { height: 48px; font-size: 16px; }
-.rugged textarea.input { height: auto; min-height: 88px; padding-top: 10px; }
-.rugged input[type="checkbox"], .rugged input[type="radio"] { width: 32px; height: 32px; accent-color: var(--accent); }
-.rugged .chip { height: 28px; font-size: 13px; font-weight: 600; }
-.rugged .card { border-radius: 4px; }
-.rugged .tabular, .rugged .tabular-nums { font-variant-numeric: tabular-nums; }
-/* late money gets the hazard edge */
+/* late money gets a hazard edge */
 .overdue-edge { border-left: 6px solid transparent; border-image: repeating-linear-gradient(-45deg, var(--red) 0 6px, #2a0d0d 6px 12px) 6; }

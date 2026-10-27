@@ -42,7 +42,7 @@ export function MoneyOverview({ rows, onOpenJob }: { rows: JobMoneyRow[]; onOpen
   ];
 
   return (
-    <div className="rugged px-4 sm:px-6 py-6 max-w-6xl w-full mx-auto space-y-5">
+    <div className="px-4 sm:px-6 py-6 max-w-6xl w-full mx-auto space-y-5">
       <div>
         <p className="eyebrow">All jobs</p>
         <h1 className="font-display text-[34px] font-extrabold uppercase leading-none tracking-[0.01em]">Money</h1>
