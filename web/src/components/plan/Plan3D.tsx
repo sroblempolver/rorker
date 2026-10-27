@@ -12,7 +12,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { JobItem, Pin, PinInput } from "@/lib/data/types";
 import { floorBBox, frontView, labelPoint, pointInPoly, roomSides, sidePoint, unionBBox, type WallSide } from "@/lib/plan/geometry";
-import type { ElementStatus, Floor, Opening, Plan, Pt, Room } from "@/lib/plan/types";
+import type { ElementStatus, Floor, Plan, Pt, Room } from "@/lib/plan/types";
 import type { ColorMode } from "./FloorCanvas";
 import { hitTest } from "./FloorCanvas";
 import { HIDDEN_KINDS, TOP_FILL, isWallMounted } from "./fixtures";
@@ -693,7 +693,7 @@ export function Plan3D(p: Props) {
     t.dots.clear();
     for (const m of getMarks().marks) {
       const fl = t.built.floors.find((f) => f.id === m.floor_id);
-      if (!fl) continue;
+      if (!fl || (m.outside && cb.current.mode !== "building")) continue;
       const g = new THREE.Group();
       const color = new THREE.Color(m.color);
       const top = fl.y0 + m.z * S + 0.35;
@@ -704,8 +704,11 @@ export function Plan3D(p: Props) {
       ring.rotation.x = -Math.PI / 2;
       ring.position.set(m.x * S, fl.y0 + 0.03, m.y * S);
       ring.renderOrder = 29;
-      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, top - fl.y0, 6), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, depthTest: false }));
-      stem.position.set(m.x * S, (fl.y0 + top) / 2, m.y * S);
+      // a dot on the outside (over the roof) has no floor to stand on: just a short stem under it
+      ring.visible = !m.outside;
+      const foot = m.outside ? top - 1.2 : fl.y0;
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, top - foot, 6), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, depthTest: false }));
+      stem.position.set(m.x * S, (foot + top) / 2, m.y * S);
       stem.renderOrder = 28;
       g.add(ball, ring, stem);
       if (m.label) { const sp = label(m.label, { color: m.color, bg: "#141513cc", size: 0.03 }); sp.position.set(m.x * S, top + 0.75, m.y * S); sp.renderOrder = 31; g.add(sp); }

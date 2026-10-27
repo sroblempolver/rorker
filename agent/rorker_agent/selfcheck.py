@@ -96,7 +96,7 @@ def _top_point(plan: Plan) -> QuestionPoint | None:
     top = floors[-1]
     b = _indoor_bbox(top) or top.bounds
     return QuestionPoint(floor_id=top.id, x=round((b[0] + b[2]) / 2), y=round((b[1] + b[3]) / 2),
-                         z=(top.height_mm or 2700) + 1800, outside=True)
+                         z=(top.height_mm or 2700) + 3500, outside=True)  # above the ridge
 
 
 def _at(f: Floor, el, z: float = 1500) -> QuestionPoint:

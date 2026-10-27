@@ -18,6 +18,8 @@ export function useFollowMarks(view: Plan | null, level: Level, go: (l: Level) =
     pending.current = focus;
     const floorId = marks[0].floor_id;
     const l = cb.current.level;
+    // dots on the outside (the roof, a porch) show on the building from outside
+    if (marks.every((m) => m.outside)) { if (l.kind !== "exterior") cb.current.go({ kind: "exterior" }); return; }
     const inRoom = l.kind === "room" || l.kind === "wall";
     const roomIds = new Set(marks.map((m) => (view && m.id ? (() => { const e = findElement(view, m.id!); return e ? (e.kind === "room" ? e.el.id : roomOf(e)) : null; })() : null)));
     const away = l.kind === "site" || l.kind === "exterior" || l.floorId !== floorId || (inRoom && !(roomIds.size === 1 && roomIds.has(l.roomId)));

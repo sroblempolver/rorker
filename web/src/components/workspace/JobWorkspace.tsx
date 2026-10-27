@@ -3,7 +3,8 @@
 // lives here and every change goes through the WorkspaceApi, so the same screen runs on the server
 // actions or on the in-memory preview.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ElementStatus } from "@/lib/plan/types";
+import type { ElementStatus, Question } from "@/lib/plan/types";
+import { clearMarks, MARK_COLORS, showMarks } from "@/lib/plan/marks";
 import type { ElementEdit, ItemInput, JobItem, Pin, PinInput, PinKind } from "@/lib/data/types";
 import { today } from "@/lib/dates";
 import { PlanChat } from "./PlanChat";
@@ -132,8 +133,13 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     setLevelRaw(to);
   }, [pins, plan, level]);
 
-  /** Point at elements from a question without leaving the current panel. */
-  const showElements = useCallback((ids: string[]) => {
+  /** Point at elements from a question without leaving the current panel. A question about the outside
+   *  (the roof, the way in) puts a blinking dot on the building instead. */
+  const showElements = useCallback((ids: string[], q?: Question) => {
+    if (q?.point) {
+      const pt = q.point;
+      return showMarks([{ floor_id: pt.floor_id, x: pt.x, y: pt.y, z: pt.z, outside: pt.outside, label: "?", color: MARK_COLORS[5][1], id: null }]);
+    }
     if (!plan || !ids.length) return;
     const e = findElement(plan.data, ids[0]);
     if (!e) return;
@@ -292,6 +298,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         onAnswer={async (a) => {
           if (!plan) return;
           await api.answer(plan.id, a);
+          clearMarks();
           const r = await api.refreshPlan();
           setRuns(r.runs);
           if (r.plan) setPlan(r.plan);

@@ -154,12 +154,15 @@ function roofPart(r: RoofPart, ex: Exterior, below: Pt[][]): RoofOut {
   const soffitM = std(FINISH.soffit, { rough: 0.9, side: THREE.DoubleSide });
   const gutterM = std(FINISH.gutter, { rough: 0.5, metal: 0.1 });
   const sideM = sidingMaterial(FINISH.siding, r.eaveY - ex.base(r.floorIndex));
+  sideM.side = THREE.DoubleSide;
   const mats = [roofM, trimM, soffitM, gutterM, sideM];
   const [x0, y0, x1, y1] = r.rect;
   const grade = -ex.rules.plinth;
 
   if (r.kind === "flat") {
+    // a membrane roof: no shingles, a fascia all round
     const o = RULES.flatOverhang;
+    roofM.map = null;
     const slab = block([x0 - o, y0 - o, x1 + o, y1 + o], r.eaveY, r.eaveY + 250, [trimM, trimM, roofM, soffitM, trimM, trimM]);
     g.add(slab);
     return { group: g, mats, main: slab };

@@ -2,6 +2,8 @@
 export interface Mark {
   floor_id: string; x: number; y: number; /** mm above the floor */ z: number;
   label: string; color: string; /** the room, object, door... it points at */ id: string | null;
+  /** on the outside of the building (the roof, a porch): shown on the outside view, not inside a floor */
+  outside?: boolean;
 }
 
 /** Colours with names the assistant can say out loud: "the blue dot". */
