@@ -12,6 +12,8 @@ import { PlanViewer, type Level } from "@/components/plan/PlanViewer";
 import type { ColorMode } from "@/components/plan/FloorCanvas";
 import { FURNISH } from "@/lib/plan/furnish";
 import { MicButton, speak, stopSpeaking, useDictation } from "@/components/voice/speech";
+import { useFeedback } from "@/components/ui/feedback";
+import { useEscape } from "@/components/ui/hotkeys";
 
 export interface NewProjectResult {
   job: { name: string; address: string | null; job_type: string; start_date: string | null; client_name: string | null; client_email: string | null; client_phone: string | null };
@@ -26,6 +28,7 @@ type Line = { who: "ai" | "you"; text: string };
 
 export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: NewProjectResult) => void; onCancel: () => void; intakeUrl?: string }) {
   const [files, setFiles] = useState<File[]>([]);
+  const { confirm } = useFeedback();
   const [text, setText] = useState("");
   const [stage, setStage] = useState<"start" | "working" | "questions" | "message" | "review">("start");
   const [err, setErr] = useState<string | null>(null);
@@ -98,10 +101,27 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
   // copy the list now: the input is cleared right after, which empties it
   const addFiles = (list: FileList | null) => { const got = list ? Array.from(list) : []; if (got.length) setFiles((f) => [...f, ...got].slice(0, 8)); };
 
+  // leaving with work in it asks first; Esc and the X do the same as Cancel
+  const started = stage !== "start" || files.length > 0 || !!text.trim();
+  const leave = async () => {
+    if (started && !(await confirm({ title: "Leave this new project?", body: "What you've added and what the assistant has drawn so far won't be kept.", confirm: "Leave", cancel: "Keep going", danger: true }))) return;
+    ctl.current?.abort();
+    dict.stop();
+    onCancel();
+  };
+  useEscape(() => { void leave(); });
+  useEffect(() => {
+    if (!started) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [started]);
+
   return (
     <div className="flex-1 overflow-y-auto">
       <div className={`px-4 sm:px-6 py-8 w-full mx-auto space-y-5 ${stage === "review" ? "max-w-[1500px]" : "max-w-3xl"}`}>
-        <div>
+        <div className="relative pr-10">
+          <button onClick={() => void leave()} aria-label="Close" title="Close (Esc)" className="absolute right-0 top-0 w-9 h-9 grid place-items-center text-muted hover:text-text rounded-[3px] hover:bg-panel-2">✕</button>
           <p className="eyebrow">New project</p>
           <h1 className="font-display text-[34px] font-extrabold uppercase leading-none tracking-[0.01em] mb-1">Set up a job</h1>
           <p className="text-muted">Drop in what you have and tell me about the job. I&apos;ll ask if I need anything, then build the plan and set up the client.</p>
@@ -142,7 +162,7 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
             {err && <p className="text-[13px] text-red">{err}</p>}
             <div className="flex gap-2">
               <button className="btn btn-primary flex-1" onClick={start}>Start</button>
-              <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+              <button className="btn btn-ghost" onClick={() => void leave()}>Cancel</button>
             </div>
           </section>
         )}

@@ -312,7 +312,7 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
         </form>
       </div>
 
-      <button className="text-[13px] text-muted hover:text-red" onClick={() => { if (confirm("Delete this pin?")) run(onDelete); }}>Delete pin</button>
+      <button className="text-[13px] text-muted hover:text-red" onClick={() => run(onDelete)} title="You can undo this for a few seconds">Delete pin</button>
     </div>
   );
 }

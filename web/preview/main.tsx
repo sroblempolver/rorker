@@ -1,6 +1,6 @@
 // Standalone, clickable preview of the Rorker app on the house.dwg sample. Same screens as the real app;
 // data lives in memory, so nothing is saved. New project reads a drawing with the Rorker assistant.
-import { StrictMode, useEffect, useMemo, useState } from "react";
+import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import housePlan from "@/demo/house-plan.json";
 import { DEMO_CREW, sampleItems, samplePins, sampleStates } from "@/demo/sample";
@@ -16,6 +16,7 @@ import { previewAsk } from "./assistant";
 import { SharedWorkView } from "@/components/share/SharedJob";
 import { newToken, shareWork } from "@/lib/share";
 import { NewProject, type NewProjectResult } from "@/components/newjob/NewProject";
+import { FeedbackProvider } from "@/components/ui/feedback";
 
 /** when this preview was built, so an out-of-date copy in the browser cache is easy to spot */
 declare const __BUILD__: string;
@@ -190,28 +191,55 @@ function fromAssistant(r: NewProjectResult, team: Member[]): WorkspaceData {
 
 type Page = "jobs" | "job" | "team" | "shared" | "new";
 
+/** Each screen has its own address (#/jobs, #/job/hadley ...) so the browser's back button, a refresh
+ * and a copied link all land where you were. */
+function fromHash(): { page: Page; id?: string } {
+  const [a, b] = location.hash.replace(/^#\/?/, "").split("/");
+  if (a === "jobs" || a === "team" || a === "new" || a === "shared") return { page: a };
+  return { page: "job", id: a === "job" ? b : undefined };
+}
+const hashFor = (page: Page, id: string) => (page === "job" ? `#/job/${id}` : `#/${page}`);
+const TITLES: Partial<Record<Page, string>> = { jobs: "Jobs", team: "Team", new: "New project", shared: "Shared link" };
+
 function App() {
-  const [page, setPage] = useState<Page>("job");
-  const [share, setShare] = useState<{ token: string; pin?: string } | null>(null);
   const sample = useMemo(seed, []);
+  const [page, setPageRaw] = useState<Page>(() => fromHash().page);
+  const [share, setShare] = useState<{ token: string; pin?: string } | null>(null);
   const [jobs, setJobs] = useState<WorkspaceData[]>(() => [sample]);
-  const [activeId, setActiveId] = useState(sample.job.id);
+  const [activeId, setActiveIdRaw] = useState(() => fromHash().id ?? sample.job.id);
+  /** go somewhere: a new history entry first, so the screen that opens builds on it */
+  const go = (p: Page, id = activeId) => {
+    const h = hashFor(p, id);
+    if (location.hash !== h) history.pushState(null, "", h);
+    setPageRaw(p);
+    setActiveIdRaw(id);
+  };
+  const setPage = (p: Page) => go(p);
+  const goRef = useRef(go);
+  goRef.current = go;
+  useEffect(() => {
+    if (!location.hash) history.replaceState(history.state, "", hashFor(page, activeId));
+    const pop = () => { const r = fromHash(); setPageRaw(r.page); if (r.id) setActiveIdRaw(r.id); };
+    window.addEventListener("popstate", pop);
+    return () => window.removeEventListener("popstate", pop);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (TITLES[page]) document.title = `${TITLES[page]} · Rorker`; }, [page]);
   const active = jobs.find((j) => j.job.id === activeId) ?? jobs[0];
   // the assistant changes the job behind the screen's back: hand the workspace a fresh copy after
   const [ver, setVer] = useState(0);
   const current = useMemo(() => ({ ...active }), [active, ver]); // eslint-disable-line react-hooks/exhaustive-deps
   const api = useMemo(() => {
     const a = memoryApi(active);
-    return { ...a, ask: previewAsk(active, a), afterAssistant: () => setVer((n) => n + 1), openShare: (token: string, pin?: string) => { setShare({ token, pin }); setPage("shared"); } };
+    return { ...a, ask: previewAsk(active, a), afterAssistant: () => setVer((n) => n + 1), openShare: (token: string, pin?: string) => { setShare({ token, pin }); goRef.current("shared"); } };
   }, [active]);
   const team = useMemo(() => teamApi(sample), [sample]);
   const [, bump] = useState(0);
   useEffect(() => {
     const go = (e: Event) => {
       const href = (e as CustomEvent<string>).detail;
-      if (href === "/jobs/new") setPage("new");
-      else if (href.startsWith("/jobs/")) { setActiveId(href.split("/")[2]); setPage("job"); }
-      else setPage("jobs");
+      if (href === "/jobs/new") goRef.current("new");
+      else if (href.startsWith("/jobs/")) goRef.current("job", href.split("/")[2]);
+      else goRef.current("jobs");
       bump((n) => n + 1);
     };
     window.addEventListener("preview-nav", go);
@@ -220,8 +248,7 @@ function App() {
   const created = (r: NewProjectResult) => {
     const d = fromAssistant(r, sample.members);
     setJobs((js) => [d, ...js]);
-    setActiveId(d.job.id);
-    setPage("job");
+    go("job", d.job.id);
   };
   const tab = (p: Page, label: string) => (
     <button onClick={() => setPage(p)} className={`px-3 h-9 rounded-[3px] font-display text-[15px] font-bold tracking-[0.1em] uppercase ${page === p ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</button>
@@ -270,4 +297,4 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
+createRoot(document.getElementById("root")!).render(<StrictMode><FeedbackProvider><App /></FeedbackProvider></StrictMode>);

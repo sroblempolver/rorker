@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Big_Shoulders, Big_Shoulders_Stencil, IBM_Plex_Mono, Instrument_Sans } from "next/font/google";
 import "./globals.css";
+import { FeedbackProvider } from "@/components/ui/feedback";
 
 // Site-signage display face, a stencil cut for the wordmark, a plain body face, and a mono for element IDs.
 const display = Big_Shoulders({ subsets: ["latin"], weight: ["600", "700", "800"], variable: "--font-signage" });
@@ -17,7 +18,7 @@ export const viewport: Viewport = { themeColor: "#17181b", width: "device-width"
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${display.variable} ${stencil.variable} ${body.variable} ${mono.variable}`}>
-      <body>{children}</body>
+      <body><FeedbackProvider>{children}</FeedbackProvider></body>
     </html>
   );
 }
