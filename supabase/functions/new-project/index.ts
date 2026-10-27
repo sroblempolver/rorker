@@ -151,7 +151,7 @@ Deno.serve(async (req) => {
 
   const raw = await req.text();
   if (raw.length > MAX_BODY) return json({ error: "Those files are too big to send at once. Try fewer pages or smaller photos." }, 413);
-  let body: { description?: string; parts?: Part[]; history?: Anthropic.MessageParam[]; today?: string; test_url?: string; plan?: string };
+  let body: { description?: string; parts?: Part[]; history?: Anthropic.MessageParam[]; today?: string; test_url?: string; test_parts?: string; plan?: string };
   try { body = JSON.parse(raw); } catch { return json({ error: "Bad request." }, 400); }
 
   // for checking the function itself: a picture from the preview's own site
@@ -165,6 +165,22 @@ Deno.serve(async (req) => {
       const note = await fetch(body.test_url.replace(/\.(png|jpg)$/, ".txt")).then((x) => (x.ok ? x.text() : "")).catch(() => "");
       parts = [{ kind: "image", name: body.test_url.split("/").pop(), media_type: body.test_url.endsWith(".png") ? "image/png" : "image/jpeg", data: btoa(s), note }];
     }
+  }
+  // the same for a whole upload as the page prepares it: a folder on the preview's site with parts.json
+  // (name, file, note for each picture) beside the pictures
+  if (body.test_parts && /^https:\/\/sroblempolver\.github\.io\/rorker\/test\/[\w-]+\/$/.test(body.test_parts)) {
+    const list = await fetch(`${body.test_parts}parts.json`).then((x) => (x.ok ? x.json() : [])).catch(() => []);
+    const got: Part[] = [];
+    for (const p of (Array.isArray(list) ? list : []).slice(0, 24)) {
+      if (!/^[\w.-]+\.(png|jpg)$/.test(String(p?.file))) continue;
+      const r = await fetch(body.test_parts + p.file);
+      if (!r.ok) continue;
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      let s = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      got.push({ kind: "image", name: String(p.name ?? p.file), media_type: p.file.endsWith(".png") ? "image/png" : "image/jpeg", data: btoa(s), note: String(p.note ?? "") });
+    }
+    if (got.length) parts = got;
   }
   const history = (Array.isArray(body.history) ? body.history : []).slice(0, 24);
   if (history.length % 2 === 1 || !history.every((m, i) => m && m.role === (i % 2 === 0 ? "assistant" : "user"))) return json({ error: "Bad request." }, 400);
