@@ -16,6 +16,12 @@ import { previewAsk } from "./assistant";
 import { SharedWorkView } from "@/components/share/SharedJob";
 import { newToken, shareWork } from "@/lib/share";
 import { NewProject, type NewProjectResult } from "@/components/newjob/NewProject";
+import { ClientMoneyView } from "@/components/billing/ClientMoneyView";
+import type { ClientStart } from "@/components/billing/MoneyPanel";
+import type { Brand } from "@/lib/billing/types";
+import { SAMPLE_BRAND, sampleBilling } from "@/demo/billing-sample";
+import { MoneyOverview } from "@/components/billing/MoneyOverview";
+import { sampleOtherJobs } from "@/demo/money-jobs-sample";
 
 /** when this preview was built, so an out-of-date copy in the browser cache is easy to spot */
 declare const __BUILD__: string;
@@ -50,11 +56,14 @@ function seed(): WorkspaceData {
     items: sampleItems(plan).map((it, i) => ({ id: `i${i + 1}`, job_id: jobId, label: null, note: null, created_at: now(), ...it }) as JobItem),
     runs: [{ id: "r1", job_id: jobId, kind: "read", file_name: "house.dwg", status: "needs_answers", error: null, plan_id: "plan1", created_at: now(), finished_at: now(), metrics: {} }],
     members, me: "m0", aiAvailable: false, canShare: true,
+    billing: sampleBilling(jobId), brand: SAMPLE_BRAND, payoutsConnected: false,
   };
 }
 
 const COMPANY: Company = { id: "demo", name: "Demo Builders", logo_url: null, brand_color: "#ff6a1f", phone: "(555) 010-2030", email: null, license_no: null, website: null, address: null };
 const shares: ShareLink[] = [];
+/** money on the other jobs in the overview (they have no plan in the preview) */
+const otherJobs = sampleOtherJobs();
 /** What a link opens, across every job in the preview (a person's own link covers them all). */
 function sharedWork(jobs: WorkspaceData[], token: string, photos: Map<string, string[]>) {
   const l = shares.find((x) => x.token === token);
@@ -142,6 +151,10 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
       return l;
     },
     shareUrl: (token) => `https://app.rorker.com/s/${token}`,
+    money: {
+      save(b) { d.billing = b; },
+      async connectPayouts() { await new Promise((r) => setTimeout(r, 600)); d.payoutsConnected = true; },
+    },
   };
 }
 
@@ -188,24 +201,29 @@ function fromAssistant(r: NewProjectResult, team: Member[]): WorkspaceData {
     pins: [], states: [], edits: {}, can3d: true, items: [],
     runs: planRow ? [{ id: uid(), job_id: jobId, kind: "read", file_name: r.plan!.source.filename || "Your files", status: r.plan!.questions.length ? "needs_answers" : "done", error: null, plan_id: planRow.id, created_at: now(), finished_at: now(), metrics: {} }] : [],
     members: team, me: "m0", aiAvailable: false, canShare: true,
+    billing: { quotes: [], invoices: [], payments: [] }, brand: SAMPLE_BRAND, payoutsConnected: false,
   };
 }
 
-type Page = "jobs" | "job" | "team" | "shared" | "new";
+type Page = "jobs" | "job" | "team" | "shared" | "new" | "client" | "money";
 
 function App() {
   const [page, setPage] = useState<Page>("job");
   const [share, setShare] = useState<{ token: string; pin?: string } | null>(null);
+  const [client, setClient] = useState<ClientStart>(null);
+  const [tier, setTier] = useState<Brand["tier"]>("standard");
   const sample = useMemo(seed, []);
   const [jobs, setJobs] = useState<WorkspaceData[]>(() => [sample]);
   const [activeId, setActiveId] = useState(sample.job.id);
   const active = jobs.find((j) => j.job.id === activeId) ?? jobs[0];
   // the assistant changes the job behind the screen's back: hand the workspace a fresh copy after
   const [ver, setVer] = useState(0);
-  const current = useMemo(() => ({ ...active }), [active, ver]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [fromClient, setFromClient] = useState(false);
+  const current = useMemo(() => ({ ...active, startOnMoney: fromClient }), [active, ver, fromClient]); // eslint-disable-line react-hooks/exhaustive-deps
   const api = useMemo(() => {
     const a = memoryApi(active);
-    return { ...a, ask: previewAsk(active, a), afterAssistant: () => setVer((n) => n + 1), openShare: (token: string, pin?: string) => { setShare({ token, pin }); setPage("shared"); } };
+    return { ...a, ask: previewAsk(active, a), afterAssistant: () => setVer((n) => n + 1), openShare: (token: string, pin?: string) => { setShare({ token, pin }); setPage("shared"); },
+      money: { ...a.money!, openClient: (start: ClientStart) => { setClient(start); setPage("client"); } } };
   }, [active]);
   const team = useMemo(() => teamApi(sample), [sample]);
   const [, bump] = useState(0);
@@ -227,18 +245,35 @@ function App() {
     setPage("job");
   };
   const tab = (p: Page, label: string) => (
-    <button onClick={() => setPage(p)} className={`px-3 h-9 rounded-[3px] font-display text-[15px] font-bold tracking-[0.1em] uppercase ${page === p ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</button>
+    <button onClick={() => { setFromClient(false); setPage(p); }} className={`px-3 h-9 rounded-[3px] font-display text-[15px] font-bold tracking-[0.1em] uppercase ${page === p ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</button>
   );
   return (
     <div className="h-full flex flex-col">
       <header className="h-14 shrink-0 border-b border-line bg-panel flex items-center gap-4 px-4">
         <button onClick={() => setPage("jobs")} aria-label="All jobs"><Logo size={20} /></button>
-        <nav className="flex items-center gap-1 ml-2">{tab("jobs", "Jobs")}{tab("team", "Team")}</nav>
+        <nav className="flex items-center gap-1 ml-2">{tab("jobs", "Jobs")}{tab("money", "Money")}{tab("team", "Team")}</nav>
         <button onClick={() => setPage("new")} className={`btn btn-sm ${page === "new" ? "btn-ghost" : "btn-primary"} ml-auto`}>+ New project</button>
         <span className="chip hidden md:inline-flex"><span>Preview · sample data, nothing is saved · build {__BUILD__}</span></span>
       </header>
       {page === "new" ? (
         <NewProject onCreate={created} onCancel={() => setPage("jobs")} />
+      ) : page === "money" ? (
+        <div className="flex-1 overflow-y-auto">
+          <MoneyOverview rows={[...jobs.filter((j) => j.billing).map((j) => ({ jobId: j.job.id, jobName: j.job.name, clientName: j.job.client_name, address: j.job.address, billing: j.billing! })), ...otherJobs]}
+            onOpenJob={(id) => { if (jobs.some((j) => j.job.id === id)) { setActiveId(id); setVer((n) => n + 1); setPage("job"); } }} />
+        </div>
+      ) : page === "client" && active.billing ? (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-2 border-b border-line bg-panel text-[13px]">
+            <span className="text-muted">Branding on client documents:</span>
+            {(["standard", "premium"] as const).map((t) => (
+              <button key={t} onClick={() => setTier(t)} className={`btn btn-sm ${tier === t ? "btn-primary" : ""}`}>{t === "standard" ? "Standard (Powered by Rorker)" : "Premium (white label)"}</button>
+            ))}
+          </div>
+          <ClientMoneyView key={`${client?.id ?? "home"}-${tier}`} billing={active.billing} brand={{ ...(active.brand ?? SAMPLE_BRAND), tier }} start={client}
+            job={{ name: active.job.name, address: active.job.address, client_name: active.job.client_name, client_email: active.job.client_email, client_phone: active.job.client_phone }}
+            onChange={(b) => { active.billing = b; }} onBack={() => { setFromClient(true); setVer((n) => n + 1); setPage("job"); }} />
+        </div>
       ) : page === "shared" && share ? (
         <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">
           {(() => { const v = sharedWork(jobs, share.token, pinPhotos); return v ? <SharedWorkView key={share.token + share.pin} work={v} pin={share.pin} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} onBack={() => { setVer((n) => n + 1); setPage("job"); }} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
