@@ -18,6 +18,7 @@ import { hitTest } from "./FloorCanvas";
 import { HIDDEN_KINDS, TOP_FILL, isWallMounted } from "./fixtures";
 import { ITEM_SIZE } from "./items";
 import { fixtureObject, Materials, SHARED_GEOMETRY } from "./models3d";
+import { getMarks, useMarks } from "@/lib/plan/marks";
 import { CHALK, GLASS, MATERIAL_BASE, PIN_COLOR, ROOM_MATERIAL, STATUS_COLOR, type Material } from "./style";
 import type { Controls, PinTarget, ScreenPoint } from "./target";
 
@@ -516,6 +517,8 @@ export function Plan3D(p: Props) {
   const three = useRef<{
     renderer: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.PerspectiveCamera; controls: OrbitControls;
     built: Built | null; mt: Materials; sel: THREE.Box3Helper; focus: number; hoverFloor: string | null; sun: THREE.DirectionalLight; lockUntil: number;
+    /** the assistant's blinking dots */
+    dots: THREE.Group;
   } | null>(null);
 
   // one renderer for the life of the view
@@ -561,7 +564,9 @@ export function Plan3D(p: Props) {
     sel.add(glow);
     scene.add(sel);
     const mt = new Materials();
-    three.current = { renderer, scene, camera, controls, built: null, mt, sel, focus: 0, hoverFloor: null, sun, lockUntil: 0 };
+    const dots = new THREE.Group();
+    scene.add(dots);
+    three.current = { renderer, scene, camera, controls, built: null, mt, sel, focus: 0, hoverFloor: null, sun, lockUntil: 0, dots };
 
     const resize = () => {
       const w = el.clientWidth || 1, h = el.clientHeight || 1;
@@ -589,6 +594,18 @@ export function Plan3D(p: Props) {
           sp.scale.copy(sp.userData.base as THREE.Vector3).multiplyScalar(Math.min(1.9, Math.max(0.5, ref / d)));
         }
       }
+      // the assistant's dots pulse: the ball blinks, the ring on the floor spreads out
+      const now = performance.now() / 1000;
+      for (const d of dots.children) {
+        const [ball, ring] = d.children as THREE.Mesh[];
+        // about the same size on screen near and far, so close up they don't hide what they point at
+        const z = THREE.MathUtils.clamp(camera.position.distanceTo(ball.position) / 12, 0.2, 2.2);
+        ball.scale.setScalar(z);
+        (ball.material as THREE.MeshBasicMaterial).opacity = 0.55 + 0.45 * Math.abs(Math.sin(now * 3.4));
+        const k = (now * 0.7) % 1;
+        ring.scale.setScalar(z * (1 + k * 3));
+        (ring.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - k);
+      }
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);
     };
@@ -598,6 +615,7 @@ export function Plan3D(p: Props) {
       ro.disconnect();
       controls.dispose();
       if (three.current?.built) dispose(three.current.built.root);
+      dispose(dots);
       mt.dispose();
       renderer.dispose();
       renderer.domElement.remove();
@@ -672,7 +690,38 @@ export function Plan3D(p: Props) {
       t.focus = 0;
     }
     highlight();
+    placeDots();
   }, [key]);  
+
+  /** Put a blinking dot (and its name) on each place the assistant is pointing at, on the floors shown. */
+  const { n: markN } = useMarks();
+  function placeDots() {
+    const t = three.current;
+    if (!t?.built) return;
+    dispose(t.dots);
+    t.dots.clear();
+    for (const m of getMarks().marks) {
+      const fl = t.built.floors.find((f) => f.id === m.floor_id);
+      if (!fl) continue;
+      const g = new THREE.Group();
+      const color = new THREE.Color(m.color);
+      const top = fl.y0 + m.z * S + 0.35;
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.16, 20, 14), new THREE.MeshBasicMaterial({ color, transparent: true, depthTest: false }));
+      ball.position.set(m.x * S, top, m.y * S);
+      ball.renderOrder = 30;
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.16, 0.24, 40), new THREE.MeshBasicMaterial({ color, transparent: true, depthTest: false, side: THREE.DoubleSide }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(m.x * S, fl.y0 + 0.03, m.y * S);
+      ring.renderOrder = 29;
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, top - fl.y0, 6), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, depthTest: false }));
+      stem.position.set(m.x * S, (fl.y0 + top) / 2, m.y * S);
+      stem.renderOrder = 28;
+      g.add(ball, ring, stem);
+      if (m.label) { const sp = label(m.label, { color: m.color, bg: "#141513cc", size: 0.03 }); sp.position.set(m.x * S, top + 0.75, m.y * S); sp.renderOrder = 31; g.add(sp); }
+      t.dots.add(g);
+    }
+  }
+  useEffect(placeDots, [markN]);
 
   function frame(reset: boolean) {
     const t = three.current;

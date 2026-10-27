@@ -1,6 +1,7 @@
 // Changes made in the app (an object moved, resized, renamed, given a product link) applied on top of
 // the plan as read, so every view draws the job as it is now.
 import type { AddedObject, ElementEdit } from "@/lib/data/types";
+import { arrange, linkSupports } from "./arrange";
 import type { Fixture, Plan, Pt } from "./types";
 
 /** An object added in the app, as a plan fixture: width across its front, depth front to back. */
@@ -13,7 +14,8 @@ export function addedFixture(id: string, a: AddedObject): Fixture {
   return {
     id, kind: a.kind, name: a.name, room_id: a.room_id, center: [cx, cy], bbox, rotation: 0, source: "app", source_ref: null, confidence: 1,
     outline: [[[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]], [bbox[0], bbox[1]]]],
-    facing: a.facing, height_mm: a.height_mm ?? null,
+    facing: a.facing, height_mm: a.height_mm ?? null, elevation_mm: a.elevation_mm ?? 0, weight_kg: a.weight_kg ?? null,
+    parts: a.parts ?? null, on: a.on ?? null, on_at: a.on_at ?? null,
   };
 }
 
@@ -22,7 +24,7 @@ function turned(f: Fixture, facing: number): Fixture {
   const { width, depth } = fixtureSize(f);
   return { ...addedFixture(f.id, { floor_id: "", room_id: f.room_id, kind: f.kind, name: f.name, center: f.center, width, depth, facing, height_mm: f.height_mm }), ...pick(f), facing };
 }
-const pick = (f: Fixture) => ({ source: f.source, source_ref: f.source_ref, confidence: f.confidence, elevation_mm: f.elevation_mm, front: f.front, spec: f.spec, product_name: f.product_name, product_url: f.product_url, notes: f.notes });
+const pick = (f: Fixture) => ({ source: f.source, source_ref: f.source_ref, confidence: f.confidence, elevation_mm: f.elevation_mm, front: f.front, spec: f.spec, product_name: f.product_name, product_url: f.product_url, notes: f.notes, weight_kg: f.weight_kg, parts: f.parts, on: f.on, on_at: f.on_at });
 
 /** Which plan axis a fixture's width runs along: across its front when it faces somewhere. */
 export function widthAxis(f: Fixture): "x" | "y" {
@@ -70,9 +72,10 @@ function editFixture(f0: Fixture, e: ElementEdit): Fixture {
   return out;
 }
 
-export function applyEdits(plan: Plan, edits: Record<string, ElementEdit>): Plan {
-  if (!Object.keys(edits).length) return plan;
-  return {
+export function applyEdits(drawn: Plan, edits: Record<string, ElementEdit>): Plan {
+  const plan = linkSupports(drawn);
+  if (!Object.keys(edits).length) return arrange(plan);
+  return arrange({
     ...plan,
     floors: plan.floors.map((fl) => ({
       ...fl,
@@ -86,5 +89,5 @@ export function applyEdits(plan: Plan, edits: Record<string, ElementEdit>): Plan
         return { ...r, name: e.name || r.name, type: (e.type as typeof r.type) || r.type, notes: e.notes ?? r.notes, label_source: e.name || e.type ? "contractor" : r.label_source };
       }),
     })),
-  };
+  });
 }

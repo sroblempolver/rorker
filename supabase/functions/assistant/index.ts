@@ -9,6 +9,9 @@ import { instructions, TOOLS } from "./core.js";
 const API_KEY = () => Deno.env.get("ANTHROPIC_API_KEY") || Deno.env.get("ANTHROPIC_API_KEY_rorker");
 const MODEL = Deno.env.get("RORKER_ASSISTANT_MODEL") || "claude-haiku-5-5";
 const MAX_BODY = 400_000;
+// it may look up what an unfamiliar object looks like and how big it is (off with RORKER_WEB_SEARCH=off)
+const WEB_SEARCH = { type: "web_search_20250305", name: "web_search", max_uses: 2 };
+let webSearch = Deno.env.get("RORKER_WEB_SEARCH") !== "off";
 const MAX_MESSAGES = 40;
 const LIMIT = 40; // requests per address per 10 minutes, per running copy of the function
 const WINDOW = 10 * 60_000;
@@ -51,7 +54,8 @@ Deno.serve(async (req) => {
   try { body = JSON.parse(raw); } catch { return json({ error: "Bad request." }, 400); }
 
   const messages = Array.isArray(body.messages) ? body.messages.slice(-MAX_MESSAGES) : [];
-  if (!messages.length || messages[0].role !== "user" || messages[messages.length - 1].role !== "user" || !messages.every((m) => m && (m.role === "user" || m.role === "assistant"))) return json({ error: "Say something first." }, 400);
+  // the last turn is the person's (or tool results), or the model's own when a web search paused it
+  if (!messages.length || messages[0].role !== "user" || !messages.every((m) => m && (m.role === "user" || m.role === "assistant"))) return json({ error: "Say something first." }, 400);
 
   const me = { name: str(body.me?.name, 80), role: body.me?.role === "employee" ? "employee" as const : "admin" as const, memberId: str(body.me?.memberId, 80), company: str(body.me?.company, 80) ?? "your company" };
   const c = body.context ?? {};
@@ -67,9 +71,16 @@ Deno.serve(async (req) => {
         { type: "text", text: lines.slice(0, -2).join("\n"), cache_control: { type: "ephemeral" } },
         { type: "text", text: lines.slice(-2).join("\n") },
       ],
-      tools: TOOLS as Anthropic.Tool[], messages, cache_control: { type: "ephemeral" },
+      tools: [...TOOLS, ...(webSearch ? [WEB_SEARCH] : [])] as Anthropic.Tool[], messages, cache_control: { type: "ephemeral" },
     };
-    const res = await new Anthropic({ apiKey: API_KEY() }).messages.create(params as unknown as Anthropic.MessageCreateParamsNonStreaming);
+    const client = new Anthropic({ apiKey: API_KEY() });
+    let res;
+    try { res = await client.messages.create(params as unknown as Anthropic.MessageCreateParamsNonStreaming); } catch (e) {
+      // web search not available on this account: carry on without it
+      if (!(webSearch && e instanceof Anthropic.APIError && e.status === 400 && /web.?search/i.test(e.message))) throw e;
+      webSearch = false;
+      res = await client.messages.create({ ...params, tools: TOOLS } as unknown as Anthropic.MessageCreateParamsNonStreaming);
+    }
     return json({ content: res.content, stop_reason: res.stop_reason, usage: res.usage });
   } catch (e) {
     console.error("assistant", e instanceof Error ? e.message : e);

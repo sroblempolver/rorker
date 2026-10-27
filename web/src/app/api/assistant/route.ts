@@ -3,7 +3,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/data";
-import { instructions, runTool, TOOLS, type AssistantContext } from "@/lib/assistant/core";
+import { instructions, runTool, TOOLS, type AssistantContext, type Changes } from "@/lib/assistant/core";
 import { serverBackend } from "@/lib/assistant/server";
 
 export const runtime = "nodejs";
@@ -11,6 +11,9 @@ export const maxDuration = 120;
 
 const MODEL = process.env.RORKER_ASSISTANT_MODEL || "claude-haiku-5-5";
 const MAX_ROUNDS = 8;
+// it may look up what an unfamiliar object looks like and how big it is (off with RORKER_WEB_SEARCH=off)
+const WEB_SEARCH = { type: "web_search_20250305", name: "web_search", max_uses: 2 };
+let webSearch = process.env.RORKER_WEB_SEARCH !== "off";
 
 type Turn = { role: "user" | "assistant"; content: string };
 
@@ -25,7 +28,7 @@ export async function POST(req: Request) {
   const backend = serverBackend(s as Parameters<typeof serverBackend>[0]);
   const client = new Anthropic();
   const messages: Anthropic.MessageParam[] = turns.map((t) => ({ role: t.role, content: t.content.slice(0, 4000) }));
-  const changed = { any: false };
+  const changed: Changes = { any: false };
   const done: string[] = [];
   // the instructions are fixed except the last two lines (today, where they are): cache the fixed part
   // with the tools; the conversation is cached as it grows, round by round
@@ -36,13 +39,22 @@ export async function POST(req: Request) {
   ];
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      const res = await client.messages.create({
+      const ask = () => client.messages.create({
         model: MODEL, max_tokens: 12000, thinking: { type: "adaptive" },
-        system, tools: TOOLS as Anthropic.Tool[], messages, cache_control: { type: "ephemeral" },
+        system, tools: [...TOOLS, ...(webSearch ? [WEB_SEARCH] : [])] as Anthropic.Tool[], messages, cache_control: { type: "ephemeral" },
       } as unknown as Anthropic.MessageCreateParamsNonStreaming);
+      let res: Anthropic.Message;
+      try { res = await ask(); } catch (e) {
+        // web search not available on this account: carry on without it
+        if (!(webSearch && e instanceof Anthropic.APIError && e.status === 400 && /web.?search/i.test(e.message))) throw e;
+        webSearch = false;
+        res = await ask();
+      }
+      // a long web search pauses the turn: send it back as it is and it carries on
+      if (res.stop_reason === "pause_turn") { messages.push({ role: "assistant", content: res.content }); continue; }
       if (res.stop_reason !== "tool_use") {
         const text = res.content.filter((c): c is Anthropic.TextBlock => c.type === "text").map((c) => c.text).join("\n").trim();
-        return NextResponse.json({ text: text || "Done.", changed: changed.any, actions: done });
+        return NextResponse.json({ text: text || "Done.", changed: changed.any, marks: changed.marks ?? [], focus: changed.focus ?? null, actions: done });
       }
       messages.push({ role: "assistant", content: res.content });
       const results: Anthropic.ToolResultBlockParam[] = [];

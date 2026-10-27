@@ -4,7 +4,8 @@
 // Supabase, which holds the API key, and runs the tools here, round by round.
 import type { AssistantSend, Turn } from "@/components/assistant/Assistant";
 import type { WorkspaceApi, WorkspaceData } from "@/components/workspace/api";
-import { instructions, runTool, TOOLS, type AssistantBackend, type AssistantContext } from "@/lib/assistant/core";
+import { instructions, runTool, TOOLS, type AssistantBackend, type AssistantContext, type Changes } from "@/lib/assistant/core";
+import { showMarks } from "@/lib/plan/marks";
 
 type SampleFn = (input: { role: "user" | "assistant"; content: string }[], opts: Record<string, unknown>) => Promise<{ text: string }>;
 type Host = { use(name: string): Promise<unknown> };
@@ -25,7 +26,9 @@ function backend(d: WorkspaceData, api: WorkspaceApi): AssistantBackend {
   };
 }
 
-const FUNCTION_URL = "https://uofdydjfwdsvaribvsfy.supabase.co/functions/v1/assistant";
+// a test build can talk to another copy of the function (ASSISTANT_FUNCTION=assistant-next node preview/build.mjs)
+declare const __ASSISTANT_FUNCTION__: string | undefined;
+const FUNCTION_URL = `https://uofdydjfwdsvaribvsfy.supabase.co/functions/v1/${typeof __ASSISTANT_FUNCTION__ === "string" ? __ASSISTANT_FUNCTION__ : "assistant"}`;
 const ROUNDS = 8;
 
 type Block = { type: string; id?: string; name?: string; input?: Record<string, unknown>; text?: string };
@@ -33,13 +36,16 @@ type Msg = { role: "user" | "assistant"; content: string | unknown[] };
 
 async function viaFunction(b: AssistantBackend, turns: Turn[], context: AssistantContext, signal: AbortSignal) {
   const messages: Msg[] = turns.map((t) => ({ role: t.role, content: t.content.slice(0, 4000) }));
-  const changed = { any: false };
+  const changed: Changes = { any: false };
   for (let round = 0; round < ROUNDS; round++) {
     const r = await fetch(FUNCTION_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ me: b.me, context, messages }), signal });
     const res = (await r.json().catch(() => null)) as { content?: Block[]; stop_reason?: string; error?: string } | null;
     if (!r.ok || !res?.content) throw new Error(res?.error ?? "The assistant couldn't answer just now. Try again in a moment.");
+    // a long web search pauses the turn: send it back as it is and it carries on
+    if (res.stop_reason === "pause_turn") { messages.push({ role: "assistant", content: res.content }); continue; }
     if (res.stop_reason !== "tool_use") {
       const text = res.content.filter((c) => c.type === "text").map((c) => c.text).join("\n").trim();
+      showMarks(changed.marks ?? [], changed.focus ?? null);
       return { text: text || "Done.", changed: changed.any };
     }
     messages.push({ role: "assistant", content: res.content });
@@ -65,7 +71,7 @@ export function previewAsk(d: WorkspaceData, api: WorkspaceApi): AssistantSend {
     if (!host) return viaFunction(b, turns, context, signal);
     const sample = (await host.use("sample")) as SampleFn | null;
     if (!sample) throw new Error("The assistant isn't available in this copy of the preview. Open the preview's own web address, where the mic works too.");
-    const changed = { any: false };
+    const changed: Changes = { any: false };
     const tools = TOOLS.map((t) => ({
       name: t.name, description: t.description, inputSchema: t.input_schema,
       execute: async (input: Record<string, unknown>) => runTool(b, context, t.name, input ?? {}, changed),
@@ -73,6 +79,7 @@ export function previewAsk(d: WorkspaceData, api: WorkspaceApi): AssistantSend {
     const lead = `${instructions(b.me, context)}\nDon't write anything before or between tool calls; reply once, at the end.\n\nThe person says:\n${turns[0].content}`;
     try {
       const r = await sample([{ role: "user", content: lead }, ...turns.slice(1)], { tools, cache: false, signal });
+      showMarks(changed.marks ?? [], changed.focus ?? null);
       return { text: r.text.trim(), changed: changed.any };
     } catch (e) {
       const code = e && typeof e === "object" && "code" in e ? String((e as { code: unknown }).code) : "";

@@ -1,3 +1,4 @@
+import type { Part } from "@/lib/plan/catalog";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
 
 export interface Company {
@@ -47,7 +48,15 @@ export interface ElementEdit {
   added?: AddedObject;
 }
 /** Something added to the plan in the app (furniture, an appliance): where it stands, its size and front. */
-export interface AddedObject { floor_id: string; room_id: string | null; kind: string; name: string; center: [number, number]; width: number; depth: number; facing: number | null; height_mm?: number | null }
+export interface AddedObject {
+  floor_id: string; room_id: string | null; kind: string; name: string; center: [number, number]; width: number; depth: number; facing: number | null; height_mm?: number | null;
+  /** its bottom above the floor, mm (on a wall, or on top of what it sits on) */
+  elevation_mm?: number | null; weight_kg?: number | null;
+  /** what it sits on and where that stood then, so it moves with it */
+  on?: string | null; on_at?: [number, number] | null;
+  /** a shape built from parts, for things the catalogue doesn't know */
+  parts?: Part[] | null;
+}
 
 export type ItemKind = "outlet" | "switch" | "light" | "data" | "plumbing" | "vent" | "thermostat" | "mount" | "other";
 /** A small thing placed on a wall (outlet, switch, light ...): dragged and edited in the wall view.
