@@ -10,7 +10,7 @@ import type { ElementEdit, ItemInput, JobItem, Pin, PinInput, PinKind, PlanRow }
 import { today } from "@/lib/dates";
 import { PlanChat } from "./PlanChat";
 import { applyEdits } from "@/lib/plan/edits";
-import { JOB_KEY, currentLook, furnishWhere, jobSettings, lookForStage } from "@/lib/plan/build";
+import { JOB_KEY, furnishWhere, jobSettings, stageLook } from "@/lib/plan/build";
 import { elementLabel, findElement, roomOf } from "@/lib/plan/geometry";
 import { recall, remember } from "@/lib/remember";
 import { pinLevel } from "@/components/plan/pinLevel";
@@ -167,10 +167,10 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
 
   // the plan as it is now: what the reader found, plus everything moved or changed in the app
   const view = useMemo(() => (plan ? applyEdits(plan.data, edits) : null), [plan, edits]);
-  // furnishing and the contractor's own build stages; the plan opens on the stage the job is at
-  const settings = jobSettings(edits);
+  // furnishing, and how built the house looks: finished, unless a stage is picked in Stages
+  const settings = useMemo(() => jobSettings(edits), [edits]);
   const layerStage = layer && layer !== HOUSE_LAYER ? stages.find((s) => s.id === layer) ?? null : null;
-  const startLook = useMemo(() => (layerStage ? lookForStage(layerStage.name) : currentLook(stages)), [stages, layerStage]);
+  const look = layerStage ? stageLook(layerStage, settings) : "finished";
   const inLayer = useCallback((p: { stage_id: string | null }) => !layer || (layer === HOUSE_LAYER ? !p.stage_id || !stages.some((s) => s.id === p.stage_id) : p.stage_id === layer), [layer, stages]);
   const layerPins = useMemo(() => (layer ? pins.filter(inLayer) : pins), [pins, layer, inLayer]);
   // on a layer, the progress colours show just what's on it: each thing, and its room, amber while
@@ -598,6 +598,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     }
     if (tab === "stages") return (
       <StagesPanel stages={stages} layer={layer} onLayer={pickLayer} counts={stageCounts}
+        lookOf={(st) => stageLook(st, settings)} onLook={(id, l) => void saveEdit(JOB_KEY, { stage_looks: { ...settings.stage_looks, [id]: l } })}
         onStatus={async (id, s) => {
           const before = stages.find((x) => x.id === id);
           await stageOp(() => api.setStageStatus(id, s));
@@ -642,7 +643,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind}
       buy={api.materials ? { lines: mlines.filter((l) => l.job_id === job.id && l.status !== "returned"), onQuick: quickBuy, onAll: quickBuyAll, onMore: (t) => openBuy(t), onOpen: openLine, onTick: (id) => { const l = mlines.find((x) => x.id === id); if (l) void updateMaterial(id, { status: NEXT_STATUS[l.status] }); } } : undefined} />;
   }, [tab, buyDraft, buyFocus, mlines, mjobs, lastBuyer, job.id, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, data.canShare, say, showPin, updatePin, deletePin, undoable, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
-    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext, billing, payouts, moneyKey, data.brand, job, guard, layer, layerPins, layerStage, inLayer, stageCounts, pickLayer]);
+    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext, billing, payouts, moneyKey, data.brand, job, guard, layer, layerPins, layerStage, inLayer, stageCounts, pickLayer, settings]);
 
   // where the quick card sits inside the map, kept on screen
   const quick = (() => {
@@ -710,7 +711,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
               items={items} selectedItem={selectedItem} onSelectItem={selectItem} onMoveItem={(id, x, y) => updateItem(id, { x, y })} onMovePin={movePin} onMoveFixture={moveFixture}
               view3d={view3d} setView3d={setView3d} can3d={data.can3d !== false}
               furnish={settings.furnish} onFurnish={(furnish) => void saveEdit(JOB_KEY, { furnish })}
-              startLook={startLook} customStages={settings.build_stages} onCustomStages={(build_stages) => void saveEdit(JOB_KEY, { build_stages })}
+              look={look}
               hud={<div className="w-[300px] bg-[#17181b]/92 backdrop-blur-sm border border-line border-l-[3px] border-l-accent rounded-[4px] p-3"><ProjectSummary compact plan={view} pins={pins} states={states} stages={stages} setLevel={setLevel} onPinKind={showPinKind} /></div>} />
           ) : (
             <div className="h-full grid place-items-center p-6 bg-ink">

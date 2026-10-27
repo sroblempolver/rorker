@@ -15,15 +15,13 @@ export const LOOKS: { look: BuildLook; label: string; hint: string }[] = [
 ];
 export const LOOK_LABEL = Object.fromEntries(LOOKS.map((l) => [l.look, l.label])) as Record<BuildLook, string>;
 
-/** A stage the contractor added: their own name, drawn like one of the four looks. */
-export interface CustomStage { id: string; name: string; look: BuildLook }
-
 /** "all", or the floors that are furnished. Not set yet: the plan hasn't been asked about. */
 export type Furnish = "all" | string[];
 
 /** The job-wide settings live in the edits under this key (it never matches a plan element). */
 export const JOB_KEY = "@job";
-export interface JobSettings { furnish?: Furnish; build_stages?: CustomStage[] }
+/** stage_looks: the look a stage was set to by hand, by stage id, over the one guessed from its name */
+export interface JobSettings { furnish?: Furnish; stage_looks?: Record<string, BuildLook> }
 export const jobSettings = (edits: Record<string, ElementEdit>): JobSettings => edits[JOB_KEY] ?? {};
 
 export function furnishedFloors(plan: Plan, f: Furnish | undefined): Set<string> {
@@ -47,10 +45,9 @@ export function lookForStage(name: string): BuildLook {
   return "finished";
 }
 
-/** Where the job is now: the look of the stage in progress, or finished when none has started. */
-export function currentLook(stages: Pick<JobStage, "name" | "status">[]): BuildLook {
-  const active = stages.find((s) => s.status === "active");
-  return active ? lookForStage(active.name) : "finished";
+/** How the map draws the house for a stage picked in Stages: the look set for it, or one from its name. */
+export function stageLook(stage: Pick<JobStage, "id" | "name">, settings: JobSettings): BuildLook {
+  return settings.stage_looks?.[stage.id] ?? lookForStage(stage.name);
 }
 
 /** A wall or opening outline as a straight run: start and end on its centre line, unit direction and

@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JobItem, Pin, PinInput } from "@/lib/data/types";
 import { roomSides } from "@/lib/plan/geometry";
-import { LOOKS, furnishedFloors, stagedPlan, type BuildLook, type CustomStage, type Furnish } from "@/lib/plan/build";
+import { furnishedFloors, stagedPlan, type BuildLook, type Furnish } from "@/lib/plan/build";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
 import { ExteriorView, WallView } from "./Elevations";
 import { FloorCanvas, type ColorMode } from "./FloorCanvas";
@@ -60,10 +60,8 @@ interface Props {
   furnish?: Furnish;
   /** without it the furnishing can't be changed here, and an unset plan shows everything */
   onFurnish?: (f: Furnish) => void;
-  /** the build stage to open on (the job's stage in progress), and the stages the contractor added */
-  startLook?: BuildLook;
-  customStages?: CustomStage[];
-  onCustomStages?: (s: CustomStage[]) => void;
+  /** how far the house is built: set by the stage picked in Stages, finished when none is */
+  look?: BuildLook;
 }
 
 const DEPTH: Level["kind"][] = ["site", "exterior", "floor", "room", "wall"];
@@ -75,15 +73,12 @@ export function PlanViewer(p: Props) {
   const { level } = p;
   // the build stage on show, and the house as it stands then: objects only once it's finished, and
   // only on the floors that are furnished
-  const [stageId, setStageId] = useState<string>(p.startLook ?? "finished");
-  useEffect(() => { if (p.startLook) setStageId(p.startLook); }, [p.startLook]);
-  const custom = p.customStages ?? [];
-  const look: BuildLook = (LOOKS.find((l) => l.look === stageId)?.look ?? custom.find((c) => c.id === stageId)?.look) ?? "finished";
+  const look: BuildLook = p.look ?? "finished";
   const asked = p.furnish !== undefined || !p.onFurnish;
   const furnished = useMemo(() => (p.furnish === undefined && !p.onFurnish ? null : furnishedFloors(p.plan, p.furnish)), [p.plan, p.furnish, p.onFurnish]);
   const plan = useMemo(() => stagedPlan(p.plan, look, furnished), [p.plan, look, furnished]);
   const hasObjects = useMemo(() => p.plan.floors.some((f) => f.fixtures.length > 0), [p.plan]);
-  const [panel, setPanel] = useState<"furnish" | "stage" | null>(null);
+  const [panel, setPanel] = useState<"furnish" | null>(null);
   const floors = useMemo(() => [...plan.floors].sort((a, b) => a.level - b.level), [plan]);
   const floor = level.kind === "site" || level.kind === "exterior" ? null : floors.find((f) => f.id === level.floorId) ?? floors[0];
   const room = floor && (level.kind === "room" || level.kind === "wall") ? floor.rooms.find((r) => r.id === level.roomId) ?? null : null;
@@ -243,22 +238,20 @@ export function PlanViewer(p: Props) {
             ))}
           </div>
         </div>
-        {in3d && (
-          <div className="flex gap-1.5">
-            <div className={`flex rounded-[4px] overflow-hidden ${glass}`} role="group" aria-label="Walls">
-              {(["full", "low", "none"] as const).map((m) => (
-                <button key={m} onClick={() => setWallMode(m)} aria-pressed={wallMode === m} title={m === "none" ? "Hide the walls to see everything inside" : undefined}
-                  className={`h-7 px-2.5 text-[12px] font-display font-bold tracking-[0.08em] uppercase ${wallMode === m ? "bg-panel-3 text-text" : "text-muted hover:text-text"}`}>{m === "full" ? "Walls" : m === "low" ? "Low walls" : "No walls"}</button>
-              ))}
-            </div>
+        {(in3d || (staged && p.onFurnish && hasObjects)) && (
+          <div className="flex gap-1.5 items-start">
+            {in3d && (
+              <div className={`flex rounded-[4px] overflow-hidden ${glass}`} role="group" aria-label="Walls">
+                {(["full", "low", "none"] as const).map((m) => (
+                  <button key={m} onClick={() => setWallMode(m)} aria-pressed={wallMode === m} title={m === "none" ? "Hide the walls to see everything inside" : undefined}
+                    className={`h-7 px-2.5 text-[12px] font-display font-bold tracking-[0.08em] uppercase ${wallMode === m ? "bg-panel-3 text-text" : "text-muted hover:text-text"}`}>{m === "full" ? "Walls" : m === "low" ? "Low walls" : "No walls"}</button>
+                ))}
+              </div>
+            )}
+            {staged && p.onFurnish && hasObjects && (
+              <FurnishPicker plan={p.plan} furnish={p.furnish} onFurnish={p.onFurnish} open={panel === "furnish"} setOpen={(on) => setPanel(on ? "furnish" : null)} disabled={look !== "finished"} />
+            )}
           </div>
-        )}
-        {staged && (
-          <BuildStages look={look} stageId={stageId} setStageId={setStageId} custom={custom} onCustom={p.readOnly ? undefined : p.onCustomStages}
-            open={panel === "stage"} setOpen={(on) => setPanel(on ? "stage" : null)} />
-        )}
-        {staged && p.onFurnish && hasObjects && (
-          <FurnishPicker plan={p.plan} furnish={p.furnish} onFurnish={p.onFurnish} open={panel === "furnish"} setOpen={(on) => setPanel(on ? "furnish" : null)} disabled={look !== "finished"} />
         )}
         {!in3d && (level.kind === "floor" || level.kind === "room") && p.items.length > 0 && (
           <button onClick={() => setShowItems(!showItems)} aria-pressed={showItems} title="Outlets, switches and other small things on the walls"
@@ -320,59 +313,6 @@ export function PlanViewer(p: Props) {
 
 const chip = "h-7 px-2.5 text-[12px] font-display font-bold tracking-[0.08em] uppercase";
 
-/** One switcher for the build stage: slab, framing, sheetrock, finished, and any the contractor added. */
-function BuildStages({ look, stageId, setStageId, custom, onCustom, open, setOpen }: {
-  look: BuildLook; stageId: string; setStageId: (id: string) => void; custom: CustomStage[]; onCustom?: (s: CustomStage[]) => void;
-  open: boolean; setOpen: (on: boolean) => void;
-}) {
-  const [name, setName] = useState("");
-  const [like, setLike] = useState<BuildLook>(look);
-  useEffect(() => { if (open) setLike(look); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-  const add = () => {
-    if (!name.trim() || !onCustom) return;
-    const id = `stage-${Date.now().toString(36)}`;
-    onCustom([...custom, { id, name: name.trim(), look: like }]);
-    setStageId(id);
-    setName("");
-    setOpen(false);
-  };
-  return (
-    <div className="relative flex flex-col items-end">
-      <div className={`flex flex-wrap justify-end rounded-[4px] overflow-hidden ${glass}`} role="group" aria-label="Build stage">
-        {[...LOOKS.map((l) => ({ id: l.look as string, label: l.label, hint: l.hint })), ...custom.map((c) => ({ id: c.id, label: c.name, hint: `Your stage, drawn like ${LOOKS.find((l) => l.look === c.look)?.label}` }))].map((s) => (
-          <button key={s.id} onClick={() => setStageId(s.id)} aria-pressed={stageId === s.id} title={s.hint}
-            className={`${chip} ${stageId === s.id ? "bg-accent text-accent-ink" : "text-muted hover:text-text"}`}>{s.label}</button>
-        ))}
-        {onCustom && <button onClick={() => setOpen(!open)} aria-expanded={open} title="Add your own stage" className={`${chip} !px-2 text-muted hover:text-text border-l border-line`}>+</button>}
-      </div>
-      {open && onCustom && (
-        <div className={`mt-1.5 w-[250px] p-3 rounded-[4px] ${glass} space-y-2 z-10`}>
-          <p className="text-[12.5px] text-muted">Add a stage of your own, like &ldquo;Rough plumbing&rdquo; or &ldquo;Insulation&rdquo;.</p>
-          <input autoFocus className="input !h-8 text-[13px]" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") setOpen(false); }} placeholder="Stage name" aria-label="Stage name" />
-          <div className="flex items-center gap-2">
-            <label className="text-[12.5px] text-muted" htmlFor="stage-like">Looks like</label>
-            <select id="stage-like" className="input !h-8 !py-0 text-[13px] flex-1" value={like} onChange={(e) => setLike(e.target.value as BuildLook)}>
-              {LOOKS.map((l) => <option key={l.look} value={l.look}>{l.label}</option>)}
-            </select>
-          </div>
-          <button className="btn btn-primary btn-sm w-full" disabled={!name.trim()} onClick={add}>Add stage</button>
-          {custom.length > 0 && (
-            <ul className="pt-1 border-t border-line space-y-1">
-              {custom.map((c) => (
-                <li key={c.id} className="flex items-center gap-2 text-[13px]">
-                  <span className="flex-1 truncate">{c.name}</span>
-                  <span className="text-muted text-[12px]">{LOOKS.find((l) => l.look === c.look)?.label}</span>
-                  <button className="text-muted hover:text-red" aria-label={`Remove ${c.name}`} onClick={() => { onCustom(custom.filter((x) => x.id !== c.id)); if (stageId === c.id) setStageId(c.look); }}>✕</button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /** Which floors get their cabinets, fixtures and furniture: all of them, or picked one by one. */
 function FurnishPicker({ plan, furnish, onFurnish, open, setOpen, disabled }: {
   plan: Plan; furnish: Furnish | undefined; onFurnish: (f: Furnish) => void; open: boolean; setOpen: (on: boolean) => void; disabled: boolean;
@@ -390,7 +330,7 @@ function FurnishPicker({ plan, furnish, onFurnish, open, setOpen, disabled }: {
       <button onClick={() => setOpen(!open)} aria-expanded={open} title={disabled ? "Objects show at the Finished stage" : "Cabinets, fixtures and furniture: all floors, or pick them"}
         className={`${chip} rounded-[4px] ${glass} ${on.size ? "text-text" : "text-muted hover:text-text"} ${disabled ? "opacity-60" : ""}`}>{label} ▾</button>
       {open && (
-        <div className={`mt-1.5 w-[230px] p-3 rounded-[4px] ${glass} space-y-2 z-10`}>
+        <div className={`absolute right-0 top-full mt-1.5 w-[230px] p-3 rounded-[4px] ${glass} space-y-2 z-10`}>
           <div className="flex gap-1.5">
             <button className={`btn btn-sm flex-1 ${furnish === "all" ? "btn-primary" : "btn-ghost"}`} onClick={() => { onFurnish("all"); setOpen(false); }}>Furnish all</button>
             <button className={`btn btn-sm flex-1 ${on.size === 0 && furnish !== undefined ? "btn-primary" : "btn-ghost"}`} onClick={() => { onFurnish([]); setOpen(false); }}>Empty</button>
