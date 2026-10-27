@@ -1,5 +1,5 @@
 "use client";
-// The Rorker assistant: a mic button, not a chat window. Tap it and talk; what you said and the answer
+// The Rorker assistant: a mic button, not a chat window. Hold it and talk, let go to send; what you said and the answer
 // show in a small bubble above it, and the answer is read out. A keyboard button next to it opens a
 // line to type instead. It can look up any job you can see and make changes for you (add a pin, tag
 // someone, close a task, move a stage along, put an outlet on a wall), in the browser's own free voice.
@@ -65,13 +65,9 @@ export function Assistant({ send, context, onChanged, open, setOpen, wide }: { s
   useEffect(() => { if (dict.error) setOpen(true); }, [dict.error, setOpen]);
 
   const close = () => { setOpen(false); setTyping(false); stopSpeaking(); ctl.current?.abort(); dict.stop(); };
-  const tapMain = () => {
-    // the mic stays the main button; where the page can't have the microphone it says why and opens typing
-    if (!voice) { setBlockedNote(dict.supported); setTyping(true); setOpen(true); return; }
-    if (dict.listening) return dict.stop();
-    setOpen(true);
-    dict.start();
-  };
+  // the mic stays the main button, held to talk; where the page can't have the microphone it says why and opens typing
+  const tapMain = () => { setBlockedNote(dict.supported); setTyping(true); setOpen(true); };
+  const press = voice ? dict.hold(() => { setOpen(true); }) : { onClick: tapMain };
 
   const side = wide ? "" : "lg:right-[470px]";
   const shown = turns.slice(-4);
@@ -92,7 +88,7 @@ export function Assistant({ send, context, onChanged, open, setOpen, wide }: { s
                 {t.role === "user" ? <span>“{t.content}”</span> : t.content}
               </p>
             ))}
-            {dict.listening && <p className="text-[13.5px] text-accent">Listening… {dict.interim && <span className="text-text">“{dict.interim}”</span>}</p>}
+            {dict.listening && <p className="text-[13.5px] text-accent">Listening, let go when done… {dict.interim && <span className="text-text">“{dict.interim}”</span>}</p>}
             {busy && <p className="text-[13px] text-muted inline-flex items-center gap-2"><span className="dot bg-accent animate-pulse" />Working on it… <button className="underline" onClick={() => ctl.current?.abort()}>Stop</button></p>}
             {(err || dict.error) && <p className="text-[12.5px] text-amber">{err ?? dict.error}</p>}
             {blockedNote && !dict.error && <p className="text-[12.5px] text-amber">The mic is blocked here because this preview runs inside a frame on the page; the browser won&apos;t give it the microphone, whatever your settings say. Open the preview at sroblempolver.github.io/rorker to talk, or type below.</p>}
@@ -112,8 +108,8 @@ export function Assistant({ send, context, onChanged, open, setOpen, wide }: { s
             <KeysIcon />
           </button>
         )}
-        <button onClick={tapMain} aria-pressed={dict.listening} aria-label={!dict.supported ? "Open the assistant" : !voice ? "Talk to the assistant (mic blocked here)" : dict.listening ? "Stop listening" : "Talk to the assistant"}
-          title={!dict.supported ? "Ask the assistant" : dict.blocked ? "The mic is blocked in this preview window" : dict.listening ? "Listening… tap to stop" : "Tap and talk"}
+        <button {...press} aria-pressed={dict.listening} aria-label={!dict.supported ? "Open the assistant" : !voice ? "Talk to the assistant (mic blocked here)" : "Hold to talk to the assistant"}
+          title={!dict.supported ? "Ask the assistant" : dict.blocked ? "The mic is blocked in this preview window" : dict.listening ? "Listening… let go when you're done" : "Hold and talk, let go to send"}
           className={`w-14 h-14 rounded-full grid place-items-center shadow-xl transition-colors ${dict.listening ? "bg-red text-white animate-pulse" : "bg-accent text-accent-ink hover:brightness-110"}`}>
           {dict.supported ? <MicIcon on={dict.listening} /> : <KeysIcon />}
         </button>
