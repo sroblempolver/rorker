@@ -3,7 +3,8 @@
 // contractor says which floors get their cabinets, fixtures and furniture (all of them, or one by one).
 // Both are saved with the job's edits under one key, so nothing new is needed in the database.
 import type { ElementEdit, JobStage } from "@/lib/data/types";
-import type { Plan, Pt } from "./types";
+import { pointInPoly } from "./geometry";
+import type { Fixture, Plan, Pt } from "./types";
 
 export type BuildLook = "slab" | "framing" | "drywall" | "finished";
 
@@ -24,15 +25,32 @@ export const JOB_KEY = "@job";
 export interface JobSettings { furnish?: Furnish; stage_looks?: Record<string, BuildLook> }
 export const jobSettings = (edits: Record<string, ElementEdit>): JobSettings => edits[JOB_KEY] ?? {};
 
-export function furnishedFloors(plan: Plan, f: Furnish | undefined): Set<string> {
-  if (f === "all") return new Set(plan.floors.map((x) => x.id));
+/** What can be furnished one by one: each home when the drawing has several, otherwise each floor. */
+export interface Place { id: string; name: string }
+export function furnishPlaces(plan: Plan): { kind: "home" | "floor"; places: Place[] } {
+  const units = [...new Set(plan.floors.flatMap((f) => f.rooms.map((r) => r.unit)).filter(Boolean) as string[])];
+  if (units.length > 1) return { kind: "home", places: units.map((u) => ({ id: `unit:${u}`, name: u })) };
+  return { kind: "floor", places: [...plan.floors].sort((a, b) => a.level - b.level).map((f) => ({ id: f.id, name: f.name })) };
+}
+
+/** The places that are furnished (floor ids, or "unit:<name>" for a home). */
+export function furnishedSet(plan: Plan, f: Furnish | undefined): Set<string> {
+  if (f === "all") return new Set(furnishPlaces(plan).places.map((x) => x.id));
   return new Set(f ?? []);
 }
 
-/** The plan as built at this stage: objects only on furnished floors, and only once it's finished. */
-export function stagedPlan(plan: Plan, look: BuildLook, furnished: Set<string> | null): Plan {
-  if (look === "finished" && !furnished) return plan;
-  return { ...plan, floors: plan.floors.map((fl) => (look === "finished" && furnished!.has(fl.id) ? fl : { ...fl, fixtures: [] })) };
+/** The plan as built at this stage: objects only once it's finished, and only where it's furnished.
+ *  null furnishing shows everything (a plan nobody can be asked about). */
+export function stagedPlan(plan: Plan, look: BuildLook, furnish: Furnish | undefined | null): Plan {
+  if (look === "finished" && (furnish === null || furnish === "all")) return plan;
+  const on = look === "finished" ? furnishedSet(plan, furnish ?? undefined) : new Set<string>();
+  return { ...plan, floors: plan.floors.map((fl) => {
+    if (on.has(fl.id)) return fl;
+    const unitOf = (x: Fixture) => (fl.rooms.find((r) => r.id === x.room_id) ?? fl.rooms.find((r) => pointInPoly(x.center, r.polygon)))?.unit;
+    // a thing outside every home (a shared garage, the street) comes in with the first home furnished
+    const fixtures = on.size ? fl.fixtures.filter((x) => { const u = unitOf(x); return u ? on.has(`unit:${u}`) : [...on].some((id) => id.startsWith("unit:")); }) : [];
+    return fixtures.length === fl.fixtures.length ? fl : { ...fl, fixtures };
+  }) };
 }
 
 /** The look that goes with a job stage, from its name ("Framing", "Insulation and drywall" ...). */
@@ -82,11 +100,14 @@ export function studsAlong(length: number, stud: number, spacing: number): numbe
 }
 
 /** Asking the assistant to furnish the house, or one room, turns furnishing on there: the whole house,
- *  or the floor that room is on. */
+ *  or the home (or floor) that room is in. */
 export function furnishWhere(plan: Plan, current: Furnish | undefined, room: string | null): Furnish {
   if (!room || current === "all") return "all";
+  const { kind, places } = furnishPlaces(plan);
   const fl = plan.floors.find((f) => f.rooms.some((r) => r.name.toLowerCase() === room.toLowerCase()));
+  const r = fl?.rooms.find((x) => x.name.toLowerCase() === room.toLowerCase());
   const on = new Set(current ?? []);
-  if (fl) on.add(fl.id);
-  return on.size >= plan.floors.length ? "all" : plan.floors.filter((f) => on.has(f.id)).map((f) => f.id);
+  if (kind === "home" && r?.unit) on.add(`unit:${r.unit}`);
+  else if (kind === "floor" && fl) on.add(fl.id);
+  return places.every((x) => on.has(x.id)) ? "all" : places.filter((x) => on.has(x.id)).map((x) => x.id);
 }

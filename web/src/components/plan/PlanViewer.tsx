@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JobItem, Pin, PinInput } from "@/lib/data/types";
 import { roomSides } from "@/lib/plan/geometry";
-import { furnishedFloors, stagedPlan, type BuildLook, type Furnish } from "@/lib/plan/build";
+import { furnishPlaces, furnishedSet, stagedPlan, type BuildLook, type Furnish } from "@/lib/plan/build";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
 import { ExteriorView, WallView } from "./Elevations";
 import { FloorCanvas, type ColorMode } from "./FloorCanvas";
@@ -75,8 +75,7 @@ export function PlanViewer(p: Props) {
   // only on the floors that are furnished
   const look: BuildLook = p.look ?? "finished";
   const asked = p.furnish !== undefined || !p.onFurnish;
-  const furnished = useMemo(() => (p.furnish === undefined && !p.onFurnish ? null : furnishedFloors(p.plan, p.furnish)), [p.plan, p.furnish, p.onFurnish]);
-  const plan = useMemo(() => stagedPlan(p.plan, look, furnished), [p.plan, look, furnished]);
+  const plan = useMemo(() => stagedPlan(p.plan, look, p.furnish === undefined && !p.onFurnish ? null : p.furnish), [p.plan, look, p.furnish, p.onFurnish]);
   const hasObjects = useMemo(() => p.plan.floors.some((f) => f.fixtures.length > 0), [p.plan]);
   const [panel, setPanel] = useState<"furnish" | null>(null);
   const floors = useMemo(() => [...plan.floors].sort((a, b) => a.level - b.level), [plan]);
@@ -274,7 +273,7 @@ export function PlanViewer(p: Props) {
 
       {/* a newly read plan starts empty: ask once whether to furnish it */}
       {!asked && hasObjects && p.onFurnish && staged && panel !== "furnish" && (
-        <FurnishAsk floors={p.plan.floors.length} onAll={() => p.onFurnish!("all")} onPick={() => setPanel("furnish")} onNone={() => p.onFurnish!([])} />
+        <FurnishAsk plan={p.plan} onAll={() => p.onFurnish!("all")} onPick={() => setPanel("furnish")} onNone={() => p.onFurnish!([])} />
       )}
 
       {p.hud && level.kind === "site" && <div className="absolute left-3 top-14 md:left-28 hidden sm:block">{p.hud}</div>}
@@ -313,35 +312,37 @@ export function PlanViewer(p: Props) {
 
 const chip = "h-7 px-2.5 text-[12px] font-display font-bold tracking-[0.08em] uppercase";
 
-/** Which floors get their cabinets, fixtures and furniture: all of them, or picked one by one. */
+/** Which floors, or homes when the drawing has several, get their cabinets, fixtures and furniture:
+ *  all of them, or picked one by one. */
 function FurnishPicker({ plan, furnish, onFurnish, open, setOpen, disabled }: {
   plan: Plan; furnish: Furnish | undefined; onFurnish: (f: Furnish) => void; open: boolean; setOpen: (on: boolean) => void; disabled: boolean;
 }) {
-  const floors = [...plan.floors].sort((a, b) => a.level - b.level);
-  const on = furnishedFloors(plan, furnish);
-  const label = on.size === 0 ? "Unfurnished" : on.size === floors.length ? "Furnished" : `Furnished ${on.size} of ${floors.length}`;
+  const { kind, places } = furnishPlaces(plan);
+  const on = furnishedSet(plan, furnish);
+  const n = places.filter((x) => on.has(x.id)).length;
+  const label = n === 0 ? "Unfurnished" : n === places.length ? "Furnished" : `Furnished ${n} of ${places.length}`;
   const toggle = (id: string) => {
     const next = new Set(on);
     if (next.has(id)) next.delete(id); else next.add(id);
-    onFurnish(next.size === floors.length ? "all" : floors.filter((f) => next.has(f.id)).map((f) => f.id));
+    onFurnish(places.every((x) => next.has(x.id)) ? "all" : places.filter((x) => next.has(x.id)).map((x) => x.id));
   };
   return (
     <div className="relative flex flex-col items-end">
-      <button onClick={() => setOpen(!open)} aria-expanded={open} title={disabled ? "Objects show at the Finished stage" : "Cabinets, fixtures and furniture: all floors, or pick them"}
-        className={`${chip} rounded-[4px] ${glass} ${on.size ? "text-text" : "text-muted hover:text-text"} ${disabled ? "opacity-60" : ""}`}>{label} ▾</button>
+      <button onClick={() => setOpen(!open)} aria-expanded={open} title={disabled ? "Objects show at the Finished stage" : `Cabinets, fixtures and furniture: all ${kind}s, or pick them`}
+        className={`${chip} rounded-[4px] ${glass} ${n ? "text-text" : "text-muted hover:text-text"} ${disabled ? "opacity-60" : ""}`}>{label} ▾</button>
       {open && (
         <div className={`absolute right-0 top-full mt-1.5 w-[230px] p-3 rounded-[4px] ${glass} space-y-2 z-10`}>
           <div className="flex gap-1.5">
             <button className={`btn btn-sm flex-1 ${furnish === "all" ? "btn-primary" : "btn-ghost"}`} onClick={() => { onFurnish("all"); setOpen(false); }}>Furnish all</button>
-            <button className={`btn btn-sm flex-1 ${on.size === 0 && furnish !== undefined ? "btn-primary" : "btn-ghost"}`} onClick={() => { onFurnish([]); setOpen(false); }}>Empty</button>
+            <button className={`btn btn-sm flex-1 ${n === 0 && furnish !== undefined ? "btn-primary" : "btn-ghost"}`} onClick={() => { onFurnish([]); setOpen(false); }}>Empty</button>
           </div>
-          {floors.length > 1 && (
-            <div className="space-y-1 pt-1 border-t border-line">
-              <p className="text-[12px] text-muted">Or pick floors</p>
-              {floors.map((f) => (
-                <label key={f.id} className="flex items-center gap-2 text-[13.5px] cursor-pointer">
-                  <input type="checkbox" checked={on.has(f.id)} onChange={() => toggle(f.id)} className="accent-[#ff6a1f]" />
-                  {f.name}
+          {places.length > 1 && (
+            <div className="space-y-1 pt-1 border-t border-line max-h-[240px] overflow-y-auto">
+              <p className="text-[12px] text-muted">Or pick {kind}s</p>
+              {places.map((x) => (
+                <label key={x.id} className="flex items-center gap-2 text-[13.5px] cursor-pointer">
+                  <input type="checkbox" checked={on.has(x.id)} onChange={() => toggle(x.id)} className="accent-[#ff6a1f]" />
+                  {x.name}
                 </label>
               ))}
             </div>
@@ -354,13 +355,15 @@ function FurnishPicker({ plan, furnish, onFurnish, open, setOpen, disabled }: {
 }
 
 /** Asked once for a plan nobody has furnished yet. */
-function FurnishAsk({ floors, onAll, onPick, onNone }: { floors: number; onAll: () => void; onPick: () => void; onNone: () => void }) {
+function FurnishAsk({ plan, onAll, onPick, onNone }: { plan: Plan; onAll: () => void; onPick: () => void; onNone: () => void }) {
+  const { kind, places } = furnishPlaces(plan);
+  const many = places.length > 1;
   return (
     <div className={`absolute left-1/2 -translate-x-1/2 bottom-16 w-[min(440px,calc(100%-24px))] p-3 rounded-[4px] ${glass} border-l-[3px] !border-l-accent`} role="dialog" aria-label="Furnish the plan">
       <p className="text-[14px]">This plan starts empty. Put in the cabinets, fixtures and furniture from the drawing?</p>
       <div className="flex flex-wrap gap-1.5 mt-2">
-        <button className="btn btn-primary btn-sm" onClick={onAll}>{floors > 1 ? "Furnish all floors" : "Furnish it"}</button>
-        {floors > 1 && <button className="btn btn-ghost btn-sm" onClick={onPick}>Pick floors</button>}
+        <button className="btn btn-primary btn-sm" onClick={onAll}>{many ? `Furnish all ${kind}s` : "Furnish it"}</button>
+        {many && <button className="btn btn-ghost btn-sm" onClick={onPick}>Pick {kind}s</button>}
         <button className="btn btn-ghost btn-sm" onClick={onNone}>Keep it empty</button>
       </div>
     </div>
