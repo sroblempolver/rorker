@@ -114,6 +114,17 @@ export interface SharedView {
   people: { id: string; full_name: string; title: string | null }[];
   /** the photos posted on each of these pins, by pin id */
   photos: Record<string, string[]>;
+  /** materials this person needs or is picking up, and the ones for these tasks */
+  materials?: SharedMaterial[];
+}
+/** A material line as a shared link shows it: what, for which task, and who's getting it. */
+export interface SharedMaterial {
+  id: string; name: string; qty: number; unit: string; status: "to_buy" | "ordered" | "got" | "installed" | "returned";
+  task_id: string | null; task: string | null; needed_by: string | null; store: string | null; note: string | null;
+  /** first name of whoever is getting it, null when nobody is yet */
+  buyer: string | null;
+  /** this link's person is the one getting it */
+  you_get: boolean;
 }
 /** Everything one link opens: one job, or every job with something for that person. */
 export interface SharedWork {

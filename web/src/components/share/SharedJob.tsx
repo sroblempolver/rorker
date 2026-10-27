@@ -2,10 +2,12 @@
 // A job opened from a shared link: no sign-in, nothing to download. The plan (look around, step
 // inside, see their flags) and a list of only their tasks, with the photos posted on them. The one thing
 // they can do from here is send a photo onto one of their tasks (a photo the contractor asked for, or
-// their work). A person's own link covers every job they have tasks on, with a row of jobs to
+// their work). Under the tasks, the materials for their work: what it's for and who's getting it.
+// A person's own link covers every job they have tasks on, with a row of jobs to
 // switch between, and a link copied from one task opens on that task.
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import type { Member, SharedView, SharedWork } from "@/lib/data/types";
+import type { Member, SharedMaterial, SharedView, SharedWork } from "@/lib/data/types";
+import { STATUS_COLOR, STATUS_LABEL, qtyText, type Unit } from "@/lib/materials/types";
 import type { ElementStatus } from "@/lib/plan/types";
 import { applyEdits } from "@/lib/plan/edits";
 import { PlanViewer, type Level } from "@/components/plan/PlanViewer";
@@ -71,9 +73,12 @@ export function SharedJob({ view, pin: firstPin, switcher, send, onBack }: { vie
   const states = useMemo(() => new Map<string, ElementStatus>(), []);
   const team = useMemo(() => ({ me: null, members: view.people.map((p): Member => ({ ...p, user_id: null, email: null, phone: null, role: "employee", is_owner: false })) }), [view.people]);
   const pin = view.pins.find((p) => p.id === pinId) ?? null;
-  const open = view.pins.filter((p) => p.status !== "done").sort((a, b) => (a.due_date ?? "9").localeCompare(b.due_date ?? "9") || a.number - b.number);
-  const done = view.pins.filter((p) => p.status === "done");
+  // material pins show in the materials list below, so the task list is only tasks, issues and notes
+  const work = view.materials?.length ? view.pins.filter((p) => p.kind !== "material") : view.pins;
+  const open = work.filter((p) => p.status !== "done").sort((a, b) => (a.due_date ?? "9").localeCompare(b.due_date ?? "9") || a.number - b.number);
+  const done = work.filter((p) => p.status === "done");
   const stage = view.stages.find((s) => s.status === "active")?.name;
+  const mats = (view.materials ?? []).filter((m) => m.status !== "installed").sort((a, b) => Number(b.you_get) - Number(a.you_get) || (a.needed_by ?? "9").localeCompare(b.needed_by ?? "9"));
 
   const show = (id: string) => {
     setPinId(id);
@@ -136,6 +141,7 @@ export function SharedJob({ view, pin: firstPin, switcher, send, onBack }: { vie
                     </div>
                   )}
                   {pin.tagged.length > 0 && <p className="text-[13px] text-muted">With {team.members.filter((m) => pin.tagged.includes(m.id)).map((m) => m.full_name).join(", ")}</p>}
+                  {mats.some((m) => m.task_id === pin.id) && <Materials title="Materials for this task" list={mats.filter((m) => m.task_id === pin.id)} />}
                 </div>
               ) : (
                 <>
@@ -144,6 +150,7 @@ export function SharedJob({ view, pin: firstPin, switcher, send, onBack }: { vie
                     <p className="text-[13px] text-muted">{open.length ? `${open.length} open` : "Nothing open right now"}{stage ? ` · job stage: ${stage}` : ""}. Tap one to see where it is.</p>
                   </div>
                   <div className="space-y-1.5">{open.map((p) => <PinRow key={p.id} pin={p} plan={plan} onClick={() => show(p.id)} />)}</div>
+                  {mats.length > 0 && <Materials title="Materials for your work" list={mats} showTask />}
                   {done.length > 0 && (
                     <>
                       <button onClick={() => setShowDone(!showDone)} className="text-[13px] text-muted hover:text-text">{showDone ? "Hide" : "Show"} {done.length} done</button>
@@ -158,6 +165,26 @@ export function SharedJob({ view, pin: firstPin, switcher, send, onBack }: { vie
         </div>
       </div>
     </TeamContext.Provider>
+  );
+}
+
+/** Materials on a link: what it is, the task it's for, and who's getting it (or that it's theirs to get). */
+function Materials({ title, list, showTask }: { title: string; list: SharedMaterial[]; showTask?: boolean }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="eyebrow">{title}</p>
+      {list.map((m) => (
+        <div key={m.id} className="card !rounded-[3px] px-2.5 py-2 flex items-center gap-2.5">
+          <span className="min-w-0 flex-1">
+            <span className="block text-[14px] truncate"><span className="font-mono text-[13px] font-semibold mr-1.5">{qtyText(m.qty, m.unit as Unit)}</span>{m.name}</span>
+            <span className="block text-[12px] text-muted truncate">
+              {[showTask && m.task, m.you_get ? `You get it${m.store ? ` at ${m.store}` : ""}` : m.buyer ? `${m.buyer} is getting it` : "Nobody is getting it yet", m.needed_by && `needed ${m.needed_by.slice(5)}`, m.note].filter(Boolean).join(" · ")}
+            </span>
+          </span>
+          <span className="chip !h-[22px] !px-1.5 !text-[11.5px] !text-text shrink-0"><span className="w-2 h-2 rounded-[1px]" style={{ background: STATUS_COLOR[m.status] }} />{STATUS_LABEL[m.status]}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 

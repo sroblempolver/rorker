@@ -23,7 +23,7 @@ import { SAMPLE_BRAND, sampleBilling } from "@/demo/billing-sample";
 import { MoneyOverview } from "@/components/billing/MoneyOverview";
 import { sampleOtherJobs } from "@/demo/money-jobs-sample";
 import { ShoppingRun } from "@/components/materials/ShoppingRun";
-import { EXTRA_JOBS, sampleMaterials } from "@/demo/materials-sample";
+import { EXTRA_JOBS, sampleMaterials, sampleTasks } from "@/demo/materials-sample";
 import { pinSummary, qtyText, type MaterialLine, type MaterialsApi, type MaterialsJob } from "@/lib/materials/types";
 import { TeamContext } from "@/components/team/context";
 import { FeedbackProvider } from "@/components/ui/feedback";
@@ -54,6 +54,9 @@ function seed(): WorkspaceData {
   // the viewer (the owner) is on the issue too, so "Tagged to me" has something in it
   const issue = pins.find((p) => p.kind === "issue");
   if (issue) issue.tagged = ["m0", ...issue.tagged];
+  // tasks the sample materials are for ("for Marco · Kitchen electrical rough-in")
+  for (const t of sampleTasks(plan, members)) pins.push({ job_id: jobId, number: pins.length + 1, element_id: null, floor_id: null, x: null, y: null, kind: "task", body: null,
+    status: "open", priority: 1, due_date: null, tagged: [], close_requirement: "confirm", stage_id: "s2", links: [], created_by: null, created_at: now(), closed_at: null, comment_count: 0, ...t } as Pin);
   // the sample materials list; lines placed on the house get their teal pin on the map
   const PIN_STATUS = { to_buy: "open", ordered: "open", got: "in_progress", installed: "done", returned: "done" } as const;
   materials.lines = sampleMaterials(plan, jobId, members).map((m, i) => {
@@ -106,7 +109,7 @@ const otherJobs = sampleOtherJobs();
 /** What a link opens, across every job in the preview (a person's own link covers them all). */
 function sharedWork(jobs: WorkspaceData[], token: string, photos: Map<string, string[]>) {
   const l = shares.find((x) => x.token === token);
-  return l ? shareWork(l, COMPANY, jobs.map((d) => ({ company: COMPANY, job: d.job, plan: d.plan?.data ?? null, edits: d.edits, items: d.items, pins: d.pins, stages: d.stages, members: d.members, photos: Object.fromEntries(d.pins.map((p) => [p.id, photos.get(p.id) ?? []])) }))) : null;
+  return l ? shareWork(l, COMPANY, jobs.map((d) => ({ company: COMPANY, job: d.job, plan: d.plan?.data ?? null, edits: d.edits, items: d.items, pins: d.pins, stages: d.stages, members: d.members, photos: Object.fromEntries(d.pins.map((p) => [p.id, photos.get(p.id) ?? []])), materials: materials.lines.filter((m) => m.job_id === d.job.id) }))) : null;
 }
 /** photos posted on pins in the preview, by pin id, so a shared link can show them */
 const pinPhotos = new Map<string, string[]>();
@@ -276,7 +279,9 @@ function App() {
   const jobsRef = useRef(jobs);
   jobsRef.current = jobs;
   const mapi = useMemo(() => materialsApi(() => jobsRef.current), []);
-  const mjobs: MaterialsJob[] = jobs.map((d) => ({ id: d.job.id, name: d.job.name, address: d.job.address }));
+  const mjobs: MaterialsJob[] = jobs.map((d) => ({ id: d.job.id, name: d.job.name, address: d.job.address,
+    tasks: d.pins.filter((p) => p.kind === "task").map((p) => ({ id: p.id, number: p.number, title: p.title, tagged: p.tagged, stage_id: p.stage_id })),
+    stages: d.stages.map((x) => ({ id: x.id, name: x.name })) }));
   const [, setMver] = useState(0);
   const [activeId, setActiveIdRaw] = useState(() => fromHash().id ?? sample.job.id);
   /** go somewhere: a new history entry first, so the screen that opens builds on it */

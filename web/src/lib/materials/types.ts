@@ -23,6 +23,8 @@ export interface MaterialLine {
   buyer: string | null;
   /** team member who uses or installs it */
   installer: string | null;
+  /** the task (a task pin) it's needed for, e.g. the kitchen rough-in */
+  task_id: string | null;
   needed_by: string | null; stage_id: string | null; note: string | null;
   /** days the store takes to get it (special order); with needed_by it gives the order-by date */
   lead_days: number | null;
@@ -38,7 +40,21 @@ export interface MaterialLine {
 }
 export type MaterialInput = Omit<MaterialLine, "id" | "created_at" | "receipts" | "pin_id"> & { receipts?: string[]; pin_id?: string | null };
 
-export interface MaterialsJob { id: string; name: string; address: string | null }
+/** A task a line can be for: a task pin on the job. */
+export interface TaskRef { id: string; number: number; title: string; tagged: string[]; stage_id: string | null }
+export interface MaterialsJob { id: string; name: string; address: string | null; tasks?: TaskRef[]; stages?: { id: string; name: string }[] }
+
+/** What the line is for: the task, or else the stage it's needed in. */
+export function taskName(l: Pick<MaterialLine, "job_id" | "task_id" | "stage_id">, jobs: MaterialsJob[]): string | null {
+  const j = jobs.find((x) => x.id === l.job_id);
+  return (l.task_id && j?.tasks?.find((t) => t.id === l.task_id)?.title) || (l.stage_id && j?.stages?.find((s) => s.id === l.stage_id)?.name) || null;
+}
+
+/** "for Marco · Kitchen rough-in · Hadley Road": who it's for, the task, and (when asked) the job. */
+export function forWhat(l: Pick<MaterialLine, "job_id" | "task_id" | "stage_id" | "installer">, jobs: MaterialsJob[], members: { id: string; full_name: string }[], withJob = false): string {
+  const who = members.find((m) => m.id === l.installer)?.full_name.split(" ")[0];
+  return [who && `for ${who}`, taskName(l, jobs), withJob && jobs.find((x) => x.id === l.job_id)?.name].filter(Boolean).join(" · ");
+}
 
 /** What the list needs from the outside world (memory in the preview; a table later). */
 export interface MaterialsApi {

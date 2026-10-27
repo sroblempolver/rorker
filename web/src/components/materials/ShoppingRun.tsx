@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import type { Member } from "@/lib/data/types";
 import { today } from "@/lib/dates";
 import { Avatar } from "@/components/team/Avatar";
-import { FULFIL_LABEL, lineTotal, money, orderNow, qtyText, type MaterialInput, type MaterialLine, type MaterialsJob } from "@/lib/materials/types";
+import { FULFIL_LABEL, forWhat, lineTotal, money, orderNow, qtyText, type MaterialInput, type MaterialLine, type MaterialsJob } from "@/lib/materials/types";
 
 interface Bundle { key: string; name: string; unit: MaterialLine["unit"]; lines: MaterialLine[]; qty: number; cost: number; needed: string | null }
 
@@ -21,7 +21,7 @@ export function ShoppingRun({ lines, jobs, members, me, onUpdate, onOpenJob }: {
   const jobName = (id: string) => jobs.find((j) => j.id === id)?.name ?? "Job";
   const short = (id: string) => jobName(id).split(" ")[0];
 
-  const todo = lines.filter((l) => l.status === show && (who === "all" || l.buyer === who));
+  const todo = lines.filter((l) => l.status === show && (who === "all" || l.buyer === who || l.installer === who));
   const stores = useMemo(() => {
     const by = new Map<string, Map<string, Bundle>>();
     for (const l of todo) {
@@ -77,7 +77,7 @@ export function ShoppingRun({ lines, jobs, members, me, onUpdate, onOpenJob }: {
         ))}
         <span className="w-px h-5 bg-line mx-1" />
         <button onClick={() => setWho("all")} className={`chip ${who === "all" ? "!text-text !border-chalk" : "hover:text-text"}`}>Everyone</button>
-        {members.filter((m) => lines.some((l) => l.buyer === m.id && (l.status === "to_buy" || l.status === "ordered"))).map((m) => (
+        {members.filter((m) => lines.some((l) => (l.buyer === m.id || l.installer === m.id) && (l.status === "to_buy" || l.status === "ordered"))).map((m) => (
           <button key={m.id} onClick={() => setWho(m.id)} className={`chip !pl-0.5 ${who === m.id ? "!text-text !border-chalk" : "hover:text-text"}`}><Avatar m={m} size={20} />{m.id === me ? "Me" : m.full_name.split(" ")[0]}</button>
         ))}
       </div>
@@ -105,7 +105,7 @@ export function ShoppingRun({ lines, jobs, members, me, onUpdate, onOpenJob }: {
                     <span className="min-w-0 flex-1">
                       <span className="block text-[14.5px] truncate">{b.name}</span>
                       <span className="block text-[12px] text-muted truncate">
-                        {jobsHere.length > 1 ? b.lines.map((l) => `${short(l.job_id)} ${+l.qty.toFixed(2)}`).join(" · ") : jobName(jobsHere[0])}
+                        {b.lines.length > 1 ? b.lines.map((l) => `${short(l.job_id)} ${+l.qty.toFixed(2)}${l.installer ? ` (${members.find((m) => m.id === l.installer)?.full_name.split(" ")[0] ?? ""})` : ""}`).join(" · ") : forWhat(b.lines[0], jobs, members, true) || jobName(jobsHere[0])}
                         {b.needed && <> · by {b.needed.slice(5)}</>}
                         {b.lines.some((l) => l.fulfil === "delivery") && <> · {FULFIL_LABEL.delivery}</>}
                         {b.lines.some((l) => orderNow(l, today(), 2)) && <span className="text-red"> · order today</span>}
@@ -119,7 +119,7 @@ export function ShoppingRun({ lines, jobs, members, me, onUpdate, onOpenJob }: {
                       {b.lines.map((l) => (
                         <div key={l.id} className="flex items-center gap-2 text-[13px]">
                           <span className="font-mono text-muted w-[54px] shrink-0">{qtyText(l.qty, l.unit)}</span>
-                          <button className="truncate text-left hover:underline" onClick={() => onOpenJob(l.job_id)}>{jobName(l.job_id)}</button>
+                          <button className="truncate text-left hover:underline" onClick={() => onOpenJob(l.job_id)}>{forWhat(l, jobs, members, true) || jobName(l.job_id)}</button>
                           {l.note && <span className="text-muted truncate">· {l.note}</span>}
                           {l.link && <a href={l.link} target="_blank" rel="noreferrer" className="text-chalk hover:underline shrink-0">link</a>}
                           <button className="ml-auto text-[12px] text-muted hover:text-text shrink-0" onClick={() => onUpdate([l.id], { status: "got" })}>Got this one</button>
