@@ -1,0 +1,42 @@
+[
+ {
+  "file": "0.jpg",
+  "name": "townhouse.pdf p1 d1",
+  "note": "Overview of drawing 1 of the 2 on townhouse.pdf (frame D1.1): cut out of the sheet (it covers about 11% of the sheet) and drawn sharp, 2400 x 971 px. Its pixels are frame D1.1: x right, y down, top-left is (0, 0). 3 close-ups of it follow; read the details (walls, doors, fixtures, small text) from them. The PDF has no text here (its words are drawn as lines), so read the words off the pictures."
+ },
+ {
+  "file": "1.jpg",
+  "name": "townhouse.pdf p1 d1 close-up 1",
+  "note": "Close-up 1 of 3 of frame D1.1: covers D1.1 pixels x 0 to 864, y 0 to 971, drawn 2.07x bigger. Close-up pixel (tx, ty) is D1.1 pixel (0 + tx / 2.071, 0 + ty / 2.071)."
+ },
+ {
+  "file": "2.jpg",
+  "name": "townhouse.pdf p1 d1 close-up 2",
+  "note": "Close-up 2 of 3 of frame D1.1: covers D1.1 pixels x 736 to 1664, y 0 to 971, drawn 2.00x bigger. Close-up pixel (tx, ty) is D1.1 pixel (736 + tx / 1.999, 0 + ty / 1.999)."
+ },
+ {
+  "file": "3.jpg",
+  "name": "townhouse.pdf p1 d1 close-up 3",
+  "note": "Close-up 3 of 3 of frame D1.1: covers D1.1 pixels x 1536 to 2400, y 0 to 971, drawn 2.07x bigger. Close-up pixel (tx, ty) is D1.1 pixel (1536 + tx / 2.071, 0 + ty / 2.071)."
+ },
+ {
+  "file": "4.jpg",
+  "name": "townhouse.pdf p1 d2",
+  "note": "Overview of drawing 2 of the 2 on townhouse.pdf (frame D1.2): cut out of the sheet (it covers about 11% of the sheet) and drawn sharp, 2400 x 984 px. Its pixels are frame D1.2: x right, y down, top-left is (0, 0). 3 close-ups of it follow; read the details (walls, doors, fixtures, small text) from them. The PDF has no text here (its words are drawn as lines), so read the words off the pictures."
+ },
+ {
+  "file": "5.jpg",
+  "name": "townhouse.pdf p1 d2 close-up 1",
+  "note": "Close-up 1 of 3 of frame D1.2: covers D1.2 pixels x 0 to 864, y 0 to 984, drawn 2.06x bigger. Close-up pixel (tx, ty) is D1.2 pixel (0 + tx / 2.058, 0 + ty / 2.058)."
+ },
+ {
+  "file": "6.jpg",
+  "name": "townhouse.pdf p1 d2 close-up 2",
+  "note": "Close-up 2 of 3 of frame D1.2: covers D1.2 pixels x 736 to 1664, y 0 to 984, drawn 1.99x bigger. Close-up pixel (tx, ty) is D1.2 pixel (736 + tx / 1.985, 0 + ty / 1.985)."
+ },
+ {
+  "file": "7.jpg",
+  "name": "townhouse.pdf p1 d2 close-up 3",
+  "note": "Close-up 3 of 3 of frame D1.2: covers D1.2 pixels x 1536 to 2400, y 0 to 984, drawn 2.06x bigger. Close-up pixel (tx, ty) is D1.2 pixel (1536 + tx / 2.058, 0 + ty / 2.058)."
+ }
+]
