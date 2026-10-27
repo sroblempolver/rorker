@@ -39,9 +39,10 @@ async function draw(page: Page, scale: number, box: [number, number, number, num
   return c;
 }
 
+// whichever is smaller: a clean drawing packs best as PNG, a busy one as JPEG (still sharp at 0.85)
 const picture = (c: HTMLCanvasElement) => {
-  const png = c.toDataURL("image/png");
-  return png.length < 2_500_000 ? png : c.toDataURL("image/jpeg", 0.88);
+  const png = c.toDataURL("image/png"), jpg = c.toDataURL("image/jpeg", 0.85);
+  return png.length <= jpg.length ? png : jpg;
 };
 
 type Box = [number, number, number, number];
