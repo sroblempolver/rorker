@@ -1,5 +1,6 @@
 import type { Part } from "@/lib/plan/catalog";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
+import type { CustomStage, Furnish } from "@/lib/plan/build";
 
 export interface Company {
   id: string; name: string; logo_url: string | null; brand_color: string; phone: string | null;
@@ -46,6 +47,8 @@ export interface ElementEdit {
   removed?: boolean;
   /** an object added in the app, not in the drawing: the edit's key is its new id */
   added?: AddedObject;
+  /** job-wide, under the "@job" key: which floors are furnished, and the build stages the contractor added */
+  furnish?: Furnish; build_stages?: CustomStage[];
 }
 /** Something added to the plan in the app (furniture, an appliance): where it stands, its size and front. */
 export interface AddedObject {

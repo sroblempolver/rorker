@@ -24,6 +24,10 @@ export const RULES = {
   walk: 1200,
 } as const;
 
+/** Framing: 2x4 studs (38 x 89 mm) at 16" (406 mm) centres, one plate below and two above, 2x10 headers
+ *  over doors and windows, a sill under each window; outside walls in 2x6 (140 mm). Drawn in the Framing build stage. */
+export const FRAMING = { stud: 38, depth: 89, depthExt: 140, spacing: 406, plate: 38, header: 235, wood: "#c9a36a", plateWood: "#b08a55" } as const;
+
 /** Colours for each part of the outside: siding, trim, roof and so on. */
 export const FINISH = {
   siding: "#d8d0c0", trim: "#f2eee6", roof: "#3d3f43", fascia: "#efebe3", gutter: "#e9e5dd",

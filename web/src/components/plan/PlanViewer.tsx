@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JobItem, Pin, PinInput } from "@/lib/data/types";
 import { roomSides } from "@/lib/plan/geometry";
+import { LOOKS, furnishedFloors, stagedPlan, type BuildLook, type CustomStage, type Furnish } from "@/lib/plan/build";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
 import { ExteriorView, WallView } from "./Elevations";
 import { FloorCanvas, type ColorMode } from "./FloorCanvas";
@@ -55,6 +56,14 @@ interface Props {
   can3d: boolean;
   /** a shared link: look only, no pin button, nothing moves, no "All jobs" */
   readOnly?: boolean;
+  /** which floors are furnished; not set yet means nobody was asked, and the plan shows empty */
+  furnish?: Furnish;
+  /** without it the furnishing can't be changed here, and an unset plan shows everything */
+  onFurnish?: (f: Furnish) => void;
+  /** the build stage to open on (the job's stage in progress), and the stages the contractor added */
+  startLook?: BuildLook;
+  customStages?: CustomStage[];
+  onCustomStages?: (s: CustomStage[]) => void;
 }
 
 const DEPTH: Level["kind"][] = ["site", "exterior", "floor", "room", "wall"];
@@ -63,7 +72,18 @@ const DEPTH_LABEL: Record<Level["kind"], string> = { site: "Site", exterior: "Ou
 const glass = "bg-[#17181b]/90 backdrop-blur-sm border border-line";
 
 export function PlanViewer(p: Props) {
-  const { plan, level } = p;
+  const { level } = p;
+  // the build stage on show, and the house as it stands then: objects only once it's finished, and
+  // only on the floors that are furnished
+  const [stageId, setStageId] = useState<string>(p.startLook ?? "finished");
+  useEffect(() => { if (p.startLook) setStageId(p.startLook); }, [p.startLook]);
+  const custom = p.customStages ?? [];
+  const look: BuildLook = (LOOKS.find((l) => l.look === stageId)?.look ?? custom.find((c) => c.id === stageId)?.look) ?? "finished";
+  const asked = p.furnish !== undefined || !p.onFurnish;
+  const furnished = useMemo(() => (p.furnish === undefined && !p.onFurnish ? null : furnishedFloors(p.plan, p.furnish)), [p.plan, p.furnish, p.onFurnish]);
+  const plan = useMemo(() => stagedPlan(p.plan, look, furnished), [p.plan, look, furnished]);
+  const hasObjects = useMemo(() => p.plan.floors.some((f) => f.fixtures.length > 0), [p.plan]);
+  const [panel, setPanel] = useState<"furnish" | "stage" | null>(null);
   const floors = useMemo(() => [...plan.floors].sort((a, b) => a.level - b.level), [plan]);
   const floor = level.kind === "site" || level.kind === "exterior" ? null : floors.find((f) => f.id === level.floorId) ?? floors[0];
   const room = floor && (level.kind === "room" || level.kind === "wall") ? floor.rooms.find((r) => r.id === level.roomId) ?? null : null;
@@ -71,11 +91,12 @@ export function PlanViewer(p: Props) {
   const ctl = useRef<{ zoomBy: (f: number) => void; home: () => void } | null>(null);
   const [showItems, setShowItems] = useState(false);
   const [wallMode, setWallMode] = useState<WallMode>("full");
-  const [empty, setEmpty] = useState(false);
   const [gl, setGl] = useState(true);
   useEffect(() => setGl(webglAvailable()), []);
   // a room opens as its own top view: in 3D when 3D is on, with buttons to face each wall
   const in3d = p.view3d && p.can3d && gl && (level.kind === "exterior" || level.kind === "floor" || level.kind === "room");
+  // the build stage applies to the 3D model and the 2D floor plan
+  const staged = in3d || level.kind === "floor" || level.kind === "room";
   const faces = useMemo(() => (floor && room && in3d ? roomSides(floor, room) : []), [floor, room, in3d]);
   // seen from above, a room reads best over low walls; back out to the floor and the walls come back up
   const inRoom = level.kind === "room";
@@ -137,7 +158,7 @@ export function PlanViewer(p: Props) {
       )}
       {in3d && (
         <Plan3D plan={plan} mode={level.kind === "exterior" ? "building" : "floor"} floor={floor} room={room} selected={p.selected} selectedPin={p.selectedPin} selectedItem={p.selectedItem}
-          states={p.states} colorMode={p.colorMode} pins={p.pins} items={p.items} pinMode={p.pinMode} draft={p.draft} wallMode={wallMode} empty={empty} locked={p.readOnly} controls={controls}
+          states={p.states} colorMode={p.colorMode} pins={p.pins} items={p.items} pinMode={p.pinMode} draft={p.draft} wallMode={wallMode} look={look} locked={p.readOnly} controls={controls}
           onSelect={(id) => { const r = floor && id ? floor.rooms.find((x) => x.id === id) : null; if (r && floor) p.setLevel({ kind: "room", floorId: floor.id, roomId: r.id }); p.onSelect(id); }}
           onSelectPin={p.onSelectPin} onSelectItem={p.onSelectItem} onPlacePin={p.onPlacePin}
           onMoveFixture={(id, dx, dy) => p.onMoveFixture(id, dx, dy, 0)} onMoveItem={p.onMoveItem} onMovePin={p.onMovePin}
@@ -152,7 +173,7 @@ export function PlanViewer(p: Props) {
           onOpenSide={(s) => p.setLevel({ kind: "wall", floorId: floor.id, roomId: s.roomId, sideKey: s.key })}
           onPlacePin={p.onPlacePin}
           items={p.items} showItems={showItems} selectedItem={p.selectedItem} onSelectItem={p.onSelectItem} onMovePin={p.onMovePin}
-          onMoveFixture={(id, dx, dy) => p.onMoveFixture(id, dx, dy, 0)} locked={p.readOnly}
+          onMoveFixture={(id, dx, dy) => p.onMoveFixture(id, dx, dy, 0)} locked={p.readOnly} look={look}
         />
       )}
       {floor && room && side && level.kind === "wall" && (
@@ -230,9 +251,14 @@ export function PlanViewer(p: Props) {
                   className={`h-7 px-2.5 text-[12px] font-display font-bold tracking-[0.08em] uppercase ${wallMode === m ? "bg-panel-3 text-text" : "text-muted hover:text-text"}`}>{m === "full" ? "Walls" : m === "low" ? "Low walls" : "No walls"}</button>
               ))}
             </div>
-            <button onClick={() => setEmpty(!empty)} aria-pressed={empty} title="Hide the cabinets, appliances, furniture and wall items: just the rooms"
-              className={`h-7 px-2.5 rounded-[4px] text-[12px] font-display font-bold tracking-[0.08em] uppercase ${glass} ${empty ? "!border-accent text-text" : "text-muted hover:text-text"}`}>Empty rooms</button>
           </div>
+        )}
+        {staged && (
+          <BuildStages look={look} stageId={stageId} setStageId={setStageId} custom={custom} onCustom={p.readOnly ? undefined : p.onCustomStages}
+            open={panel === "stage"} setOpen={(on) => setPanel(on ? "stage" : null)} />
+        )}
+        {staged && p.onFurnish && hasObjects && (
+          <FurnishPicker plan={p.plan} furnish={p.furnish} onFurnish={p.onFurnish} open={panel === "furnish"} setOpen={(on) => setPanel(on ? "furnish" : null)} disabled={look !== "finished"} />
         )}
         {!in3d && (level.kind === "floor" || level.kind === "room") && p.items.length > 0 && (
           <button onClick={() => setShowItems(!showItems)} aria-pressed={showItems} title="Outlets, switches and other small things on the walls"
@@ -251,6 +277,11 @@ export function PlanViewer(p: Props) {
               className="h-7 px-2.5 rounded-[3px] text-[12.5px] font-display font-bold tracking-[0.06em] uppercase text-muted hover:text-text hover:bg-panel-3">{s.label}</button>
           ))}
         </div>
+      )}
+
+      {/* a newly read plan starts empty: ask once whether to furnish it */}
+      {!asked && hasObjects && p.onFurnish && staged && panel !== "furnish" && (
+        <FurnishAsk floors={p.plan.floors.length} onAll={() => p.onFurnish!("all")} onPick={() => setPanel("furnish")} onNone={() => p.onFurnish!([])} />
       )}
 
       {p.hud && level.kind === "site" && <div className="absolute left-3 top-14 md:left-28 hidden sm:block">{p.hud}</div>}
@@ -282,6 +313,115 @@ export function PlanViewer(p: Props) {
           </div>
         )}
         <div className={`chip !rounded-[3px] ${glass} ${p.pinMode ? "!text-accent !border-accent" : "hidden sm:inline-flex"}`}>{hint}</div>
+      </div>
+    </div>
+  );
+}
+
+const chip = "h-7 px-2.5 text-[12px] font-display font-bold tracking-[0.08em] uppercase";
+
+/** One switcher for the build stage: slab, framing, sheetrock, finished, and any the contractor added. */
+function BuildStages({ look, stageId, setStageId, custom, onCustom, open, setOpen }: {
+  look: BuildLook; stageId: string; setStageId: (id: string) => void; custom: CustomStage[]; onCustom?: (s: CustomStage[]) => void;
+  open: boolean; setOpen: (on: boolean) => void;
+}) {
+  const [name, setName] = useState("");
+  const [like, setLike] = useState<BuildLook>(look);
+  useEffect(() => { if (open) setLike(look); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const add = () => {
+    if (!name.trim() || !onCustom) return;
+    const id = `stage-${Date.now().toString(36)}`;
+    onCustom([...custom, { id, name: name.trim(), look: like }]);
+    setStageId(id);
+    setName("");
+    setOpen(false);
+  };
+  return (
+    <div className="relative flex flex-col items-end">
+      <div className={`flex flex-wrap justify-end rounded-[4px] overflow-hidden ${glass}`} role="group" aria-label="Build stage">
+        {[...LOOKS.map((l) => ({ id: l.look as string, label: l.label, hint: l.hint })), ...custom.map((c) => ({ id: c.id, label: c.name, hint: `Your stage, drawn like ${LOOKS.find((l) => l.look === c.look)?.label}` }))].map((s) => (
+          <button key={s.id} onClick={() => setStageId(s.id)} aria-pressed={stageId === s.id} title={s.hint}
+            className={`${chip} ${stageId === s.id ? "bg-accent text-accent-ink" : "text-muted hover:text-text"}`}>{s.label}</button>
+        ))}
+        {onCustom && <button onClick={() => setOpen(!open)} aria-expanded={open} title="Add your own stage" className={`${chip} !px-2 text-muted hover:text-text border-l border-line`}>+</button>}
+      </div>
+      {open && onCustom && (
+        <div className={`mt-1.5 w-[250px] p-3 rounded-[4px] ${glass} space-y-2 z-10`}>
+          <p className="text-[12.5px] text-muted">Add a stage of your own, like &ldquo;Rough plumbing&rdquo; or &ldquo;Insulation&rdquo;.</p>
+          <input autoFocus className="input !h-8 text-[13px]" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") setOpen(false); }} placeholder="Stage name" aria-label="Stage name" />
+          <div className="flex items-center gap-2">
+            <label className="text-[12.5px] text-muted" htmlFor="stage-like">Looks like</label>
+            <select id="stage-like" className="input !h-8 !py-0 text-[13px] flex-1" value={like} onChange={(e) => setLike(e.target.value as BuildLook)}>
+              {LOOKS.map((l) => <option key={l.look} value={l.look}>{l.label}</option>)}
+            </select>
+          </div>
+          <button className="btn btn-primary btn-sm w-full" disabled={!name.trim()} onClick={add}>Add stage</button>
+          {custom.length > 0 && (
+            <ul className="pt-1 border-t border-line space-y-1">
+              {custom.map((c) => (
+                <li key={c.id} className="flex items-center gap-2 text-[13px]">
+                  <span className="flex-1 truncate">{c.name}</span>
+                  <span className="text-muted text-[12px]">{LOOKS.find((l) => l.look === c.look)?.label}</span>
+                  <button className="text-muted hover:text-red" aria-label={`Remove ${c.name}`} onClick={() => { onCustom(custom.filter((x) => x.id !== c.id)); if (stageId === c.id) setStageId(c.look); }}>✕</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Which floors get their cabinets, fixtures and furniture: all of them, or picked one by one. */
+function FurnishPicker({ plan, furnish, onFurnish, open, setOpen, disabled }: {
+  plan: Plan; furnish: Furnish | undefined; onFurnish: (f: Furnish) => void; open: boolean; setOpen: (on: boolean) => void; disabled: boolean;
+}) {
+  const floors = [...plan.floors].sort((a, b) => a.level - b.level);
+  const on = furnishedFloors(plan, furnish);
+  const label = on.size === 0 ? "Unfurnished" : on.size === floors.length ? "Furnished" : `Furnished ${on.size} of ${floors.length}`;
+  const toggle = (id: string) => {
+    const next = new Set(on);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    onFurnish(next.size === floors.length ? "all" : floors.filter((f) => next.has(f.id)).map((f) => f.id));
+  };
+  return (
+    <div className="relative flex flex-col items-end">
+      <button onClick={() => setOpen(!open)} aria-expanded={open} title={disabled ? "Objects show at the Finished stage" : "Cabinets, fixtures and furniture: all floors, or pick them"}
+        className={`${chip} rounded-[4px] ${glass} ${on.size ? "text-text" : "text-muted hover:text-text"} ${disabled ? "opacity-60" : ""}`}>{label} ▾</button>
+      {open && (
+        <div className={`mt-1.5 w-[230px] p-3 rounded-[4px] ${glass} space-y-2 z-10`}>
+          <div className="flex gap-1.5">
+            <button className={`btn btn-sm flex-1 ${furnish === "all" ? "btn-primary" : "btn-ghost"}`} onClick={() => { onFurnish("all"); setOpen(false); }}>Furnish all</button>
+            <button className={`btn btn-sm flex-1 ${on.size === 0 && furnish !== undefined ? "btn-primary" : "btn-ghost"}`} onClick={() => { onFurnish([]); setOpen(false); }}>Empty</button>
+          </div>
+          {floors.length > 1 && (
+            <div className="space-y-1 pt-1 border-t border-line">
+              <p className="text-[12px] text-muted">Or pick floors</p>
+              {floors.map((f) => (
+                <label key={f.id} className="flex items-center gap-2 text-[13.5px] cursor-pointer">
+                  <input type="checkbox" checked={on.has(f.id)} onChange={() => toggle(f.id)} className="accent-[#ff6a1f]" />
+                  {f.name}
+                </label>
+              ))}
+            </div>
+          )}
+          {disabled && <p className="text-[12px] text-muted">Objects show at the Finished stage.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Asked once for a plan nobody has furnished yet. */
+function FurnishAsk({ floors, onAll, onPick, onNone }: { floors: number; onAll: () => void; onPick: () => void; onNone: () => void }) {
+  return (
+    <div className={`absolute left-1/2 -translate-x-1/2 bottom-16 w-[min(440px,calc(100%-24px))] p-3 rounded-[4px] ${glass} border-l-[3px] !border-l-accent`} role="dialog" aria-label="Furnish the plan">
+      <p className="text-[14px]">This plan starts empty. Put in the cabinets, fixtures and furniture from the drawing?</p>
+      <div className="flex flex-wrap gap-1.5 mt-2">
+        <button className="btn btn-primary btn-sm" onClick={onAll}>{floors > 1 ? "Furnish all floors" : "Furnish it"}</button>
+        {floors > 1 && <button className="btn btn-ghost btn-sm" onClick={onPick}>Pick floors</button>}
+        <button className="btn btn-ghost btn-sm" onClick={onNone}>Keep it empty</button>
       </div>
     </div>
   );

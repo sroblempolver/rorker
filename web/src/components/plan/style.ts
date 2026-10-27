@@ -35,3 +35,6 @@ export const WALL_SIDE = "#0a0a0b";
 export const GLASS = "#8fd3f0";
 export const FIXTURE_STROKE = "#f4efe6";
 export const GROUND = "#1d1f1b";
+
+/** build stages: boarded walls before paint, and walls chalked out on the bare slab */
+export const DRYWALL = "#e3e0d9", CHALK_LINE = "#ece6d6", SUBFLOOR = "#a88d64";

@@ -10,6 +10,7 @@ import type { ElementEdit, ItemInput, JobItem, Pin, PinInput, PinKind, PlanRow }
 import { today } from "@/lib/dates";
 import { PlanChat } from "./PlanChat";
 import { applyEdits } from "@/lib/plan/edits";
+import { JOB_KEY, currentLook, furnishWhere, jobSettings } from "@/lib/plan/build";
 import { elementLabel, findElement } from "@/lib/plan/geometry";
 import { recall, remember } from "@/lib/remember";
 import { pinLevel } from "@/components/plan/pinLevel";
@@ -164,6 +165,9 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
 
   // the plan as it is now: what the reader found, plus everything moved or changed in the app
   const view = useMemo(() => (plan ? applyEdits(plan.data, edits) : null), [plan, edits]);
+  // furnishing and the contractor's own build stages; the plan opens on the stage the job is at
+  const settings = jobSettings(edits);
+  const startLook = useMemo(() => currentLook(stages), [stages]);
 
   const setLevel = useCallback((l: Level) => {
     setLevelRaw(l);
@@ -588,7 +592,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     if (tab === "plan") return (
       <div className="space-y-3">
       {api.ask && view && (
-        <PlanChat send={api.ask} context={askContext} onChanged={api.afterAssistant}
+        <PlanChat send={api.ask} context={askContext} onChanged={api.afterAssistant} onFurnish={(room) => { if (view) void saveEdit(JOB_KEY, { furnish: furnishWhere(view, jobSettings(edits).furnish, room) }); }}
           rooms={view.floors.flatMap((f) => f.rooms.map((r) => (view.floors.length > 1 ? `${r.name} (${f.name})` : r.name)))} />
       )}
       <PlanPanel plan={plan} runs={runs} aiAvailable={data.aiAvailable} onShow={showElements}
@@ -678,6 +682,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
               flyTo={flyTo} onAllJobs={onAllJobs} jobName={job.name}
               items={items} selectedItem={selectedItem} onSelectItem={selectItem} onMoveItem={(id, x, y) => updateItem(id, { x, y })} onMovePin={movePin} onMoveFixture={moveFixture}
               view3d={view3d} setView3d={setView3d} can3d={data.can3d !== false}
+              furnish={settings.furnish} onFurnish={(furnish) => void saveEdit(JOB_KEY, { furnish })}
+              startLook={startLook} customStages={settings.build_stages} onCustomStages={(build_stages) => void saveEdit(JOB_KEY, { build_stages })}
               hud={<div className="w-[300px] bg-[#17181b]/92 backdrop-blur-sm border border-line border-l-[3px] border-l-accent rounded-[4px] p-3"><ProjectSummary compact plan={view} pins={pins} states={states} stages={stages} setLevel={setLevel} onPinKind={showPinKind} /></div>} />
           ) : (
             <div className="h-full grid place-items-center p-6 bg-ink">
