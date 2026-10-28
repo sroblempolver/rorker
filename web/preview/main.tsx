@@ -11,6 +11,7 @@ import { TeamManager, type TeamApi } from "@/components/team/TeamManager";
 import type { WorkspaceApi, WorkspaceData } from "@/components/workspace/api";
 import { DEFAULT_TEMPLATES } from "@/lib/data/templates";
 import type { Company, JobItem, JobStage, JobSummary, Member, MemberInput, Pin, PinComment, PlanRow, ShareLink } from "@/lib/data/types";
+import { JOB_KEY } from "@/lib/plan/build";
 import type { Plan } from "@/lib/plan/types";
 import { previewAsk } from "./assistant";
 import { SharedWorkView } from "@/components/share/SharedJob";
@@ -48,8 +49,10 @@ function seed(): WorkspaceData {
   }));
   const pins = samplePins(plan, members).filter((p) => p.kind !== "material").map((p, i) => ({
     id: `p${i + 1}`, job_id: jobId, number: i + 1, element_id: null, floor_id: null, x: null, y: null, kind: "task", title: "", body: null,
-    status: "open", priority: 1, due_date: null, tagged: [], close_requirement: "confirm", stage_id: null, links: [], created_by: null,
+    status: "open", priority: 1, due_date: null, tagged: [], close_requirement: "confirm", links: [], created_by: null,
     created_at: now(), closed_at: null, comment_count: 0, ...p,
+    // spread over a few stages so the Stages tab has layers to show; the rest are on the whole house
+    stage_id: ["s2", "s3", "s6", null][i % 4],
   })) as Pin[];
   // the viewer (the owner) is on the issue too, so "Tagged to me" has something in it
   const issue = pins.find((p) => p.kind === "issue");
@@ -62,14 +65,14 @@ function seed(): WorkspaceData {
       pin_id = `pm${i}`;
       pins.push({ id: pin_id, job_id: jobId, number: pins.length + 1, element_id: m.element_id, floor_id: m.floor_id, x: null, y: null, kind: "material", title: `Buy ${qtyText(m.qty, m.unit)} ${m.name}`,
         body: null, status: PIN_STATUS[m.status], priority: 1, due_date: m.needed_by, tagged: [...new Set([m.buyer, m.installer].filter(Boolean) as string[])], close_requirement: "confirm",
-        stage_id: null, links: [], created_by: null, created_at: now(), closed_at: null, comment_count: 0 });
+        stage_id: m.stage_id, links: [], created_by: null, created_at: now(), closed_at: null, comment_count: 0 });
     }
     return { ...m, id: `ml${i}`, pin_id, receipts: [], created_at: now() };
   });
   const planRow: PlanRow = { id: "plan1", job_id: jobId, version: 1, data: plan, created_at: now() };
   return {
     job: { id: jobId, company_id: "demo", name: "Hadley Road house", address: "14 Hadley Road", client_name: "Sam and Priya Okafor", client_email: null, client_phone: null, job_type: "renovation", status: "active", start_date: null, current_plan_id: "plan1", created_at: now() },
-    plan: planRow, stages, pins, states: sampleStates(plan), edits: {}, can3d: true,
+    plan: planRow, stages, pins, states: sampleStates(plan), edits: { [JOB_KEY]: { furnish: "all" } }, can3d: true,
     items: sampleItems(plan).map((it, i) => ({ id: `i${i + 1}`, job_id: jobId, label: null, note: null, created_at: now(), ...it }) as JobItem),
     runs: [{ id: "r1", job_id: jobId, kind: "read", file_name: "house.dwg", status: "needs_answers", error: null, plan_id: "plan1", created_at: now(), finished_at: now(), metrics: {} }],
     members, me: "m0", aiAvailable: false, canShare: true,
@@ -237,7 +240,7 @@ function fromAssistant(r: NewProjectResult, team: Member[]): WorkspaceData {
   return {
     job: { id: jobId, company_id: "demo", ...r.job, status: "active", current_plan_id: planRow?.id ?? null, created_at: now() },
     plan: planRow, stages: tpl.stages.map((s, i) => ({ id: uid(), job_id: jobId, position: i + 1, name: s.name, description: null, status: "not_started", started_at: null, completed_at: null })),
-    pins: [], states: [], edits: {}, can3d: true, items: [],
+    pins: [], states: [], edits: r.furnish !== undefined ? { [JOB_KEY]: { furnish: r.furnish } } : {}, can3d: true, items: [],
     runs: planRow ? [{ id: uid(), job_id: jobId, kind: "read", file_name: r.plan!.source.filename || "Your files", status: r.plan!.questions.length ? "needs_answers" : "done", error: null, plan_id: planRow.id, created_at: now(), finished_at: now(), metrics: {} }] : [],
     members: team, me: "m0", aiAvailable: false, canShare: true,
     billing: { quotes: [], invoices: [], payments: [] }, brand: SAMPLE_BRAND, payoutsConnected: false,

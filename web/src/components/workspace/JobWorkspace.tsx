@@ -10,7 +10,8 @@ import type { ElementEdit, ItemInput, JobItem, Pin, PinInput, PinKind, PlanRow }
 import { today } from "@/lib/dates";
 import { PlanChat } from "./PlanChat";
 import { applyEdits } from "@/lib/plan/edits";
-import { elementLabel, findElement } from "@/lib/plan/geometry";
+import { JOB_KEY, furnishWhere, jobSettings, stageLook } from "@/lib/plan/build";
+import { elementLabel, findElement, roomOf } from "@/lib/plan/geometry";
 import { recall, remember } from "@/lib/remember";
 import { pinLevel } from "@/components/plan/pinLevel";
 import { PlanViewer, type Level } from "@/components/plan/PlanViewer";
@@ -27,7 +28,7 @@ import { PinDetail, PinForm, PinsList, QuickPin, where } from "./PinsPanel";
 import { PlanPanel, UploadBox } from "./PlanPanel";
 import { ShareDialog } from "./ShareDialog";
 import { useFollowMarks } from "./useFollowMarks";
-import { StagesPanel, StageStrip } from "./StagesPanel";
+import { HOUSE_LAYER, StagesPanel, StageStrip } from "./StagesPanel";
 import { MoneyPanel } from "@/components/billing/MoneyPanel";
 import { AddMaterial, MaterialsPanel, blankLine, type BuyTarget } from "@/components/materials/MaterialsPanel";
 import { parseQty, type Suggestion } from "@/lib/materials/suggest";
@@ -63,9 +64,11 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedPin, setSelectedPin] = useState<string | null>(null);
   const [colorMode, setColorMode] = useState<ColorMode>("type");
+  // a stage picked in Stages is a layer: the map shows only what's on it (HOUSE_LAYER: no stage)
+  const [layer, setLayer] = useState<string | null>(null);
   const [pinMode, setPinMode] = useState(false);
   // a pin being made: `at` set means the quick card at that screen point, otherwise the full form
-  const [draft, setDraft] = useState<(PinTarget & { at?: ScreenPoint; preset?: { kind: PinKind; title: string; tagged?: string[]; photo?: boolean } }) | null>(null);
+  const [draft, setDraft] = useState<(PinTarget & { at?: ScreenPoint; preset?: { kind: PinKind; title: string; tagged?: string[]; photo?: boolean; stage?: string | null } }) | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab>(data.startOnMoney && data.billing ? "money" : data.plan ? "details" : "plan");
   const [flyTo, setFlyTo] = useState<{ ids: string[]; n: number } | null>(null);
@@ -164,6 +167,34 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
 
   // the plan as it is now: what the reader found, plus everything moved or changed in the app
   const view = useMemo(() => (plan ? applyEdits(plan.data, edits) : null), [plan, edits]);
+  // furnishing, and how built the house looks: finished, unless a stage is picked in Stages
+  const settings = useMemo(() => jobSettings(edits), [edits]);
+  const layerStage = layer && layer !== HOUSE_LAYER ? stages.find((s) => s.id === layer) ?? null : null;
+  const look = layerStage ? stageLook(layerStage, settings) : "finished";
+  const inLayer = useCallback((p: { stage_id: string | null }) => !layer || (layer === HOUSE_LAYER ? !p.stage_id || !stages.some((s) => s.id === p.stage_id) : p.stage_id === layer), [layer, stages]);
+  const layerPins = useMemo(() => (layer ? pins.filter(inLayer) : pins), [pins, layer, inLayer]);
+  // on a layer, the progress colours show just what's on it: each thing, and its room, amber while
+  // anything there is open and green once it's all done
+  const layerStates = useMemo(() => {
+    if (!layer || !view) return states;
+    const m = new Map<string, ElementStatus>();
+    const mark = (id: string, done: boolean) => { if (!done) m.set(id, "in_progress"); else if (!m.has(id)) m.set(id, "done"); };
+    for (const p of layerPins) {
+      const e = p.element_id ? findElement(view, p.element_id) : null;
+      if (!e) continue;
+      mark(e.el.id, p.status === "done");
+      const r = roomOf(e);
+      if (r) mark(r, p.status === "done");
+    }
+    return m;
+  }, [layer, view, layerPins, states]);
+  const stageCounts = useMemo(() => {
+    const c = new Map<string, number>();
+    const known = new Set(stages.map((s) => s.id));
+    for (const p of pins) if (p.status !== "done") { const k = p.stage_id && known.has(p.stage_id) ? p.stage_id : HOUSE_LAYER; c.set(k, (c.get(k) ?? 0) + 1); }
+    return c;
+  }, [pins, stages]);
+  const pickLayer = useCallback((id: string | null) => { setLayer(id); if (id) setColorMode("progress"); }, []);
 
   const setLevel = useCallback((l: Level) => {
     setLevelRaw(l);
@@ -543,7 +574,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
 
   const panel = useMemo(() => {
     if (tab === "pins") {
-      if (draft && !draft.at) return <PinForm key={`${draft.elementId}${draft.anchor?.x}${draft.preset?.title}`} plan={view} draft={draft} preset={draft.preset} stages={stages} onCancel={() => setDraft(null)} onCreate={async (input) => { await createPin(input); }} />;
+      if (draft && !draft.at) return <PinForm key={`${draft.elementId}${draft.anchor?.x}${draft.preset?.title}`} plan={view} draft={draft} preset={{ kind: "task", title: "", stage: layerStage?.id ?? null, ...draft.preset }} stages={stages} onCancel={() => setDraft(null)} onCreate={async (input) => { await createPin(input); }} />;
       if (pin) return <PinDetail pin={pin} plan={view} stages={stages} onBack={() => setSelectedPin(null)} onShow={() => showPin(pin.id)}
         linkFor={data.canShare && api.personLink && api.shareUrl ? async (m) => `${api.shareUrl!((await api.personLink!(m)).token)}?pin=${pin.id}` : undefined}
         openLinkFor={data.canShare && api.personLink && api.openShare ? (m) => { void api.personLink!(m).then((l) => api.openShare!(l.token, pin.id)); } : undefined}
@@ -555,18 +586,19 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
           setPins((l) => l.map((x) => (x.id === pin.id ? { ...x, comment_count: c.length } : x)));
           return c;
         }} />;
-      return <PinsList key={pinFilter.n} initialFilter={pinFilter.kind} pins={pins} plan={view} onSelect={showPin} onNew={() => { setPinMode(true); say("Click the map where the pin goes"); }} />;
+      return <PinsList key={pinFilter.n} initialFilter={pinFilter.kind} pins={layerPins} plan={view} onSelect={showPin} onNew={() => { setPinMode(true); say("Click the map where the pin goes"); }} />;
     }
     if (tab === "buy") {
       if (buyDraft) return <AddMaterial key={`${buyDraft.target?.where}${buyDraft.preset?.name}`} target={buyDraft.target} preset={buyDraft.preset} jobs={mjobs} stages={stages} existing={mlines}
         defaults={{ jobId: job.id, buyer: lastBuyer }} onCancel={() => setBuyDraft(null)} onAdd={async (ls, together) => { await addMaterials(ls, together); setBuyDraft(null); }} />;
-      return <MaterialsPanel key={buyFocus.n} jobId={job.id} lines={mlines} jobs={mjobs} plan={view} stages={stages} focus={buyFocus.id}
+      return <MaterialsPanel key={buyFocus.n} jobId={job.id} lines={layer ? mlines.filter((l) => l.job_id !== job.id || inLayer(l)) : mlines} jobs={mjobs} plan={view} stages={stages} focus={buyFocus.id}
         onAdd={() => openBuy(null)} onUpdate={updateMaterial} onRemove={removeMaterial} onShoppingRun={api.openShopping}
         onShow={(l) => (l.element_id ? showElements([l.element_id]) : l.pin_id && showPin(l.pin_id))}
         onSplit={(l, j, q) => void addMaterials([{ ...blankLine(j, null, { name: l.name, unit: l.unit, qty: q }, l.buyer), store: l.store, link: l.link, unit_cost: l.unit_cost, fulfil: l.fulfil, installer: l.installer, note: l.note, group_id: l.group_id }])} />;
     }
     if (tab === "stages") return (
-      <StagesPanel stages={stages}
+      <StagesPanel stages={stages} layer={layer} onLayer={pickLayer} counts={stageCounts}
+        lookOf={(st) => stageLook(st, settings)} onLook={(id, l) => void saveEdit(JOB_KEY, { stage_looks: { ...settings.stage_looks, [id]: l } })}
         onStatus={async (id, s) => {
           const before = stages.find((x) => x.id === id);
           await stageOp(() => api.setStageStatus(id, s));
@@ -588,7 +620,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     if (tab === "plan") return (
       <div className="space-y-3">
       {api.ask && view && (
-        <PlanChat send={api.ask} context={askContext} onChanged={api.afterAssistant}
+        <PlanChat send={api.ask} context={askContext} onChanged={api.afterAssistant} onFurnish={(room) => { if (view) void saveEdit(JOB_KEY, { furnish: furnishWhere(view, jobSettings(edits).furnish, room) }); }}
           rooms={view.floors.flatMap((f) => f.rooms.map((r) => (view.floors.length > 1 ? `${r.name} (${f.name})` : r.name)))} />
       )}
       <PlanPanel plan={plan} runs={runs} aiAvailable={data.aiAvailable} onShow={showElements}
@@ -611,7 +643,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind}
       buy={api.materials ? { lines: mlines.filter((l) => l.job_id === job.id && l.status !== "returned"), onQuick: quickBuy, onAll: quickBuyAll, onMore: (t) => openBuy(t), onOpen: openLine, onTick: (id) => { const l = mlines.find((x) => x.id === id); if (l) void updateMaterial(id, { status: NEXT_STATUS[l.status] }); } } : undefined} />;
   }, [tab, buyDraft, buyFocus, mlines, mjobs, lastBuyer, job.id, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, data.canShare, say, showPin, updatePin, deletePin, undoable, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
-    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext, billing, payouts, moneyKey, data.brand, job, guard]);
+    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext, billing, payouts, moneyKey, data.brand, job, guard, layer, layerPins, layerStage, inLayer, stageCounts, pickLayer, settings]);
 
   // where the quick card sits inside the map, kept on screen
   const quick = (() => {
@@ -674,10 +706,12 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         <div ref={mapRef} className="relative h-[62vh] shrink-0 lg:shrink lg:h-auto lg:flex-1 min-w-0 border-b lg:border-b-0 lg:border-r border-line">
           {plan && view ? (
             <PlanViewer plan={view} level={level} setLevel={setLevel} selected={selected} onSelect={(id) => select(id)} selectedPin={selectedPin} onSelectPin={showPin}
-              states={states} pins={pins} colorMode={colorMode} setColorMode={setColorMode} pinMode={pinMode} setPinMode={setPinMode} onPlacePin={placePin} draft={draft}
+              states={layerStates} pins={layerPins} colorMode={colorMode} setColorMode={setColorMode} pinMode={pinMode} setPinMode={setPinMode} onPlacePin={placePin} draft={draft}
               flyTo={flyTo} onAllJobs={onAllJobs} jobName={job.name}
               items={items} selectedItem={selectedItem} onSelectItem={selectItem} onMoveItem={(id, x, y) => updateItem(id, { x, y })} onMovePin={movePin} onMoveFixture={moveFixture}
               view3d={view3d} setView3d={setView3d} can3d={data.can3d !== false}
+              furnish={settings.furnish} onFurnish={(furnish) => void saveEdit(JOB_KEY, { furnish })}
+              look={look}
               hud={<div className="w-[300px] bg-[#17181b]/92 backdrop-blur-sm border border-line border-l-[3px] border-l-accent rounded-[4px] p-3"><ProjectSummary compact plan={view} pins={pins} states={states} stages={stages} setLevel={setLevel} onPinKind={showPinKind} /></div>} />
           ) : (
             <div className="h-full grid place-items-center p-6 bg-ink">
@@ -689,16 +723,24 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
             </div>
           )}
           {quick && draft?.at && (
-            <QuickPin key={`${draft.at.x},${draft.at.y}`} plan={view} target={draft} left={quick.left} top={quick.top} onCancel={() => setDraft(null)}
-              onSave={async (kind, title, tagged, photo) => { await guard(() => createPin({ kind, title, tagged, due_date: today(), close_requirement: photo ? "photo" : "confirm", element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, anchor: draft.anchor, priority: kind === "issue" ? 2 : 1 })); }}
-              onMore={(kind, title, tagged, photo) => { setDraft({ ...draft, at: undefined, preset: { kind, title, tagged, photo } }); setTab("pins"); }}
-              onBuy={api.materials ? async (title, tagged, more) => {
+            <QuickPin key={`${draft.at.x},${draft.at.y}`} plan={view} target={draft} left={quick.left} top={quick.top} onCancel={() => setDraft(null)} stages={stages} stage={layerStage?.id ?? null}
+              onSave={async (kind, title, tagged, photo, stage) => { await guard(() => createPin({ kind, title, tagged, due_date: today(), close_requirement: photo ? "photo" : "confirm", element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, anchor: draft.anchor, priority: kind === "issue" ? 2 : 1, stage_id: stage })); }}
+              onMore={(kind, title, tagged, photo, stage) => { setDraft({ ...draft, at: undefined, preset: { kind, title, tagged, photo, stage } }); setTab("pins"); }}
+              onBuy={api.materials ? async (title, tagged, more, stage) => {
                 const t: BuyTarget = { element_id: draft.elementId, floor_id: draft.floorId, x: draft.x, y: draft.y, anchor: draft.anchor ?? null, where: where(view, draft), suggestions: [] };
                 const q = parseQty(title);
                 if (more || !q.name) return openBuy(t, q.name ? { name: q.name, qty: q.qty } : undefined);
-                await addMaterials([blankLine(job.id, t, q, tagged[0] ?? lastBuyer)]);
+                await addMaterials([{ ...blankLine(job.id, t, q, tagged[0] ?? lastBuyer), stage_id: stage }]);
                 setDraft(null);
               } : undefined} />
+          )}
+          {layer && plan && (
+            <div className="absolute left-1/2 -translate-x-1/2 bottom-14 z-10 flex items-center gap-2 h-9 pl-3 pr-1 rounded-[4px] bg-[#17181b]/92 backdrop-blur-sm border border-accent text-[13px]" role="status">
+              <span className="eyebrow !text-[11.5px]">Layer</span>
+              <span className="font-medium">{layerStage?.name ?? "Whole house"}</span>
+              <span className="text-muted">{layerPins.filter((p) => p.status !== "done").length} open</span>
+              <button onClick={() => setLayer(null)} className="h-7 px-2 rounded-[3px] text-muted hover:text-text hover:bg-panel-3" title="Show everything">Show all ✕</button>
+            </div>
           )}
           {plan && questions > 0 && tab !== "plan" && (
             <button onClick={() => setTab("plan")} className="absolute left-1/2 -translate-x-1/2 bottom-3 z-10 btn btn-primary btn-sm shadow-lg">

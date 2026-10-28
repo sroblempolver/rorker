@@ -8,6 +8,7 @@ import { useMemo, useRef, useState, type ReactNode } from "react";
 import type { Member, SharedView, SharedWork } from "@/lib/data/types";
 import type { ElementStatus } from "@/lib/plan/types";
 import { applyEdits } from "@/lib/plan/edits";
+import { jobSettings } from "@/lib/plan/build";
 import { PlanViewer, type Level } from "@/components/plan/PlanViewer";
 import type { ColorMode } from "@/components/plan/FloorCanvas";
 import { pinLevel } from "@/components/plan/pinLevel";
@@ -102,7 +103,8 @@ export function SharedJob({ view, pin: firstPin, switcher, send, onBack }: { vie
               <PlanViewer plan={plan} level={level} setLevel={setLevel} selected={null} onSelect={nothing} selectedPin={pinId} onSelectPin={show}
                 states={states} pins={view.pins} colorMode={colorMode} setColorMode={setColorMode} pinMode={false} setPinMode={nothing} onPlacePin={nothing} draft={null}
                 flyTo={null} onAllJobs={nothing} jobName={view.job.name} items={view.items} selectedItem={null} onSelectItem={nothing} onMoveItem={nothing}
-                onMovePin={nothing} onMoveFixture={nothing} view3d={view3d} setView3d={setView3d} can3d readOnly />
+                onMovePin={nothing} onMoveFixture={nothing} view3d={view3d} setView3d={setView3d} can3d readOnly
+                furnish={jobSettings(view.edits).furnish ?? "all"} />
             ) : <div className="h-full grid place-items-center text-muted p-6 text-center">The plan for this job isn&apos;t ready yet.</div>}
           </div>
           <aside className="lg:w-[380px] shrink-0 flex flex-col min-h-0 bg-panel">

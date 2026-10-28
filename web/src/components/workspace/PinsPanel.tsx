@@ -91,7 +91,7 @@ export function PinsList({ pins, plan, onSelect, onNew, initialFilter = "open" }
 }
 
 export function PinForm({ plan, draft, preset, stages, onCancel, onCreate }: {
-  plan: Plan | null; draft: PinTarget; preset?: { kind: PinKind; title: string; body?: string; tagged?: string[]; photo?: boolean }; stages: JobStage[];
+  plan: Plan | null; draft: PinTarget; preset?: { kind: PinKind; title: string; body?: string; tagged?: string[]; photo?: boolean; stage?: string | null }; stages: JobStage[];
   onCancel: () => void; onCreate: (input: PinInput) => Promise<void>;
 }) {
   const [kind, setKind] = useState<PinKind>(preset?.kind ?? "task");
@@ -101,7 +101,8 @@ export function PinForm({ plan, draft, preset, stages, onCancel, onCreate }: {
   const { members } = useTeam();
   const [tagged, setTagged] = useState<string[]>(preset?.tagged ?? []);
   const [photo, setPhoto] = useState(!!preset?.photo);
-  const [stage, setStage] = useState(stages.find((s) => s.status === "active")?.id ?? "");
+  // no stage means the whole house; the stage shown on the map is the default
+  const [stage, setStage] = useState(preset?.stage ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -153,7 +154,7 @@ export function PinForm({ plan, draft, preset, stages, onCancel, onCreate }: {
         <div>
           <label className="label" htmlFor="pin-stage">Stage</label>
           <select id="pin-stage" className="input" value={stage} onChange={(x) => setStage(x.target.value)}>
-            <option value="">None</option>
+            <option value="">Whole house</option>
             {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
@@ -239,7 +240,13 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
           <input type="date" aria-label="Due date" className="bg-transparent text-text text-[12.5px] outline-none [color-scheme:dark]" value={pin.due_date ?? ""}
             onChange={(ev) => run(() => onUpdate({ due_date: ev.target.value || null }))} />
         </label>
-        {stage && <span className="chip">{stage.name}</span>}
+        <label className="chip !pr-1 cursor-pointer" title="Which stage this belongs to; none means the whole house">Stage
+          <select aria-label="Stage" className="bg-transparent text-text text-[12.5px] outline-none max-w-[150px]" value={stage?.id ?? ""}
+            onChange={(ev) => run(() => onUpdate({ stage_id: ev.target.value || null }))}>
+            <option value="">Whole house</option>
+            {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </label>
         {pin.priority > 1 && <span className="chip text-red">High priority</span>}
       </div>
 
@@ -319,12 +326,15 @@ export function PinDetail({ pin, plan, stages, onBack, onUpdate, onDelete, loadC
 
 /** The quick card that opens right where you dropped a pin: pick a kind, type a line, save. "More"
  *  moves to the full form in the side panel with what you typed. */
-export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel, onBuy }: {
+export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel, onBuy, stages = [], stage: startStage = null }: {
   plan: Plan | null; target: PinTarget; left: number; top: number;
-  onSave: (kind: PinKind, title: string, tagged: string[], photo: boolean) => Promise<void>; onMore: (kind: PinKind, title: string, tagged: string[], photo: boolean) => void; onCancel: () => void;
+  onSave: (kind: PinKind, title: string, tagged: string[], photo: boolean, stage: string | null) => Promise<void>; onMore: (kind: PinKind, title: string, tagged: string[], photo: boolean, stage: string | null) => void; onCancel: () => void;
   /** with a materials list, "Material" puts it on the list (and the map) instead of a plain pin */
-  onBuy?: (title: string, tagged: string[], more: boolean) => Promise<void> | void;
+  onBuy?: (title: string, tagged: string[], more: boolean, stage: string | null) => Promise<void> | void;
+  /** the stage it belongs to: the one shown on the map, or none for the whole house */
+  stages?: JobStage[]; stage?: string | null;
 }) {
+  const [stage, setStage] = useState<string | null>(startStage);
   const { members } = useTeam();
   const [tagged, setTagged] = useState<string[]>([]);
   // "Photo" asks someone for a photo of this spot: a task that needs a photo to close
@@ -342,13 +352,13 @@ export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel, on
     const t = title.trim() || (photo ? "Photo of this spot" : "");
     if (buy) {
       setBusy(true);
-      try { await onBuy!(t, tagged, !t); } finally { setBusy(false); }
+      try { await onBuy!(t, tagged, !t, stage); } finally { setBusy(false); }
       return;
     }
-    if (!t) return onMore(kind, "", tagged, photo);
+    if (!t) return onMore(kind, "", tagged, photo, stage);
     if (photo && !tagged.length) return setNeedWho(true);
     setBusy(true);
-    try { await onSave(kind, t, tagged, photo); } finally { setBusy(false); }
+    try { await onSave(kind, t, tagged, photo, stage); } finally { setBusy(false); }
   };
   return (
     <form onSubmit={save} onKeyDown={(e) => e.key === "Escape" && onCancel()} style={{ left, top }}
@@ -375,9 +385,17 @@ export function QuickPin({ plan, target, left, top, onSave, onMore, onCancel, on
           <div className="max-h-[96px] overflow-y-auto scroll-thin"><StaffPicker compact members={members} value={tagged} onChange={setTagged} /></div>
         </div>
       )}
+      {stages.length > 0 && (
+        <label className="flex items-center gap-2 text-[11.5px] text-muted">Stage
+          <select className="input !h-7 !py-0 text-[12.5px] flex-1" value={stage ?? ""} onChange={(e) => setStage(e.target.value || null)} aria-label="Stage">
+            <option value="">Whole house</option>
+            {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </label>
+      )}
       <div className="flex gap-1.5">
         <button className="btn btn-primary btn-sm flex-1" disabled={busy}>{busy ? "Saving…" : buy ? "Add to list" : "Save"}</button>
-        <button type="button" className="btn btn-sm" onClick={() => (buy ? onBuy!(title, tagged, true) : onMore(kind, title, tagged, photo))}>More…</button>
+        <button type="button" className="btn btn-sm" onClick={() => (buy ? onBuy!(title, tagged, true, stage) : onMore(kind, title, tagged, photo, stage))}>More…</button>
       </div>
     </form>
   );

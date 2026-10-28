@@ -20,9 +20,10 @@ import { ITEM_SIZE } from "./items";
 import { fixtureObject, Materials, SHARED_GEOMETRY } from "./models3d";
 import { buildRoofs, buildSite, buildZone, garagePanels, openingTrim, sidingMaterial, trimMaterial, type Fade } from "./exterior3d";
 import { planExterior } from "@/lib/plan/exterior";
-import { FINISH, openingSpan } from "@/lib/plan/rules";
+import { FINISH, FRAMING, openingSpan } from "@/lib/plan/rules";
+import { runOf, studsAlong, type BuildLook } from "@/lib/plan/build";
 import { getMarks, useMarks } from "@/lib/plan/marks";
-import { CHALK, GLASS, MATERIAL_BASE, PIN_COLOR, ROOM_MATERIAL, STATUS_COLOR, type Material } from "./style";
+import { CHALK, CHALK_LINE, DRYWALL, GLASS, MATERIAL_BASE, PIN_COLOR, SUBFLOOR, ROOM_MATERIAL, STATUS_COLOR, type Material } from "./style";
 import type { Controls, PinTarget, ScreenPoint } from "./target";
 
 const S = 0.001;
@@ -47,6 +48,8 @@ interface Props {
   wallMode: WallMode;
   /** leave out the objects and wall items: just the rooms, walls and floors */
   empty?: boolean;
+  /** the build stage to show: slab, framing, sheetrock or finished (the default) */
+  look?: BuildLook;
   /** look but don't move anything (shared links, the new-project review) */
   locked?: boolean;
   controls: Controls;
@@ -177,6 +180,25 @@ interface Built {
   groundY: number;
 }
 
+/** Framing members as one instanced mesh: each a box placed along its run, in slightly varied wood. */
+function framingMesh(members: { s: Pt; along: number; up: number; w: number; h: number; d: number; u: Pt; plate?: boolean }[]): THREE.InstancedMesh {
+  const mat = new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.8 });
+  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, members.length);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), sc = new THREE.Vector3(), yAxis = new THREE.Vector3(0, 1, 0);
+  const wood = new THREE.Color(FRAMING.wood), plate = new THREE.Color(FRAMING.plateWood), c = new THREE.Color();
+  members.forEach((f, i) => {
+    q.setFromAxisAngle(yAxis, Math.atan2(-f.u[1], f.u[0]));
+    pos.set((f.s[0] + f.u[0] * f.along) * S, f.up * S, (f.s[1] + f.u[1] * f.along) * S);
+    sc.set(Math.max(1, f.w) * S, Math.max(1, f.h) * S, f.d * S);
+    mesh.setMatrixAt(i, m4.compose(pos, q, sc));
+    // no two boards quite the same colour
+    c.copy(f.plate ? plate : wood).offsetHSL(0, 0, ((i * 37) % 11 - 5) * 0.008);
+    mesh.setColorAt(i, c);
+  });
+  mesh.castShadow = mesh.receiveShadow = true;
+  return mesh;
+}
+
 function wallMaterial(color: string) {
   const m = new THREE.MeshStandardMaterial({ color, roughness: 0.9, transparent: true, opacity: 1 });
   return m;
@@ -188,14 +210,19 @@ function buildScene(p: Props, mt: Materials): Built {
   const byId = new Map<string, THREE.Object3D>();
   const fades: Fade[] = [];
   const floorsAll = [...p.plan.floors].sort((a, b) => a.level - b.level);
-  const shown = p.mode === "building" ? floorsAll : p.floor ? [p.floor] : [];
+  // on the bare slab there's nothing above the ground floor yet
+  const shown = p.mode === "building" ? (p.look === "slab" ? floorsAll.slice(0, 1) : floorsAll) : p.floor ? [p.floor] : [];
   const prog = p.colorMode === "progress";
   const statusTint = (id: string, fallback: string) => (prog ? (p.states.get(id) ? STATUS_COLOR[p.states.get(id)!] : "#5d5a53") : fallback);
   const floorsMeta: Built["floors"] = [];
   // the outside worked out from the house rules: roofs, porches, the lot. Drawn in the whole building.
   const ex = planExterior(p.plan);
   const outside = p.mode === "building";
-  const dressed = outside && p.wallMode === "full";
+  const look = p.look ?? "finished";
+  const finished = look === "finished";
+  // trim, porches and the dressed outside once it's finished; the roof is on from sheetrock
+  const dressed = outside && p.wallMode === "full" && finished;
+  const roofed = outside && p.wallMode === "full" && (finished || look === "drywall");
   const pick = (o: THREE.Object3D, data: Pick) => { o.userData.pick = data; picks.push(o); byId.set(data.id, o); };
 
   const roomBox = p.room ? p.room.polygon.reduce((a, q) => [Math.min(a[0], q[0] - 300), Math.min(a[1], q[1] - 300), Math.max(a[2], q[0] + 300), Math.max(a[3], q[1] + 300)], [Infinity, Infinity, -Infinity, -Infinity]) : [0, 0, 0, 0];
@@ -207,7 +234,9 @@ function buildScene(p: Props, mt: Materials): Built {
     const base = fl.elevation_mm || fi * (p.plan.building.exterior.storey_height_mm || 3000);
     const H = fl.height_mm || 2700;
     const wallH = p.wallMode === "low" ? 1100 : H;
-    const walls = p.wallMode !== "none";
+    const walls = p.wallMode !== "none" && look !== "slab";
+    // framing: every stud, plate and header on this floor in one instanced mesh
+    const frame: { s: Pt; along: number; up: number; w: number; h: number; d: number; u: Pt; plate?: boolean }[] = [];
     floorsMeta.push({ id: fl.id, y0: base * S, y1: (base + H) * S });
     const g = new THREE.Group();
     g.position.y = base * S;
@@ -249,8 +278,10 @@ function buildScene(p: Props, mt: Materials): Built {
     // room floors in their material
     for (const r of fl.rooms) {
       const mat = ROOM_MATERIAL[r.type] ?? "concrete";
-      const patterned = p.mode === "floor" && !prog;
-      const m = new THREE.MeshStandardMaterial({ color: patterned ? "#ffffff" : statusTint(r.id, MATERIAL_BASE[mat]), map: patterned ? floorTexture(mat) : null, roughness: 0.85, transparent: true });
+      const patterned = p.mode === "floor" && !prog && finished;
+      // before the finishes go down: the bare slab on the ground, plywood subfloor upstairs
+      const bare = fi === 0 ? MATERIAL_BASE.concrete : SUBFLOOR;
+      const m = new THREE.MeshStandardMaterial({ color: patterned ? "#ffffff" : statusTint(r.id, finished ? MATERIAL_BASE[mat] : bare), map: patterned ? floorTexture(mat) : null, roughness: 0.85, transparent: true });
       if (p.room && r.id !== p.room.id) { m.opacity = 0.35; }
       const mesh = new THREE.Mesh(flat(r.polygon, 2), m);
       mesh.receiveShadow = true;
@@ -272,9 +303,24 @@ function buildScene(p: Props, mt: Materials): Built {
       // a wall with no room on either side is a porch post, a balcony baluster or the porch's edge
       const role = ex.walls.get(w.id);
       if (role && role.height <= 0) continue;
-      const color = statusTint(w.id, role?.kind === "column" ? FINISH.trim : role?.kind === "post" ? FINISH.rail : w.exterior && outside ? FINISH.siding : "#efe8da");
-      const m = w.exterior && outside && !role && !prog ? sidingMaterial(color) : wallMaterial(color);
-      const mesh = new THREE.Mesh(extrude(w.polygon, 0, role ? Math.min(role.height, wallH) : wallH), m);
+      const wh = role ? Math.min(role.height, wallH) : wallH;
+      const run = look === "framing" && !role ? runOf(w.polygon) : null;
+      if (run) {
+        // studs, a bottom plate and a double top plate; an invisible wall keeps it clickable
+        const d = Math.min(run.thickness, w.exterior ? FRAMING.depthExt : FRAMING.depth);
+        const sh = wh - 3 * FRAMING.plate;
+        for (const at of studsAlong(run.length, FRAMING.stud, FRAMING.spacing)) frame.push({ s: run.a, u: run.u, along: at, up: FRAMING.plate + sh / 2, w: FRAMING.stud, h: sh, d });
+        frame.push({ s: run.a, u: run.u, along: run.length / 2, up: FRAMING.plate / 2, w: run.length, h: FRAMING.plate, d, plate: true });
+        frame.push({ s: run.a, u: run.u, along: run.length / 2, up: wh - FRAMING.plate, w: run.length, h: 2 * FRAMING.plate, d, plate: true });
+        const ghost = new THREE.Mesh(extrude(w.polygon, 0, wh), new THREE.MeshBasicMaterial({ visible: false }));
+        g.add(ghost);
+        pick(ghost, { type: "wall", id: w.id, floorId: fl.id });
+        continue;
+      }
+      const boarded = look === "drywall" && !role;
+      const color = statusTint(w.id, boarded ? DRYWALL : role?.kind === "column" ? FINISH.trim : role?.kind === "post" ? FINISH.rail : w.exterior && outside ? FINISH.siding : "#efe8da");
+      const m = w.exterior && outside && !role && !prog && !boarded ? sidingMaterial(color) : wallMaterial(color);
+      const mesh = new THREE.Mesh(extrude(w.polygon, 0, wh), m);
       mesh.castShadow = mesh.receiveShadow = true;
       g.add(mesh);
       pick(mesh, { type: "wall", id: w.id, floorId: fl.id });
@@ -282,17 +328,53 @@ function buildScene(p: Props, mt: Materials): Built {
       fades.push({ mats: [m], centre: new THREE.Vector3(c[0] * S, (base + H / 2) * S, c[1] * S), floorIndex: fi, role: "wall" });
     }
 
+    // the slab stage: the walls, doors and windows chalked out where they'll stand
+    if (look === "slab" && p.wallMode !== "none") {
+      for (const w of fl.walls.filter((x) => near(x.polygon))) {
+        if (ex.walls.get(w.id)?.height === 0) continue;
+        const mesh = new THREE.Mesh(flat(w.polygon, 6), wallMaterial(statusTint(w.id, CHALK_LINE)));
+        g.add(mesh);
+        pick(mesh, { type: "wall", id: w.id, floorId: fl.id });
+      }
+      for (const o of fl.openings.filter((x) => near(x.polygon))) {
+        const mesh = new THREE.Mesh(flat(o.polygon, 6), wallMaterial(statusTint(o.id, o.kind === "window" ? "#6f9aab" : "#b98c5a")));
+        g.add(mesh);
+        pick(mesh, { type: "opening", id: o.id, floorId: fl.id });
+      }
+    }
+
     // doors and windows: header above, sill below, glass in a window
     for (const o of walls ? fl.openings.filter((x) => near(x.polygon)) : []) {
       // the open front of a porch: posts either side, nothing across
       if (ex.gaps.has(o.id)) continue;
       const og = new THREE.Group();
-      const face = o.exterior && outside && !prog;
       const [bot, top] = openingSpan(o, fl);
-      const m = face ? sidingMaterial(FINISH.siding, top) : wallMaterial(statusTint(o.id, o.exterior && outside ? FINISH.siding : "#efe8da"));
-      if (top < wallH) { const h = new THREE.Mesh(extrude(o.polygon, top, wallH), m); h.castShadow = true; og.add(h); }
+      const run = look === "framing" ? runOf(o.polygon) : null;
+      if (run) {
+        // a header and the double top plate over it, cripples between; a sill and cripples under a window
+        const d = Math.min(run.thickness, o.exterior ? FRAMING.depthExt : FRAMING.depth);
+        const L = run.length;
+        const cripples = (lo: number, hi: number) => { if (hi - lo > 30) for (const at of studsAlong(L, FRAMING.stud, FRAMING.spacing)) frame.push({ s: run.a, u: run.u, along: at, up: (lo + hi) / 2, w: FRAMING.stud, h: hi - lo, d }); };
+        if (top < wallH) {
+          const plates = wallH - 2 * FRAMING.plate;
+          const hh = Math.min(FRAMING.header, plates - top);
+          if (hh > 0) frame.push({ s: run.a, u: run.u, along: L / 2, up: top + hh / 2, w: L + 2 * FRAMING.stud, h: hh, d, plate: true });
+          frame.push({ s: run.a, u: run.u, along: L / 2, up: wallH - FRAMING.plate, w: L, h: 2 * FRAMING.plate, d, plate: true });
+          cripples(top + hh, plates);
+        }
+        if (bot > 0) {
+          frame.push({ s: run.a, u: run.u, along: L / 2, up: FRAMING.plate / 2, w: L, h: FRAMING.plate, d, plate: true });
+          frame.push({ s: run.a, u: run.u, along: L / 2, up: bot - FRAMING.plate / 2, w: L, h: FRAMING.plate, d, plate: true });
+          cripples(FRAMING.plate, bot - FRAMING.plate);
+        }
+        const ghost = new THREE.Mesh(extrude(o.polygon, 0, wallH), new THREE.MeshBasicMaterial({ visible: false }));
+        og.add(ghost);
+      }
+      const face = o.exterior && outside && !prog && finished;
+      const m = face ? sidingMaterial(FINISH.siding, top) : wallMaterial(statusTint(o.id, look === "drywall" ? DRYWALL : o.exterior && outside ? FINISH.siding : "#efe8da"));
+      if (top < wallH && !run) { const h = new THREE.Mesh(extrude(o.polygon, top, wallH), m); h.castShadow = true; og.add(h); }
       const sm = face ? sidingMaterial(FINISH.siding, 0) : m;
-      if (bot > 0) og.add(new THREE.Mesh(extrude(o.polygon, 0, Math.min(bot, wallH)), sm));
+      if (bot > 0 && !run) og.add(new THREE.Mesh(extrude(o.polygon, 0, Math.min(bot, wallH)), sm));
       const gm = new THREE.MeshStandardMaterial({ color: face ? FINISH.glass : GLASS, transparent: true, opacity: face ? 0.55 : 0.32, roughness: 0.05, metalness: face ? 0.4 : 0.1, depthWrite: false });
       // outside: casing, sill and sash frame on every door and window
       const extra: THREE.Material[] = [];
@@ -303,7 +385,7 @@ function buildScene(p: Props, mt: Materials): Built {
       }
       if (o.kind === "window" || o.kind === "sliding_door") {
         if (Math.min(top, wallH) > bot) og.add(new THREE.Mesh(extrude(o.polygon, bot, Math.min(top, wallH)), gm));
-      } else if (o.kind === "door" || o.kind === "double_door" || o.kind === "garage_door") {
+      } else if (finished && (o.kind === "door" || o.kind === "double_door" || o.kind === "garage_door")) {
         // a thin closed door in the frame, so doors read as doors; the way in gets its own colour
         const dm = new THREE.MeshStandardMaterial({ color: o.kind === "garage_door" ? (face ? FINISH.garageDoor : "#c9c2b4") : face && o === ex.entry ? FINISH.frontDoor : FINISH.door, roughness: 0.7, transparent: true });
         if (face && o.kind === "garage_door") { dm.map = garagePanels(); }
@@ -320,7 +402,7 @@ function buildScene(p: Props, mt: Materials): Built {
     }
 
     // stairs: a flight of steps across the stair outline
-    for (const st of fl.stairs) {
+    for (const st of look === "slab" ? [] : fl.stairs) {
       const b = st.polygon.reduce((a, q) => [Math.min(a[0], q[0]), Math.min(a[1], q[1]), Math.max(a[2], q[0]), Math.max(a[3], q[1])], [Infinity, Infinity, -Infinity, -Infinity]);
       const sg = new THREE.Group();
       const n = Math.max(6, Math.round(H / 185));
@@ -337,6 +419,8 @@ function buildScene(p: Props, mt: Materials): Built {
       g.add(sg);
       pick(sg, { type: "stair", id: st.id, floorId: fl.id });
     }
+
+    if (frame.length) g.add(framingMesh(frame));
 
     // fixtures at real size
     // each storey gets its own materials in the building, so the floors above can fade on their own
@@ -366,7 +450,7 @@ function buildScene(p: Props, mt: Materials): Built {
     // things on the walls: outlets, switches, lights
     const sides = new Map<string, WallSide>();
     for (const r of fl.rooms) for (const s of roomSides(fl, r)) sides.set(s.key, s);
-    for (const it of p.empty ? [] : p.items) {
+    for (const it of p.empty || !finished ? [] : p.items) {
       const side = sides.get(it.side);
       if (!side) continue;
       const [w, h] = ITEM_SIZE[it.kind];
@@ -416,14 +500,14 @@ function buildScene(p: Props, mt: Materials): Built {
     root.add(buildSite(ex, floorsAll[0]));
     for (const z of ex.zones) {
       const fi = floorsAll.findIndex((f) => f.id === z.floorId);
-      if (fi < 0) continue;
+      if (fi < 0 || !shown.includes(floorsAll[fi])) continue;
       const zg = new THREE.Group();
       zg.position.y = ex.base(fi) * S;
       root.add(zg);
       const c = new THREE.Vector3(((z.rect[0] + z.rect[2]) / 2) * S, ex.base(fi) * S, ((z.rect[1] + z.rect[3]) / 2) * S);
       buildZone(z, ex, dressed, (o, mats, role) => { zg.add(o); if (mats.length) fades.push({ mats, centre: c, floorIndex: fi, role }); });
     }
-    if (dressed) {
+    if (roofed) {
       const top = floorsAll[floorsAll.length - 1];
       buildRoofs(ex, (o, mats, centre, floorIndex, main) => {
         root.add(o);
@@ -652,7 +736,7 @@ export function Plan3D(p: Props) {
   }
 
   // (re)build the model when the job changes
-  const key = useMemo(() => ({}), [p.plan, p.mode, p.floor, p.room, p.items, p.pins, p.states, p.colorMode, p.wallMode, p.empty, p.draft, p.selectedPin, p.selectedItem]); // eslint-disable-line react-hooks/exhaustive-deps
+  const key = useMemo(() => ({}), [p.plan, p.mode, p.floor, p.room, p.items, p.pins, p.states, p.colorMode, p.wallMode, p.empty, p.look, p.draft, p.selectedPin, p.selectedItem]); // eslint-disable-line react-hooks/exhaustive-deps
   const framed = useRef<string>("");
   useEffect(() => {
     const t = three.current;

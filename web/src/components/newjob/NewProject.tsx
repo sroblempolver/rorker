@@ -11,6 +11,7 @@ import { JOB_TYPES } from "@/lib/data/templates";
 import { PlanViewer, type Level } from "@/components/plan/PlanViewer";
 import type { ColorMode } from "@/components/plan/FloorCanvas";
 import { FURNISH } from "@/lib/plan/furnish";
+import { furnishWhere, type Furnish } from "@/lib/plan/build";
 import { MicButton, speak, stopSpeaking, useDictation } from "@/components/voice/speech";
 import { useFeedback } from "@/components/ui/feedback";
 import { useEscape } from "@/components/ui/hotkeys";
@@ -19,6 +20,8 @@ export interface NewProjectResult {
   job: { name: string; address: string | null; job_type: string; start_date: string | null; client_name: string | null; client_email: string | null; client_phone: string | null };
   plan: Plan | null;
   summary: string;
+  /** which floors to furnish; left unset, the job asks when the plan first opens */
+  furnish?: Furnish;
 }
 
 const READING = ["Reading your files…", "Finding the rooms…", "Measuring walls…", "Placing doors and windows…", "Working out the kitchen and baths…", "Almost there…"];
@@ -47,6 +50,12 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
   const [talk, setTalk] = useState<Line[]>([]);
   const [talkQs, setTalkQs] = useState<IntakeQuestion[] | null>(null);
   const [talking, setTalking] = useState(false);
+  // a read plan starts empty: the review asks whether to furnish all of it or pick floors
+  const [furnish, setFurnish] = useState<Furnish | undefined>(undefined);
+  const built = useMemo(() => {
+    if (!project?.sketch?.floors?.length) return null;
+    try { return planFromSketch(project.sketch, prep?.source?.filename ? prep.source : { kind: "notes", filename: "notes" }); } catch { return null; }
+  }, [project, prep]);
   const discuss = async (said: string, byVoice: boolean, qAnswers?: Record<string, string>) => {
     if (!chat.current || talking) return;
     setTalk((t) => [...t, { who: "you", text: said || "(skipped)" }]);
@@ -194,8 +203,8 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
         )}
 
         {stage === "review" && project && (
-          <Review project={project} source={prep?.source} onCreate={onCreate} onRestart={() => { setStage("start"); setStep(null); setProject(null); setTalk([]); setTalkQs(null); setErr(null); }}
-            check={<Check lines={talk} busy={talking} questions={talkQs} plan={project.sketch?.questions ?? []} rooms={(project.sketch?.floors ?? []).flatMap((f) => f.rooms.map((r) => r.name))} err={err} onSend={discuss} onStop={() => ctl.current?.abort()} />} />
+          <Review project={project} built={built} furnish={furnish} setFurnish={setFurnish} onCreate={onCreate} onRestart={() => { setStage("start"); setStep(null); setProject(null); setTalk([]); setTalkQs(null); setErr(null); setFurnish(undefined); }}
+            check={<Check onFurnish={(room) => { if (built) setFurnish((f) => furnishWhere(built.plan, f, room)); }} lines={talk} busy={talking} questions={talkQs} plan={project.sketch?.questions ?? []} rooms={(project.sketch?.floors ?? []).flatMap((f) => f.rooms.map((r) => r.name))} err={err} onSend={discuss} onStop={() => ctl.current?.abort()} />} />
         )}
       </div>
     </div>
@@ -223,11 +232,10 @@ function Questions({ step, answers, setAnswers, onSend, onSkip, err }: { step: E
   );
 }
 
-function Review({ project, source, onCreate, onRestart, check }: { project: IntakeProject; source?: { kind: string; filename: string }; onCreate: (r: NewProjectResult) => void; onRestart: () => void; check: ReactNode }) {
-  const built = useMemo(() => {
-    if (!project.sketch?.floors?.length) return null;
-    try { return planFromSketch(project.sketch, source?.filename ? source : { kind: "notes", filename: "notes" }); } catch { return null; }
-  }, [project, source]);
+function Review({ project, built, furnish, setFurnish, onCreate, onRestart, check }: {
+  project: IntakeProject; built: { plan: Plan } | null; furnish: Furnish | undefined; setFurnish: (f: Furnish) => void;
+  onCreate: (r: NewProjectResult) => void; onRestart: () => void; check: ReactNode;
+}) {
   const [job, setJob] = useState({
     name: project.job?.name ?? "New job", address: project.job?.address ?? "", job_type: project.job?.job_type ?? "renovation", start_date: project.job?.start_date ?? "",
     client_name: project.client?.name ?? "", client_email: project.client?.email ?? "", client_phone: project.client?.phone ?? "",
@@ -263,7 +271,7 @@ function Review({ project, source, onCreate, onRestart, check }: { project: Inta
               <PlanViewer plan={plan} level={level} setLevel={setLevel} selected={null} onSelect={nothing} selectedPin={null} onSelectPin={nothing}
                 states={states} pins={[]} colorMode={colorMode} setColorMode={setColorMode} pinMode={false} setPinMode={nothing} onPlacePin={nothing} draft={null}
                 flyTo={null} onAllJobs={nothing} jobName={job.name} items={[]} selectedItem={null} onSelectItem={nothing} onMoveItem={nothing}
-                onMovePin={nothing} onMoveFixture={nothing} view3d={view3d} setView3d={setView3d} can3d readOnly />
+                onMovePin={nothing} onMoveFixture={nothing} view3d={view3d} setView3d={setView3d} can3d readOnly furnish={furnish} onFurnish={setFurnish} />
             </div>
           </section>
         ) : <section className="card p-5 text-[14px] text-muted">No plan yet: there wasn&apos;t a drawing to read. You can add one to the job later, or tell me about the rooms here.</section>}
@@ -287,7 +295,7 @@ function Review({ project, source, onCreate, onRestart, check }: { project: Inta
       <div className="flex gap-2">
         <button className="btn btn-primary flex-1" onClick={() => onCreate({
           job: { name: job.name.trim() || "New job", address: job.address.trim() || null, job_type: job.job_type, start_date: job.start_date || null, client_name: job.client_name.trim() || null, client_email: job.client_email.trim() || null, client_phone: job.client_phone.trim() || null },
-          plan, summary: project.summary,
+          plan, summary: project.summary, furnish,
         })}>Create the project</button>
         <button className="btn btn-ghost" onClick={onRestart}>Start over</button>
       </div>
@@ -298,9 +306,11 @@ function Review({ project, source, onCreate, onRestart, check }: { project: Inta
 // one-tap asks for the inside of the house; none of them may move a wall, room, door or window
 const KEEP = " Don't change any walls, rooms, doors or windows.";
 
-function Check({ lines, busy, questions, plan, rooms, err, onSend, onStop }: {
+function Check({ lines, busy, questions, plan, rooms, err, onSend, onStop, onFurnish }: {
   lines: Line[]; busy: boolean; questions: IntakeQuestion[] | null; plan: { text: string; options?: string[] }[]; rooms: string[]; err: string | null;
   onSend: (said: string, byVoice: boolean, answers?: Record<string, string>) => void; onStop: () => void;
+  /** a furnishing ask turns furnishing on there: the whole house, or that room's floor */
+  onFurnish: (room: string | null) => void;
 }) {
   const [text, setText] = useState("");
   const [picked, setPicked] = useState<Record<number, string>>({});
@@ -361,7 +371,7 @@ function Check({ lines, busy, questions, plan, rooms, err, onSend, onStop }: {
             </select>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {FURNISH.map((a) => <button key={a.label} className="chip !h-7" onClick={() => onSend(a.ask(where ? `the ${where}` : "the whole house").replace("the the ", "the ") + KEEP, false)}>{a.label}</button>)}
+            {FURNISH.map((a) => <button key={a.label} className="chip !h-7" onClick={() => { if (a.label !== "Clear the furniture") onFurnish(where || null); onSend(a.ask(where ? `the ${where}` : "the whole house").replace("the the ", "the ") + KEEP, false); }}>{a.label}</button>)}
           </div>
         </div>
       )}
