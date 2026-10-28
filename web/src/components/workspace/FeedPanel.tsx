@@ -1,7 +1,7 @@
 "use client";
 // The feed: the first thing beside the map. What's going on now and what's coming up on this job, by
 // who it's on (or by day). A tap on anything shows it on the map and opens it.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { today as todayNow } from "@/lib/dates";
 import type { JobStage, Pin } from "@/lib/data/types";
 import { byPerson, byWhenGroups, dayText, feedItems, stageNowNext, type FeedItem } from "@/lib/feed";
@@ -17,15 +17,28 @@ type GroupBy = "person" | "day";
 /** rows shown per group before "Show n more" */
 const FIRST = 4;
 
-export function FeedPanel({ pins, lines, stages, plan, onPin, onLine, onStages }: {
+export function FeedPanel({ pins, lines, stages, plan, onPin, onLine, onStages, person }: {
   pins: Pin[]; lines: MaterialLine[]; stages: JobStage[]; plan: Plan | null;
   onPin: (id: string) => void; onLine: (id: string) => void; onStages: () => void;
+  /** jump to one person's list (from Go to): grouped by person, theirs opened in full and scrolled to */
+  person?: { id: string; n: number } | null;
 }) {
   const { members, me } = useTeam();
   const [groupBy, setGroupByRaw] = useState<GroupBy>("person");
   const [open, setOpen] = useState<Set<string>>(new Set());
   useEffect(() => { const g = recall<GroupBy>("feed.groupBy"); if (g === "day") setGroupByRaw(g); }, []);
   const setGroupBy = (g: GroupBy) => { setGroupByRaw(g); remember("feed.groupBy", g); };
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!person) return;
+    setGroupByRaw("person");
+    setOpen((s) => new Set(s).add(person.id));
+    requestAnimationFrame(() => {
+      const el = box.current?.querySelector<HTMLElement>(`[data-group="${person.id}"]`);
+      el?.scrollIntoView({ block: "start", behavior: "smooth" });
+      el?.classList.remove("flash"); void el?.offsetWidth; el?.classList.add("flash");
+    });
+  }, [person]);
   const today = todayNow();
   const items = useMemo(() => feedItems(pins, lines, today), [pins, lines, today]);
   const groups = useMemo(() => (groupBy === "person" ? byPerson(items, members) : byWhenGroups(items)), [groupBy, items, members]);
@@ -34,7 +47,7 @@ export function FeedPanel({ pins, lines, stages, plan, onPin, onLine, onStages }
   const late = count("late"), dueToday = count("today"), going = count("now");
 
   return (
-    <div className="p-4 space-y-4">
+    <div ref={box} className="p-4 space-y-4">
       <div>
         <p className="eyebrow">On this job</p>
         <h2 className="font-display text-[25px] font-extrabold uppercase leading-none">Coming up</h2>
@@ -65,7 +78,7 @@ export function FeedPanel({ pins, lines, stages, plan, onPin, onLine, onStages }
       )}
 
       {groups.map((g) => (
-        <section key={g.id} className="space-y-1.5">
+        <section key={g.id} data-group={g.id} className="space-y-1.5 scroll-mt-2">
           <div className="flex items-center gap-2 pt-1">
             {g.member && <Avatar m={g.member} size={24} />}
             <h3 className={`font-display font-bold uppercase tracking-[0.06em] text-[14px] truncate ${g.id === "late" ? "text-red" : g.id === "now" ? "text-amber" : ""}`}>

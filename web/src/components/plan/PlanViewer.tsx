@@ -129,6 +129,13 @@ export function PlanViewer(p: Props) {
     if (k === "room" && floor && room) return p.setLevel({ kind: "room", floorId: floor.id, roomId: room.id });
   };
 
+  // the how-to line shows when a level opens, then fades so it never sits on top of the map's buttons
+  const [hintOn, setHintOn] = useState(true);
+  useEffect(() => {
+    setHintOn(true);
+    const t = setTimeout(() => setHintOn(false), 6000);
+    return () => clearTimeout(t);
+  }, [level.kind, in3d]);
   const hint = p.pinMode ? "Click anywhere to drop the pin · Esc to cancel" :
     in3d && level.kind === "exterior" ? "Drag to look around · zoom in to open the building, keep zooming to step into a floor · right-click or Pin to flag the roof or a wall" :
     in3d && p.readOnly ? "Drag to look around · right-drag to slide · click a flag to see the task" :
@@ -194,7 +201,7 @@ export function PlanViewer(p: Props) {
       </nav>
 
       {/* depth ladder */}
-      <div className="absolute left-3 top-1/2 -translate-y-1/2 hidden md:flex flex-col items-stretch" aria-label="Zoom level">
+      <div className={`absolute left-3 top-1/2 -translate-y-1/2 hidden md:flex flex-col items-stretch py-1 pr-1 rounded-[4px] ${glass}`} aria-label="Zoom level">
         {DEPTH.map((k, i) => {
           const can = k === "site" || k === "exterior" || k === "floor" || (k === "room" && !!room) || (k === "wall" && !!side);
           const on = i === depth;
@@ -262,7 +269,7 @@ export function PlanViewer(p: Props) {
 
       {/* in the room's 3D view, step up to any wall */}
       {in3d && room && floor && faces.length > 0 && (
-        <div className={`absolute left-3 top-14 md:left-1/2 md:-translate-x-1/2 md:top-3 flex flex-wrap gap-1 p-1 rounded-[4px] ${glass}`} role="group" aria-label="Face a wall">
+        <div className={`absolute left-3 top-12 flex flex-wrap gap-1 p-1 rounded-[4px] ${glass}`} role="group" aria-label="Face a wall">
           <span className="h-7 px-1.5 inline-flex items-center text-[11.5px] text-muted font-display font-bold tracking-[0.1em] uppercase">Face</span>
           {faces.map((s) => (
             <button key={s.key} onClick={() => p.setLevel({ kind: "wall", floorId: floor.id, roomId: room.id, sideKey: s.key })}
@@ -304,7 +311,7 @@ export function PlanViewer(p: Props) {
             {STATUS_ORDER.map((s) => <span key={s} className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-[1px]" style={{ background: STATUS_COLOR[s] }} />{STATUS_LABEL[s]}</span>)}
           </div>
         )}
-        <div className={`chip !rounded-[3px] ${glass} ${p.pinMode ? "!text-accent !border-accent" : "hidden sm:inline-flex"}`}>{hint}</div>
+        <div className={`chip !rounded-[3px] ${glass} transition-opacity duration-700 ${p.pinMode ? "!text-accent !border-accent" : `hidden sm:inline-flex ${hintOn ? "" : "opacity-0"}`}`}>{hint}</div>
       </div>
     </div>
   );

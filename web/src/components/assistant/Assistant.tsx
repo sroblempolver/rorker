@@ -74,7 +74,7 @@ export function Assistant({ send, context, onChanged, open, setOpen, wide }: { s
   const showBubble = open && (shown.length > 0 || busy || dict.listening || !!err || !!dict.error || typing);
 
   return (
-    <div className={`fixed z-40 right-4 bottom-4 ${side} flex flex-col items-end gap-2 pointer-events-none`}>
+    <div className={`fixed z-40 right-4 bottom-[calc(1rem+var(--nav-h,0px))] ${side} flex flex-col items-end gap-2 pointer-events-none`}>
       {showBubble && (
         <section role="dialog" aria-label="Rorker assistant" className="pointer-events-auto w-[min(340px,calc(100vw-32px))] bg-panel/95 backdrop-blur-sm border border-line border-l-[3px] border-l-accent rounded-[6px] shadow-2xl">
           <div className="flex items-center px-3 pt-2">

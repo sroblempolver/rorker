@@ -22,6 +22,7 @@ import { STATUS_LABEL } from "@/components/plan/style";
 import { TeamContext } from "@/components/team/context";
 import { ShortcutsDialog, useFeedback } from "@/components/ui/feedback";
 import { useEscape, useHotkeys } from "@/components/ui/hotkeys";
+import { useGoTo, type GoItem } from "@/components/ui/GoTo";
 import type { WorkspaceApi, WorkspaceData } from "./api";
 import { Inspector, ProjectSummary, type AddPin } from "./Inspector";
 import { FeedPanel } from "./FeedPanel";
@@ -59,6 +60,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const [edits, setEdits] = useState<Record<string, ElementEdit>>(data.edits);
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
   const [view3d, setView3d] = useState(data.can3d !== false);
+  const [feedPerson, setFeedPerson] = useState<{ id: string; n: number } | null>(null);
   const [pinFilter, setPinFilter] = useState<{ kind: PinKind | "open"; n: number }>({ kind: "open", n: 0 });
   const [states, setStates] = useState(() => new Map(data.states.map((s) => [s.element_id, s.status] as [string, ElementStatus])));
   const [level, setLevelRaw] = useState<Level>({ kind: "site" });
@@ -502,6 +504,37 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     "?": () => setHelp(true),
   });
 
+  // this job's places and actions in the Go to box (Ctrl+K): floors, rooms, open pins, people, tabs
+  const tabName: Record<Tab, string> = { feed: "Feed", details: "Details", pins: "Pins", buy: "Buy list", stages: "Stages", plan: "Plan questions", money: "Money" };
+  const goItems = useMemo<GoItem[]>(() => {
+    const out: GoItem[] = [];
+    const k = job.id;
+    if (view) {
+      for (const f of view.floors) out.push({ id: `${k}:floor:${f.id}`, group: "Floors", label: f.name, sub: `${f.rooms.length} rooms`, run: () => setLevel({ kind: "floor", floorId: f.id }) });
+      for (const f of view.floors) for (const r of f.rooms) out.push({ id: `${k}:room:${r.id}`, group: "Rooms", label: r.name, sub: f.name, keywords: r.id, run: () => setLevel({ kind: "room", floorId: f.id, roomId: r.id }) });
+    }
+    const names = new Map(data.members.map((m) => [m.id, m.full_name]));
+    for (const p of pins) if (p.status !== "done") out.push({ id: `${k}:pin:${p.id}`, group: "Open pins", label: `#${p.number} ${p.title}`, sub: `${p.kind[0].toUpperCase()}${p.kind.slice(1)} · ${where(view, p)}`,
+      keywords: p.tagged.map((t) => names.get(t) ?? "").join(" "), run: () => showPin(p.id) });
+    for (const m of data.members) {
+      const n = pins.filter((p) => p.status !== "done" && p.tagged.includes(m.id)).length;
+      if (n) out.push({ id: `${k}:person:${m.id}`, group: "People", label: m.full_name, sub: `${n} open on this job${m.title ? ` · ${m.title}` : ""}`, run: () => { setFeedPerson({ id: m.id, n: Date.now() }); setSelectedPin(null); setDraft(null); setTab("feed"); } });
+    }
+    shownTabs.forEach((t, i) => out.push({ id: `tab:${t}`, group: "This job", label: `Open ${tabName[t]}`, keys: String(i + 1), run: () => openTab(t) }));
+    if (plan) {
+      out.push({ id: "act:pin", group: "This job", label: "Drop a pin", sub: "click the map where it goes", keys: "P", run: () => setPinMode(true) });
+      if (data.can3d !== false) out.push({ id: "act:3d", group: "This job", label: view3d ? "Show the plan in 2D" : "Show the house in 3D", run: () => setView3d(!view3d) });
+      out.push({ id: "act:outside", group: "This job", label: "Whole site", sub: "step all the way out", run: () => setLevel({ kind: "site" }) });
+    }
+    if (data.canShare && api.createShareLink) out.push({ id: "act:share", group: "This job", label: "Share a link", sub: "with a sub or the crew", run: () => setSharing(true) });
+    if (api.ask) out.push({ id: "act:ask", group: "This job", label: "Ask the assistant", run: () => setAskOpen(true) });
+    out.push({ id: "act:keys", group: "This job", label: "Keyboard shortcuts", keys: "?", run: () => setHelp(true) });
+    return out;
+  }, [job.id, view, pins, data.members, data.can3d, data.canShare, api, plan, view3d, shownTabs.join(), openTab, setLevel, showPin]); // eslint-disable-line react-hooks/exhaustive-deps
+  useGoTo(`job:${job.id}`, goItems);
+  // the jobs list marks the one you were last in
+  useEffect(() => { remember("jobs.last", job.id); }, [job.id]);
+
   // open where you left this job last time on this device: same floor or room, 2D or 3D. The side panel
   // always opens on the feed, so what's coming up is the first thing seen.
   const memKey = `job.${job.id}`;
@@ -606,7 +639,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         onSplit={(l, j, q) => void addMaterials([{ ...blankLine(j, null, { name: l.name, unit: l.unit, qty: q }, l.buyer), store: l.store, link: l.link, unit_cost: l.unit_cost, fulfil: l.fulfil, installer: l.installer, note: l.note, group_id: l.group_id }])} />;
     }
     if (tab === "feed") return (
-      <FeedPanel pins={pins} lines={mlines.filter((l) => l.job_id === job.id)} stages={stages} plan={view}
+      <FeedPanel person={feedPerson} pins={pins} lines={mlines.filter((l) => l.job_id === job.id)} stages={stages} plan={view}
         onPin={showPin} onLine={openLine} onStages={() => setTab("stages")} />
     );
     if (tab === "stages") return (
@@ -655,7 +688,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       edits={edits} onSaveEdit={saveEdit} items={items} selectedItem={selectedItem} onSelectItem={selectItem}
       onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind}
       buy={api.materials ? { lines: mlines.filter((l) => l.job_id === job.id && l.status !== "returned"), onQuick: quickBuy, onAll: quickBuyAll, onMore: (t) => openBuy(t), onOpen: openLine, onTick: (id) => { const l = mlines.find((x) => x.id === id); if (l) void updateMaterial(id, { status: NEXT_STATUS[l.status] }); } } : undefined} />;
-  }, [tab, buyDraft, buyFocus, mlines, mjobs, lastBuyer, job.id, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, data.canShare, say, showPin, updatePin, deletePin, undoable, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
+  }, [tab, feedPerson, buyDraft, buyFocus, mlines, mjobs, lastBuyer, job.id, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, data.canShare, say, showPin, updatePin, deletePin, undoable, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
     edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext, billing, payouts, moneyKey, data.brand, job, guard, layer, layerPins, layerStage, inLayer, stageCounts, pickLayer, settings]);
 
   // where the quick card sits inside the map, kept on screen
@@ -779,7 +812,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
               <kbd className="kbd ml-auto hidden md:inline-grid !h-5 !text-[10.5px]">Esc</kbd>
             </button>
           )}
-          <div ref={panelRef} className="flex-1 min-h-0 overflow-y-auto scroll-thin">{panel}</div>
+          <div ref={panelRef} className="flex-1 min-h-0 overflow-y-auto scroll-thin"><div key={tab} className="fade-in">{panel}</div></div>
         </aside>
       </div>
       {help && <ShortcutsDialog onClose={() => setHelp(false)} groups={[

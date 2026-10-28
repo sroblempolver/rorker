@@ -28,6 +28,10 @@ import { EXTRA_JOBS, sampleMaterials, sampleTasks } from "@/demo/materials-sampl
 import { pinSummary, qtyText, type MaterialLine, type MaterialsApi, type MaterialsJob } from "@/lib/materials/types";
 import { TeamContext } from "@/components/team/context";
 import { FeedbackProvider } from "@/components/ui/feedback";
+import { GoToButton, GoToHost, useGoTo, type GoItem } from "@/components/ui/GoTo";
+import { JobCards } from "@/components/JobCards";
+import { jobGlance } from "@/lib/feed";
+import { today } from "@/lib/dates";
 
 /** when this preview was built, so an out-of-date copy in the browser cache is easy to spot */
 declare const __BUILD__: string;
@@ -333,6 +337,16 @@ function App() {
     setJobs((js) => [d, ...js]);
     go("job", d.job.id);
   };
+  // the app's own places in the Go to box (Ctrl+K): every job and every screen
+  const goItems = useMemo<GoItem[]>(() => [
+    ...jobs.map((d) => ({ id: `job:${d.job.id}`, group: "Jobs", label: d.job.name, sub: [d.job.address, d.job.client_name].filter(Boolean).join(" · "), keywords: d.job.client_name ?? "", run: () => { setFromClient(false); go("job", d.job.id); } })),
+    { id: "page:jobs", group: "Go to", label: "All jobs", run: () => setPage("jobs") },
+    { id: "page:money", group: "Go to", label: "Money", sub: "quotes, invoices, who owes what", run: () => setPage("money") },
+    { id: "page:shop", group: "Go to", label: "Shopping", sub: "everything to buy, by store", run: () => setPage("shop") },
+    { id: "page:team", group: "Go to", label: "Team", run: () => setPage("team") },
+    { id: "page:new", group: "Go to", label: "New project", sub: "from a drawing, PDF or photo", run: () => setPage("new") },
+  ], [jobs]); // eslint-disable-line react-hooks/exhaustive-deps
+  useGoTo("app", goItems);
   const tab = (p: Page, label: string) => (
     <button onClick={() => { setFromClient(false); setPage(p); }} className={`shrink-0 px-1.5 sm:px-3 h-9 rounded-[3px] font-display text-[13px] sm:text-[15px] font-bold tracking-[0.06em] sm:tracking-[0.1em] uppercase ${page === p ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</button>
   );
@@ -340,10 +354,26 @@ function App() {
     <div className="h-full flex flex-col">
       <header className="h-14 shrink-0 border-b border-line bg-panel flex items-center gap-2 sm:gap-4 px-3 sm:px-4">
         <button onClick={() => setPage("jobs")} aria-label="All jobs"><Logo size={20} /></button>
-        <nav className="flex items-center gap-1 sm:ml-2 min-w-0 overflow-x-auto">{tab("jobs", "Jobs")}{tab("money", "Money")}{tab("shop", "Shopping")}{tab("team", "Team")}</nav>
-        <button onClick={() => setPage("new")} className={`btn btn-sm ${page === "new" ? "btn-ghost" : "btn-primary"} ml-auto`}>+<span className="hidden sm:inline"> New project</span></button>
-        <span className="chip hidden md:inline-flex"><span>Preview · sample data, nothing is saved · build {__BUILD__}</span></span>
+        <nav className="hidden sm:flex items-center gap-1 sm:ml-2 min-w-0 overflow-x-auto">{tab("jobs", "Jobs")}{tab("money", "Money")}{tab("shop", "Shopping")}{tab("team", "Team")}</nav>
+        <GoToButton className="ml-auto" />
+        <button onClick={() => setPage("new")} className={`btn btn-sm ${page === "new" ? "btn-ghost" : "btn-primary"}`}>+<span className="hidden sm:inline"> New project</span></button>
+        <span className="chip hidden xl:inline-flex" title={`Build ${__BUILD__}`}><span>Preview · sample data, nothing is saved</span></span>
       </header>
+      <GoToHost />
+      {/* on a phone the main places sit at the bottom, under the thumb */}
+      <nav className="mobile-nav sm:hidden fixed bottom-0 inset-x-0 z-30 h-14 pb-[env(safe-area-inset-bottom)] box-content bg-panel border-t border-line grid grid-cols-4" aria-label="Main">
+        {([["jobs", "Jobs", "M3 21V9l9-6 9 6v12M9 21v-7h6v7"], ["money", "Money", "M3 6h18v12H3zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"], ["shop", "Shopping", "M5 7h14l-1.5 12h-11zM9 7a3 3 0 0 1 6 0"], ["team", "Team", "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14a6.5 6.5 0 0 1 3.5 6"]] as const).map(([p, label, d]) => {
+          const on = page === p || (p === "jobs" && page === "job");
+          return (
+            <button key={p} onClick={() => { setFromClient(false); setPage(p); }} aria-current={on ? "page" : undefined}
+              className={`flex flex-col items-center justify-center gap-0.5 font-display text-[11.5px] font-bold tracking-[0.08em] uppercase ${on ? "text-accent" : "text-muted"}`}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
+              {label}
+            </button>
+          );
+        })}
+      </nav>
+      <div key={page === "job" ? `job-${active.job.id}` : page} className="flex-1 min-h-0 flex flex-col fade-in pb-14 sm:pb-0">
       {page === "new" ? (
         <NewProject onCreate={created} onCancel={() => setPage("jobs")} />
       ) : page === "money" ? (
@@ -390,17 +420,18 @@ function App() {
             <div className="flex-1 min-w-0">
               <p className="eyebrow">All jobs</p>
               <h1 className="font-display text-[34px] font-extrabold uppercase leading-none tracking-[0.01em]">{jobs.length} active job{jobs.length === 1 ? "" : "s"}</h1>
-              <p className="text-muted text-sm">Click a building to go inside. Start a new one from your drawings with New project.</p>
+              <p className="text-muted text-sm">Click a building or a card to go inside. Press <kbd className="kbd !h-5 !text-[10.5px]">/</kbd> to jump straight to any job, room or pin.</p>
             </div>
-            <button className="btn btn-primary" onClick={() => setPage("new")}>+ New project</button>
           </div>
-          <div className="px-4 sm:px-6 pb-8"><AllJobsMap jobs={jobs.map(summary)} /></div>
+          <div className="px-4 sm:px-6"><AllJobsMap jobs={jobs.map(summary)} /></div>
+          <div className="px-4 sm:px-6 py-6"><JobCards jobs={jobs.map((d) => ({ ...summary(d), ...jobGlance(d.pins, materials.lines.filter((l) => l.job_id === d.job.id), today()) }))} /></div>
         </div>
       ) : (
         <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">
           <JobWorkspace key={active.job.id} data={current} api={api} onAllJobs={() => setPage("jobs")} />
         </div>
       )}
+      </div>
     </div>
   );
 }
