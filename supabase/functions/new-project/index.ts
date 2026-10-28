@@ -3,6 +3,7 @@
 // model either asks a few follow-up questions or hands back the new client, the job and a room sketch
 // that the page turns into the 2D/3D plan. The API key is a Supabase secret and never reaches the page.
 import Anthropic from "npm:@anthropic-ai/sdk@1.3.0";
+import { OBJECT_KINDS, catalogBrief } from "./catalog.js";
 
 const API_KEY = () => Deno.env.get("ANTHROPIC_API_KEY") || Deno.env.get("ANTHROPIC_API_KEY_rorker");
 // reading plans: the best model for paying plans, a cheaper one for the free plan
@@ -28,7 +29,8 @@ function limited(ip: string) {
 
 const PT = { type: "array", items: { type: "number" }, minItems: 2, maxItems: 2, description: "[x, y] in mm" };
 const SIDE = { type: "string", enum: ["north", "south", "east", "west"] };
-const FIXTURE_KINDS = ["base_cabinet", "wall_cabinet", "tall_cabinet", "kitchen_sink", "dishwasher", "range", "cooktop", "oven", "range_hood", "fridge", "island", "toilet", "washbasin", "vanity", "bathtub", "shower", "bed", "sofa", "armchair", "chair", "table", "dining_table", "desk", "nightstand", "sideboard", "wardrobe", "bookshelf", "washing_machine", "dryer", "water_heater", "fireplace", "tv", "lamp", "plant", "car", "other"];
+// every object the app knows, at its real size (generated from the app's catalogue)
+const FIXTURE_KINDS = OBJECT_KINDS;
 
 const TOOLS: Anthropic.Tool[] = [
   {
@@ -106,6 +108,7 @@ The sketch (only when there's a drawing, plan, sketch or photo of a layout):
 - Several homes in one drawing (a terrace of townhouses, semi-detached houses, a duplex, flats): count the homes before anything else. A home is a separate dwelling (its own household or tenant): look across the whole drawing for unit labels ("Unit A", "Lot 3", "Apt 2", "Townhouse 1"), party or demising walls (thick walls running the full depth with no door through them), separate front entrances, a kitchen in each, separate meters or services, and the same layout repeated or mirrored. Rooms joined by an internal door are one home; a second kitchen behind the same front door is still one home unless the drawing calls it a unit. List each one in units and make every one of them; never squeeze them into one house. Start each room's name with its unit ("Unit 2 living room") so names stay unique, and set its unit. Doors between a unit and outside are outside doors. Neighbouring units share the party wall line exactly. Draw the first unit in full; a unit that is the same or the mirror image of one already drawn is a copy_of entry (mirror for handed pairs, offset_mm from that unit's left edge to its own). Draw a unit in full when it differs (end units with an extra window, a different layout). Say how many units you found in the summary. Name the building after the drawing ("Townhouses 1-6") when it has no name.
 - Doors: every door between two rooms and every outside door, by the two room names (and the side of the house for an outside door). Windows: by room and the side of the house they're on. Open passages are kind "opening".
 - Fixtures: the main things drawn (kitchen run as base cabinets with the sink, range and fridge; toilets, basins, tubs, showers; beds, sofas, dining table; a car in a garage). Centre in mm, real size, and which way the front faces.
+- Object kinds, with their usual size (width x depth x height, mm) and where they go: ${catalogBrief()}. Use the kind that matches; for anything else use kind "other" with its real name. Leave out width and depth to get the usual size. Something that sits on something (a TV on its unit, a computer or monitor on the desk, a microwave on the counter, a table lamp on a nightstand) goes with its centre on what it sits on, and the app stands it on top; wall things (wall cabinets, mirrors, pictures, shelves) go against the wall and the app hangs them at their usual height.
 - Put the things you weren't sure about in the sketch's questions (at most 5, each with quick answers when there are obvious ones). The contractor sees them next to the design.
 
 After create_project the contractor looks over the design and tells you what's wrong or what to change, by voice or typing ("the garage door is on the south side", "add a powder room under the stairs", "the kitchen is bigger, about 4 by 5 metres", or answers to your questions).
