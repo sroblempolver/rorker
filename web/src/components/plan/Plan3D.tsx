@@ -34,6 +34,8 @@ export type WallMode = "full" | "low" | "none";
 interface Props {
   plan: Plan;
   mode: "building" | "floor";
+  /** the floors picked to show, by id; null shows them all (and a floor you're in lifts off the ones above) */
+  only?: string[] | null;
   floor: Floor | null;
   room: Room | null;
   selected: string | null;
@@ -182,8 +184,8 @@ interface Built {
   outerR: number;
   /** the side the entrance faces, as a camera heading: the front door is always toward you (the house's south) */
   frontAz: number;
-  /** the highest storey on show: in a floor, the ones above it are lifted off */
-  top: number;
+  /** which storeys are on show, 1 or 0 by level: the ones picked, or in a floor the ones up to it */
+  on: number[];
 }
 
 /** Framing members as one instanced mesh: each a box placed along its run, in slightly varied wood. */
@@ -514,13 +516,15 @@ function buildScene(p: Props, mt: Materials): Built {
       const flag = pin ? pinFlag(String(pin.number), PIN_COLOR[pin.kind], pin.status === "done", pin.id === p.selectedPin) : pinFlag("+", "#ff6a1f", false, true);
       flag.position.set(a.x * S, (a.z ?? 0) * S, a.y * S);
       root.add(flag);
+      // a pin on the roof or an outside wall goes with the top storey when the floors are picked
+      fades.push({ mats: allMats(flag), centre: new THREE.Vector3(a.x * S, 0, a.y * S), floorIndex: floorsAll.length - 1, role: "thing" });
       if (pin) pick(flag, { type: "pin", id: pin.id, floorId: pin.floor_id ?? floorsAll[0].id });
     }
   }
 
   // the outside, built to the house rules: roofs with eaves and gutters, porches and balconies, the lot
   // a floor keeps the lot and the porches, so the house looks the same zoomed in; the ones above it fade out
-  const top = cur >= 0 ? cur : floorsAll.length - 1;
+  const on = floorsAll.map((f, i) => (p.only ? (p.only.includes(f.id) ? 1 : 0) : cur < 0 || i <= cur ? 1 : 0));
   if (finish && floorsAll.length) {
     root.add(buildSite(ex, floorsAll[0]));
     for (const z of ex.zones) {
@@ -530,13 +534,13 @@ function buildScene(p: Props, mt: Materials): Built {
       zg.position.y = ex.base(fi) * S;
       root.add(zg);
       const c = new THREE.Vector3(((z.rect[0] + z.rect[2]) / 2) * S, ex.base(fi) * S, ((z.rect[1] + z.rect[3]) / 2) * S);
-      buildZone(z, ex, outside && dressed, (o, mats, role) => { zg.add(o); if (mats.length) fades.push({ mats, centre: c, floorIndex: fi, role }); });
+      buildZone(z, ex, outside && dressed, (o, mats, role) => { zg.add(o); fades.push({ mats: allMats(o, mats), centre: c, floorIndex: fi, role }); });
     }
     if (roofed) {
       const last = floorsAll[floorsAll.length - 1];
       buildRoofs(ex, (o, mats, centre, floorIndex, main) => {
         root.add(o);
-        fades.push({ mats, centre, floorIndex, role: "roof" });
+        fades.push({ mats: allMats(o, mats), centre, floorIndex, role: "roof" });
         o.traverse((x) => { if ((x as THREE.Mesh).isMesh) pick(x, { type: "roof", id: x === main ? "roof" : `roof-${x.id}`, floorId: last.id }); });
       });
     }
@@ -556,7 +560,14 @@ function buildScene(p: Props, mt: Materials): Built {
   roomTint.forEach((m) => { const holder = new THREE.Object3D(); holder.userData.ownMaterials = m; root.add(holder); });
   const pinLabels: THREE.Sprite[] = [];
   root.traverse((o) => { if (o.userData.pinLabel) pinLabels.push(o as THREE.Sprite); });
-  return { root, picks, byId, fades, floors: floorsMeta, centre, radius, pinLabels, groundY: finish ? -(ex.rules.plinth + 5) * S : -0.21, outerR, frontAz: entranceAz(p.plan, ex), top };
+  return { root, picks, byId, fades, floors: floorsMeta, centre, radius, pinLabels, groundY: finish ? -(ex.rules.plinth + 5) * S : -0.21, outerR, frontAz: entranceAz(p.plan, ex), on };
+}
+
+/** Every material in an object, so all of it fades together (gutters, steps and posts included). */
+function allMats(o: THREE.Object3D, extra: THREE.Material[] = []): THREE.Material[] {
+  const out = new Set(extra);
+  o.traverse((x) => { const m = (x as THREE.Mesh).material; if (m) for (const mm of Array.isArray(m) ? m : [m]) out.add(mm); });
+  return [...out];
 }
 
 /** The camera heading that faces the main entrance: the door is the house's south, at the bottom of the view. */
@@ -633,7 +644,7 @@ export function Plan3D(p: Props) {
     /** the assistant's blinking dots */
     dots: THREE.Group;
     /** storeys lifting off or coming back: the top one on show before and after, and when it changed */
-    vis: { t0: number; from: number; to: number };
+    vis: { t0: number; from: number[]; to: number[] };
     /** the zoom range the camera eases into, so a new level never snaps it */
     want: { min: number; max: number } | null;
   } | null>(null);
@@ -684,7 +695,7 @@ export function Plan3D(p: Props) {
     const mt = new Materials();
     const dots = new THREE.Group();
     scene.add(dots);
-    three.current = { renderer, scene, camera, controls, built: null, mt, sel, focus: 0, hoverFloor: null, sun, lockUntil: 0, dots, vis: { t0: 0, from: 99, to: 99 }, want: null };
+    three.current = { renderer, scene, camera, controls, built: null, mt, sel, focus: 0, hoverFloor: null, sun, lockUntil: 0, dots, vis: { t0: 0, from: [], to: [] }, want: null };
 
     const resize = () => {
       const w = el.clientWidth || 1, h = el.clientHeight || 1;
@@ -765,7 +776,7 @@ export function Plan3D(p: Props) {
     const focus = t.focus;
     // the storeys above the floor you're in lift off, and come back as you zoom out, over half a second
     const k = THREE.MathUtils.clamp((performance.now() - t.vis.t0) / 450, 0, 1);
-    const shownAt = (fi: number) => { const a = fi <= t.vis.from ? 1 : 0, b = fi <= t.vis.to ? 1 : 0; return a + (b - a) * k; };
+    const shownAt = (fi: number) => { const a = t.vis.from[fi] ?? 1, b = t.vis.to[fi] ?? 1; return a + (b - a) * k; };
     for (const f of built.fades) {
       // a roof is numbered as the storey above the walls it sits on: it goes with those walls
       let o = shownAt(f.role === "roof" ? f.floorIndex - 1 : f.floorIndex);
@@ -792,7 +803,7 @@ export function Plan3D(p: Props) {
   }
 
   // (re)build the model when the job changes
-  const key = useMemo(() => ({}), [p.plan, p.mode, p.floor, p.room, p.items, p.pins, p.states, p.colorMode, p.wallMode, p.empty, p.look, p.draft, p.selectedPin, p.selectedItem]); // eslint-disable-line react-hooks/exhaustive-deps
+  const key = useMemo(() => ({}), [p.plan, p.mode, p.floor, p.room, p.items, p.pins, p.states, p.colorMode, p.wallMode, p.empty, p.look, p.only, p.draft, p.selectedPin, p.selectedItem]); // eslint-disable-line react-hooks/exhaustive-deps
   const framed = useRef<string>("");
   useEffect(() => {
     const t = three.current;
@@ -823,11 +834,15 @@ export function Plan3D(p: Props) {
       // keeping the way you were looking (the first look starts from the front door)
       if (prev && !prev.split("|")[2] && !cb.current.room) frame(false);
       else frame(true, !!prev);
-      const from = prev ? t.vis.to : built.top;
-      t.vis = { t0: performance.now(), from, to: built.top };
       // back outside, the storey you came from is the one that opens first
-      t.focus = cb.current.mode === "building" && prev ? Math.min(from, built.floors.length - 1) : 0;
+      t.focus = cb.current.mode === "building" && prev ? Math.max(0, built.floors.findIndex((f) => f.id === prev.split("|")[1])) : 0;
     } else frame(false);
+    // storeys going off or coming back fade from wherever they are now, so nothing pops
+    const now = performance.now();
+    const k = THREE.MathUtils.clamp((now - t.vis.t0) / 450, 0, 1);
+    const at = built.on.map((_, i) => { const a = t.vis.from[i] ?? 1, b = t.vis.to[i] ?? 1; return a + (b - a) * k; });
+    if (!t.vis.to.length) t.vis = { t0: now, from: built.on, to: built.on };
+    else if (built.on.some((v, i) => v !== t.vis.to[i])) t.vis = { t0: now, from: at, to: built.on };
     highlight();
     placeDots();
   }, [key]);  
