@@ -82,7 +82,11 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const [buyDraft, setBuyDraft] = useState<{ target: BuyTarget | null; preset?: Partial<Suggestion> & { name?: string } } | null>(null);
   const [buyFocus, setBuyFocus] = useState<{ id: string | null; n: number }>({ id: null, n: 0 });
   const [lastBuyer, setLastBuyer] = useState<string | null>(null);
-  const mjobs = useMemo(() => data.materials?.jobs ?? [{ id: data.job.id, name: data.job.name, address: data.job.address }], [data.materials?.jobs, data.job]);
+  // this job's tasks and stages are live here (a task made a moment ago can be picked for a line)
+  const mjobs = useMemo(() => {
+    const here = { tasks: pins.filter((p) => p.kind === "task").map((p) => ({ id: p.id, number: p.number, title: p.title, tagged: p.tagged, stage_id: p.stage_id })), stages: stages.map((x) => ({ id: x.id, name: x.name })) };
+    return (data.materials?.jobs ?? [{ id: data.job.id, name: data.job.name, address: data.job.address }]).map((j) => (j.id === data.job.id ? { ...j, ...here } : j));
+  }, [data.materials?.jobs, data.job, pins, stages]);
   useEffect(() => { void api.materials?.list().then(setMlines).catch(() => {}); }, [api]);
   // opening the add sheet or the list starts at the top
   useEffect(() => { if (tab === "buy") panelRef.current?.scrollTo(0, 0); }, [tab, buyDraft]);
