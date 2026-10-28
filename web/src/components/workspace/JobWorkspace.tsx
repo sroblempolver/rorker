@@ -1,5 +1,5 @@
 "use client";
-// One job: the plan on the left, the side panel on the right (details, pins, stages, plan). All state
+// One job: the plan on the left, the side panel on the right (the feed first, then details, pins, stages, plan). All state
 // lives here and every change goes through the WorkspaceApi, so the same screen runs on the server
 // actions or on the in-memory preview. Like a good game menu, Esc (or the Back bar, or the browser's
 // back button) always steps back one thing, most changes can be undone, and the job opens where you left it.
@@ -24,6 +24,7 @@ import { ShortcutsDialog, useFeedback } from "@/components/ui/feedback";
 import { useEscape, useHotkeys } from "@/components/ui/hotkeys";
 import type { WorkspaceApi, WorkspaceData } from "./api";
 import { Inspector, ProjectSummary, type AddPin } from "./Inspector";
+import { FeedPanel } from "./FeedPanel";
 import { PinDetail, PinForm, PinsList, QuickPin, where } from "./PinsPanel";
 import { PlanPanel, UploadBox } from "./PlanPanel";
 import { ShareDialog } from "./ShareDialog";
@@ -34,7 +35,7 @@ import { AddMaterial, MaterialsPanel, blankLine, type BuyTarget } from "@/compon
 import { parseQty, type Suggestion } from "@/lib/materials/suggest";
 import { NEXT_STATUS, pinSummary, qtyText, type MaterialInput, type MaterialLine } from "@/lib/materials/types";
 
-const TABS: Tab[] = ["details", "pins", "buy", "stages", "plan", "money"];
+const TABS: Tab[] = ["feed", "details", "pins", "buy", "stages", "plan", "money"];
 
 interface Undo { id: number; label: string; run: () => void | Promise<void>; key?: string }
 
@@ -48,7 +49,7 @@ function levelFits(plan: PlanRow["data"], l: Level) {
 }
 const sameLevel = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-type Tab = "details" | "pins" | "buy" | "stages" | "plan" | "money";
+type Tab = "feed" | "details" | "pins" | "buy" | "stages" | "plan" | "money";
 export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; api: WorkspaceApi; onAllJobs: () => void }) {
   const [plan, setPlan] = useState(data.plan);
   const [runs, setRuns] = useState(data.runs);
@@ -70,7 +71,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   // a pin being made: `at` set means the quick card at that screen point, otherwise the full form
   const [draft, setDraft] = useState<(PinTarget & { at?: ScreenPoint; preset?: { kind: PinKind; title: string; tagged?: string[]; photo?: boolean; stage?: string | null } }) | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
-  const [tab, setTab] = useState<Tab>(data.startOnMoney && data.billing ? "money" : data.plan ? "details" : "plan");
+  const [tab, setTab] = useState<Tab>(data.startOnMoney && data.billing ? "money" : data.plan ? "feed" : "plan");
   const [flyTo, setFlyTo] = useState<{ ids: string[]; n: number } | null>(null);
   const job = data.job;
   const [billing, setBilling] = useState(data.billing);
@@ -483,6 +484,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     if (selectedPin) return setSelectedPin(null);
     if (selectedItem) return setSelectedItem(null);
     if (pickedSomething) return setSelected(level.kind === "room" ? level.roomId : null);
+    // the whole job's details step back to the feed
+    if (level.kind === "site" && tab === "details") return setTab("feed");
     stepOut();
   }, [askOpen, pinMode, draft, tab, buyDraft, selectedPin, selectedItem, pickedSomething, level, stepOut]);
   useEscape(back);
@@ -499,21 +502,21 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     "?": () => setHelp(true),
   });
 
-  // open where you left this job last time on this device: same tab, same floor or room, 2D or 3D
+  // open where you left this job last time on this device: same floor or room, 2D or 3D. The side panel
+  // always opens on the feed, so what's coming up is the first thing seen.
   const memKey = `job.${job.id}`;
   const restored = useRef(false);
   const replaceNext = useRef(false);
   useEffect(() => {
     if (restored.current) return;
     restored.current = true;
-    const m = recall<{ tab?: Tab; level?: Level; view3d?: boolean; colorMode?: ColorMode }>(memKey);
+    const m = recall<{ level?: Level; view3d?: boolean; colorMode?: ColorMode }>(memKey);
     if (!m) return;
-    if (m.tab && !data.startOnMoney && shownTabs.includes(m.tab) && (plan || m.tab !== "details")) setTab(m.tab);
     if (typeof m.view3d === "boolean" && data.can3d !== false) setView3d(m.view3d);
     if (m.colorMode) setColorMode(m.colorMode);
-    if (m.level && plan && m.level.kind !== "site" && levelFits(plan.data, m.level)) { replaceNext.current = true; setLevel(m.level); }
-  }, [memKey, plan, data.can3d, setLevel]);
-  useEffect(() => { if (restored.current) remember(memKey, { tab, level, view3d, colorMode }); }, [memKey, tab, level, view3d, colorMode]);
+    if (m.level && plan && m.level.kind !== "site" && levelFits(plan.data, m.level)) { replaceNext.current = true; setLevel(m.level); if (!data.startOnMoney) setTab("feed"); }
+  }, [memKey, plan, data.can3d, data.startOnMoney, setLevel]);
+  useEffect(() => { if (restored.current) remember(memKey, { level, view3d, colorMode }); }, [memKey, level, view3d, colorMode]);
 
   // the browser's back and forward buttons walk the map too (and a phone's back gesture)
   const fromHistory = useRef(false);
@@ -560,7 +563,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     if (level.kind === "room") return fl?.name ?? "the floor";
     if (level.kind === "floor") return "the outside";
     if (level.kind === "exterior") return "the whole job";
-    return null;
+    return "the feed";
   })();
   const openPins = pins.filter((p) => p.status !== "done").length;
   const questions = plan?.data.questions.filter((q) => !q.answer).length ?? 0;
@@ -602,6 +605,10 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         onShow={(l) => (l.element_id ? showElements([l.element_id]) : l.pin_id && showPin(l.pin_id))}
         onSplit={(l, j, q) => void addMaterials([{ ...blankLine(j, null, { name: l.name, unit: l.unit, qty: q }, l.buyer), store: l.store, link: l.link, unit_cost: l.unit_cost, fulfil: l.fulfil, installer: l.installer, note: l.note, group_id: l.group_id }])} />;
     }
+    if (tab === "feed") return (
+      <FeedPanel pins={pins} lines={mlines.filter((l) => l.job_id === job.id)} stages={stages} plan={view}
+        onPin={showPin} onLine={openLine} onStages={() => setTab("stages")} />
+    );
     if (tab === "stages") return (
       <StagesPanel stages={stages} layer={layer} onLayer={pickLayer} counts={stageCounts}
         lookOf={(st) => stageLook(st, settings)} onLook={(id, l) => void saveEdit(JOB_KEY, { stage_looks: { ...settings.stage_looks, [id]: l } })}
@@ -663,7 +670,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
 
   const tabBtn = (t: Tab, label: string, badge?: number) => (
     <button key={t} onClick={() => openTab(t)} title={`${label} (${shownTabs.indexOf(t) + 1})`} aria-selected={tab === t} role="tab"
-      className={`flex-1 h-12 text-[14px] font-display font-bold tracking-[0.1em] uppercase border-b-[3px] inline-flex items-center justify-center gap-1.5 ${tab === t ? "border-accent text-text" : "border-transparent text-muted hover:text-text"}`}>
+      className={`flex-auto shrink-0 px-1 h-12 text-[13px] font-display font-bold tracking-[0.05em] uppercase border-b-[3px] inline-flex items-center justify-center gap-1.5 ${tab === t ? "border-accent text-text" : "border-transparent text-muted hover:text-text"}`}>
       {label}{badge ? <span className={`font-mono text-[11px] rounded-[2px] px-1.5 min-w-[18px] ${t === "plan" ? "bg-accent text-accent-ink" : "bg-panel-3 text-text"}`}>{badge}</span> : null}
     </button>
   );
@@ -755,7 +762,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
           )}
         </div>
         <aside className="lg:w-[400px] shrink-0 flex flex-col min-h-0 bg-panel">
-          <div role="tablist" className="flex border-b border-line shrink-0 px-2">
+          <div role="tablist" className="flex border-b border-line shrink-0 px-1.5 overflow-x-auto [scrollbar-width:none]">
+            {tabBtn("feed", "Feed")}
             {tabBtn("details", "Details")}
             {tabBtn("pins", "Pins", openPins)}
             {api.materials && tabBtn("buy", "Buy", mlines.filter((l) => l.job_id === job.id && l.status === "to_buy").length)}
@@ -777,7 +785,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       {help && <ShortcutsDialog onClose={() => setHelp(false)} groups={[
         { title: "Getting around", items: [
           { keys: ["Esc"], does: "Back one step" },
-          { keys: ["1", "2", "3", "4"], does: "Details, Pins, Stages, Plan" },
+          { keys: ["1", "2", "3", "4"], does: `${shownTabs.slice(0, 4).map((t) => t[0].toUpperCase() + t.slice(1)).join(", ")}` },
           { keys: ["Alt", "←"], does: "Browser back walks the map too" },
         ] },
         { title: "Doing things", items: [
