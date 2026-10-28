@@ -1139,12 +1139,8 @@ export function Plan3D(p: Props) {
       if (h.pick.type === "item") return P.onSelectItem(h.pick.id);
       P.onSelect(h.pick.id);
     };
-    const onContext = (e: MouseEvent) => {
-      e.preventDefault();
-      if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return; // that was a pan
-      const tg = target(e);
-      if (tg) cb.current.onPlacePin(tg, { x: e.clientX, y: e.clientY });
-    };
+    // the right button moves the view in 3D, so it never drops a pin: use the Pin button for that
+    const onContext = (e: MouseEvent) => e.preventDefault();
     // zooming past the limits steps a level in or out, like the flat views
     const onWheel = (e: WheelEvent) => {
       const t = three.current;

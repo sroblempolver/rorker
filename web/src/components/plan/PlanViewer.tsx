@@ -147,10 +147,10 @@ export function PlanViewer(p: Props) {
     return () => clearTimeout(t);
   }, [level.kind, in3d]);
   const hint = p.pinMode ? "Click anywhere to drop the pin · Esc to cancel" :
-    in3d && level.kind === "exterior" ? "Drag to look around · zoom in to open the building, keep zooming to step into a floor · right-click or Pin to flag the roof or a wall" :
+    in3d && level.kind === "exterior" ? "Drag to look around · zoom in to open the building, keep zooming to step into a floor · Pin to flag the roof or a wall" :
     in3d && p.readOnly ? "Drag to look around · right-drag to slide · click a flag to see the task" :
-    in3d && level.kind === "room" ? "Click an object to select it, then drag it to move · drag anywhere else to look around · Face a wall at the top · right-click to pin" :
-    in3d ? "Drag to look around · click a room to see it from above · click an object to select, drag it to move · right-click to pin" :
+    in3d && level.kind === "room" ? "Click an object to select it, then drag it to move · drag anywhere else to look around · Face a wall at the top · Pin to add a pin" :
+    in3d ? "Drag to look around · click a room to see it from above · click an object to select, drag it to move · right-drag to move the view" :
     level.kind === "site" ? "The whole job · click the building or zoom in to go inside" :
     level.kind === "exterior" ? "Click a floor to go inside · zoom out for the whole site" :
     level.kind === "floor" ? "Click a room to step in · zoom out for the outside" :
