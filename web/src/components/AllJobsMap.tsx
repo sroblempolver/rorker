@@ -19,7 +19,7 @@ export function AllJobsMap({ jobs }: { jobs: JobSummary[] }) {
   const [hover, setHover] = useState<string | null>(null);
 
   return (
-    <div className="relative card !rounded-[4px] overflow-hidden" style={{ height: "min(56vh, 520px)" }}>
+    <div className="relative card !rounded-[4px] overflow-hidden" style={{ height: rows > 1 ? "min(56vh, 520px)" : "min(44vh, 380px)" }}>
       <svg ref={ref} className={`w-full h-full block touch-none ${dragging ? "cursor-grabbing" : "cursor-grab"}`} viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} {...handlers} role="img" aria-label="Map of all jobs">
         <defs>
           <pattern id="lots" width={LOT} height={LOT} patternUnits="userSpaceOnUse">

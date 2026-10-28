@@ -2,6 +2,7 @@ import Link from "next/link";
 import { signOut } from "@/app/auth-actions";
 import type { Session } from "@/lib/data/types";
 import { Logo } from "./AuthShell";
+import { AppGoTo } from "./AppGoTo";
 
 export function AppShell({ session, children, demo, active, fill }: { session: Session; children: React.ReactNode; demo: boolean; active: "jobs" | "team" | "settings"; fill?: boolean }) {
   const c = session.company;
@@ -14,6 +15,7 @@ export function AppShell({ session, children, demo, active, fill }: { session: S
         <Link href="/jobs"><Logo size={20} /></Link>
         <nav className="flex items-center gap-1 ml-2">{tab("/jobs", "Jobs", active === "jobs")}{tab("/settings/team", "Team", active === "team")}{tab("/settings", "Company", active === "settings")}</nav>
         <div className="ml-auto flex items-center gap-3 min-w-0">
+          <AppGoTo />
           {demo && <span className="chip hidden sm:inline-flex">Demo mode</span>}
           {c && (
             <span className="hidden md:inline-flex items-center gap-2 text-sm text-muted min-w-0">

@@ -98,6 +98,20 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 
 @keyframes toast-in { from { opacity: 0; transform: translateY(-6px); } }
 
+/* screens and panels arrive with a short settle instead of a hard cut */
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(-8px) scale(.985); } }
+@keyframes rise-in { from { opacity: 0; transform: translateY(6px); } }
+.fade-in { animation: fade-in .16s ease-out; }
+.pop-in { animation: pop-in .18s cubic-bezier(.2,.8,.2,1); }
+/* a phone's bottom bar: floating buttons sit above it */
+@media (max-width: 639px) { body:has(.mobile-nav) { --nav-h: 56px; } }
+
+/* where a jump landed: a short orange outline that fades */
+@keyframes flash { from { box-shadow: 0 0 0 2px var(--accent); } to { box-shadow: 0 0 0 2px transparent; } }
+.flash { animation: flash 1.4s ease-out; border-radius: 3px; }
+.rise-in { animation: rise-in .2s cubic-bezier(.2,.8,.2,1); }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
 /* Pin tool: the cursor becomes a survey flag; its foot is the spot the pin lands on. */
