@@ -92,3 +92,10 @@ export function stageNowNext(stages: JobStage[]) {
   const next = sorted.find((s) => s.status === "not_started" && (!now || s.position > now.position)) ?? null;
   return { now, next };
 }
+
+/** A job at a glance for the jobs list: how much is late, and the next dated thing coming up. */
+export function jobGlance(pins: Pin[], lines: MaterialLine[], today: string): { open: number; late: number; next_up: { title: string; when: string } | null } {
+  const items = feedItems(pins, lines, today);
+  const next = items.filter((i) => i.date && i.when !== "late").sort((a, b) => a.date!.localeCompare(b.date!))[0];
+  return { open: items.length, late: items.filter((i) => i.when === "late").length, next_up: next ? { title: next.title, when: dayText(next.date!, today) } : null };
+}
