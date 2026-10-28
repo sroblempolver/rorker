@@ -41,7 +41,7 @@ export class IntakeChat {
     const r = await fetch(this.url, {
       method: "POST", headers: { "content-type": "application/json" }, signal,
       body: JSON.stringify({ description: this.description, parts: this.parts, history: this.history, today: new Date().toISOString().slice(0, 10), plan: this.plan }),
-    }).catch(() => { throw new Error("Couldn't reach the assistant. Check your connection, or open the preview at sroblempolver.github.io/rorker."); });
+    }).catch(() => { throw new Error("Couldn't reach the assistant. Check your connection, or open the preview at build.rorker.com."); });
     const raw = await r.text();
     let res: { content?: Block[]; error?: string } | null = null;
     try { res = JSON.parse(raw.trim()); } catch { /* handled below */ }
