@@ -6,7 +6,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { JobItem, Pin, PinInput } from "@/lib/data/types";
 import { bboxOf, centroid, unionBBox, edgeDistance, elementCenter, findElement, floorBBox, footprint, labelPoint, lineD, pathD, pointInPoly, roomOf, roomSides, sidePoint, type WallSide } from "@/lib/plan/geometry";
 import type { BBox, ElementStatus, Fixture, Floor, Opening, Plan, Pt, Room } from "@/lib/plan/types";
-import { CHALK, FIXTURE_STROKE, GLASS, GROUND, ROOM_MATERIAL, STATUS_COLOR, WALL_EXT_TOP, WALL_SIDE, WALL_TOP } from "./style";
+import { CHALK, CHALK_LINE, DRYWALL, FIXTURE_STROKE, GLASS, GROUND, ROOM_MATERIAL, STATUS_COLOR, SUBFLOOR, WALL_EXT_TOP, WALL_SIDE, WALL_TOP } from "./style";
+import { runOf, studsAlong, type BuildLook } from "@/lib/plan/build";
+import { FRAMING } from "@/lib/plan/rules";
 import { DraftFlag, MarkDot, PinFlag, PlanDefs, useHoldToPin, useWorldDrag } from "./svg";
 import { useMarks } from "@/lib/plan/marks";
 import { HIDDEN_KINDS, TOP_FILL, fixtureBottom, fixtureTop, isWallMounted } from "./fixtures";
@@ -45,6 +47,8 @@ interface Props {
   onMoveFixture: (id: string, dx: number, dy: number) => void;
   /** look only: nothing can be dragged */
   locked?: boolean;
+  /** the build stage to show: slab, framing, sheetrock or finished (the default) */
+  look?: BuildLook;
 }
 
 /** Fixtures that can't be picked or moved in the top view: linework of something else, and things up
@@ -96,6 +100,7 @@ function leafPaths(o: Opening) {
 
 export function FloorCanvas(props: Props) {
   const { plan, floor, room, selected, selectedPin, states, pins, colorMode, pinMode } = props;
+  const look = props.look ?? "finished";
   const ref = useRef<SVGSVGElement>(null);
   const fb = useMemo(() => floorBBox(floor), [floor]);
   const homeBox = useMemo(() => (room ? box(bboxOf(room.polygon)) : box(fb)), [room, fb]);
@@ -256,7 +261,7 @@ export function FloorCanvas(props: Props) {
           const hot = hover === r.id, sel = selected === r.id;
           return (
             <g key={r.id} onClick={(e) => roomClick(r, e)} onPointerEnter={hov(r.id)} onPointerLeave={hov(null)} className="cursor-pointer">
-              <path d={pathD(r.polygon)} fill={`url(#mat-${ROOM_MATERIAL[r.type] ?? "concrete"})`} />
+              <path d={pathD(r.polygon)} fill={look !== "finished" && floor.level > 0 ? SUBFLOOR : `url(#mat-${look === "finished" ? ROOM_MATERIAL[r.type] ?? "concrete" : "concrete"})`} />
               {colorMode === "progress" && <path d={pathD(r.polygon)} fill={st ? STATUS_COLOR[st] : "#1d1f1b"} fillOpacity={st ? 0.55 : 0.6} />}
               {st === "demolish" && <path d={pathD(r.polygon)} fill="url(#hatch)" />}
               {/* inner shade along the walls gives the floor depth */}
@@ -271,7 +276,7 @@ export function FloorCanvas(props: Props) {
 
       {/* stairs */}
       <g>
-        {floor.stairs.map((s) => (
+        {(look === "slab" ? [] : floor.stairs).map((s) => (
           <g key={s.id} onClick={(e) => click(s.id, e)} onPointerEnter={hov(s.id)} onPointerLeave={hov(null)} className="cursor-pointer" opacity={inRoom(s.room_id) ? 1 : 0.35}>
             <path d={pathD(s.polygon)} fill="#000" fillOpacity={0.18} stroke={selected === s.id ? CHALK : hover === s.id ? "#fff" : "transparent"} strokeWidth={2 * lw} />
             <path d={lineD(s.outline)} fill="none" stroke="#f0ece3" strokeOpacity={0.75} strokeWidth={1.2 * lw} />
@@ -310,6 +315,7 @@ export function FloorCanvas(props: Props) {
                   <text x={f.center[0]} y={f.center[1] + fs * 0.35} textAnchor="middle" fontSize={fs * 0.8} fill={FIXTURE_STROKE}>{f.name}</text>
                 </>
               )}
+              {f.facing != null && <FrontEdge b={b} facing={f.facing} lw={lw} strong={sel || hot} />}
               {live && <text x={f.center[0]} y={b[1] - 10 * lw} textAnchor="middle" fontSize={11 * lw} fontFamily="var(--font-mono)" fill="#55b2ff" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>moved {Math.round(Math.hypot(live.dx, live.dy))} mm</text>}
             </g>
           );
@@ -318,16 +324,38 @@ export function FloorCanvas(props: Props) {
 
       {/* walls, extruded: a dark side drawn first, offset down-right, then the plaster top */}
       <g pointerEvents="none">
-        {floor.walls.map((w) => <path key={`s${w.id}`} d={pathD(w.polygon)} fill={WALL_SIDE} opacity={inRoom(w.room_ids) ? 0.7 : 0.25} transform={`translate(${H * 0.5} ${H})`} />)}
+        {look !== "slab" && floor.walls.map((w) => <path key={`s${w.id}`} d={pathD(w.polygon)} fill={WALL_SIDE} opacity={inRoom(w.room_ids) ? (look === "framing" ? 0.35 : 0.7) : 0.25} transform={`translate(${H * 0.5} ${H})`} />)}
       </g>
       <g>
         {floor.walls.map((w) => {
           const st = status(w.id), sel = selected === w.id, hot = hover === w.id;
-          const fill = colorMode === "progress" && st ? STATUS_COLOR[st] : w.exterior ? WALL_EXT_TOP : WALL_TOP;
+          const tint = colorMode === "progress" && st ? STATUS_COLOR[st] : null;
+          const events = { onClick: (e: React.MouseEvent) => click(w.id, e), onPointerEnter: hov(w.id), onPointerLeave: hov(null) };
+          // the bare slab: the wall chalked out where it'll stand
+          if (look === "slab") return (
+            <path key={w.id} d={pathD(w.polygon)} fill={tint ?? CHALK_LINE} fillOpacity={hot || sel ? 0.4 : 0.14} stroke={sel ? CHALK : tint ?? CHALK_LINE} strokeOpacity={0.9} strokeWidth={(sel ? 3 : 1.4) * lw}
+              strokeDasharray={`${8 * lw} ${5 * lw}`} opacity={inRoom(w.room_ids) ? 1 : 0.35} className="cursor-pointer" {...events} />
+          );
+          // framing from above: the top plate, with a tick at every stud
+          const run = look === "framing" ? runOf(w.polygon) : null;
+          if (run) {
+            const d = Math.min(run.thickness, w.exterior ? FRAMING.depthExt : FRAMING.depth) / 2;
+            return (
+              <g key={w.id} opacity={inRoom(w.room_ids) ? 1 : 0.35} className="cursor-pointer" {...events}>
+                <path d={pathD(w.polygon)} fill="transparent" />
+                <path d={`M${run.a[0] + run.n[0] * d} ${run.a[1] + run.n[1] * d}L${run.b[0] + run.n[0] * d} ${run.b[1] + run.n[1] * d}L${run.b[0] - run.n[0] * d} ${run.b[1] - run.n[1] * d}L${run.a[0] - run.n[0] * d} ${run.a[1] - run.n[1] * d}Z`}
+                  fill={tint ?? (hot && !sel ? "#e3c592" : FRAMING.plateWood)} stroke={sel ? CHALK : "#5a4126"} strokeWidth={(sel ? 3 : 0.8) * lw} />
+                {studsAlong(run.length, FRAMING.stud, FRAMING.spacing).map((at) => {
+                  const c = [run.a[0] + run.u[0] * at, run.a[1] + run.u[1] * at];
+                  return <path key={at} d={`M${c[0] + run.n[0] * d} ${c[1] + run.n[1] * d}L${c[0] - run.n[0] * d} ${c[1] - run.n[1] * d}`} stroke="#5a4126" strokeWidth={Math.max(FRAMING.stud, 1.2 * lw)} pointerEvents="none" />;
+                })}
+              </g>
+            );
+          }
+          const fill = tint ?? (look === "drywall" ? DRYWALL : w.exterior ? WALL_EXT_TOP : WALL_TOP);
           return (
             <path key={w.id} d={pathD(w.polygon)} fill={hot && !sel ? "#ffffff" : fill} stroke={sel ? CHALK : "#00000033"} strokeWidth={(sel ? 3.5 : 1) * lw}
-              opacity={inRoom(w.room_ids) ? 1 : 0.35} className="cursor-pointer"
-              onClick={(e) => click(w.id, e)} onPointerEnter={hov(w.id)} onPointerLeave={hov(null)} />
+              opacity={inRoom(w.room_ids) ? 1 : 0.35} className="cursor-pointer" {...events} />
           );
         })}
       </g>
@@ -341,7 +369,9 @@ export function FloorCanvas(props: Props) {
           const mid = [(o.a[0] + o.b[0]) / 2, (o.a[1] + o.b[1]) / 2];
           return (
             <g key={o.id} onClick={(e) => click(o.id, e)} onPointerEnter={hov(o.id)} onPointerLeave={hov(null)} className="cursor-pointer" opacity={inRoom(o.room_ids) ? 1 : 0.35}>
-              {isWin ? (
+              {look === "slab" ? (
+                <path d={pathD(o.polygon)} fill={tint ?? (isWin ? "#6f9aab" : "#b98c5a")} fillOpacity={0.45} stroke={tint ?? CHALK_LINE} strokeWidth={lw} strokeDasharray={`${4 * lw} ${3 * lw}`} />
+              ) : isWin ? (
                 <>
                   <path d={pathD(o.polygon)} fill={tint ?? GLASS} />
                   <path d={`M${o.a[0]} ${o.a[1]}L${o.b[0]} ${o.b[1]}`} stroke="#2b5a6b" strokeWidth={1.6 * lw} />
@@ -351,7 +381,7 @@ export function FloorCanvas(props: Props) {
                   <path d={pathD(o.polygon)} fill={tint ?? (o.kind === "opening" ? "transparent" : "#3a2c20")} fillOpacity={tint ? 0.7 : o.kind === "opening" ? 0 : 0.55} />
                   {o.kind === "opening" && <path d={`M${o.a[0]} ${o.a[1]}L${o.b[0]} ${o.b[1]}`} stroke="#f0ece3" strokeOpacity={0.4} strokeWidth={lw} strokeDasharray={`${5 * lw} ${4 * lw}`} />}
                   {o.kind === "garage_door" && <path d={`M${o.a[0]} ${o.a[1]}L${o.b[0]} ${o.b[1]}`} stroke="#f0ece3" strokeWidth={4 * lw} strokeDasharray={`${12 * lw} ${4 * lw}`} />}
-                  {leafPaths(o).map((p, i) => (
+                  {look === "finished" && leafPaths(o).map((p, i) => (
                     <g key={i} pointerEvents="none">
                       <path d={p.arc} fill="none" stroke={tint ?? "#f0ece3"} strokeOpacity={0.45} strokeWidth={lw} strokeDasharray={`${3 * lw} ${3 * lw}`} />
                       <path d={p.leaf} stroke={tint ?? "#c99a62"} strokeWidth={4 * lw} strokeLinecap="round" />
@@ -452,5 +482,24 @@ export function FloorCanvas(props: Props) {
       </g>
       {floorMarks.map((m, i) => <MarkDot key={`${markN}-${i}`} x={m.x} y={m.y} color={m.color} label={m.label} px={lw} />)}
     </svg>
+  );
+}
+
+/** Its front, the side with the doors, drawers or opening: a bright edge and a small arrow pointing out. */
+function FrontEdge({ b, facing, lw, strong }: { b: [number, number, number, number]; facing: number; lw: number; strong: boolean }) {
+  const r = (facing * Math.PI) / 180, vx = Math.round(Math.cos(r)), vy = Math.round(Math.sin(r));
+  if (!vx && !vy) return null;
+  const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+  const hx = (b[2] - b[0]) / 2, hy = (b[3] - b[1]) / 2;
+  const fx = cx + vx * hx, fy = cy + vy * hy; // middle of the front edge
+  const ax = -vy, ay = vx; // along the front
+  const half = (vx ? hy : hx) - 15, inset = Math.min(30, (vx ? hx : hy) * 0.15);
+  const ex = fx - vx * inset, ey = fy - vy * inset;
+  const k = Math.min(110, (vx ? hy : hx) * 0.45, (vx ? hx : hy) * 0.6);
+  return (
+    <g pointerEvents="none" stroke="#ffd23f" strokeLinecap="round" strokeLinejoin="round" opacity={strong ? 1 : 0.75}>
+      <path d={`M${ex + ax * half} ${ey + ay * half}L${ex - ax * half} ${ey - ay * half}`} strokeWidth={(strong ? 3 : 2) * lw} fill="none" />
+      <path d={`M${ex - vx * k + ax * k * 0.7} ${ey - vy * k + ay * k * 0.7}L${ex - vx * k * 0.25} ${ey - vy * k * 0.25}L${ex - vx * k - ax * k * 0.7} ${ey - vy * k - ay * k * 0.7}`} strokeWidth={(strong ? 2.5 : 1.6) * lw} fill="none" />
+    </g>
   );
 }

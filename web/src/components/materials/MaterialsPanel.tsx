@@ -13,7 +13,7 @@ import { elementLabel, findElement, roomOf } from "@/lib/plan/geometry";
 import { GROUP_ORDER, KITS, parseQty, type SuggestGroup, type Suggestion } from "@/lib/materials/suggest";
 import { saveStore, storeOptions } from "@/lib/materials/stores";
 import {
-  FULFIL_LABEL, NEXT_STATUS, STATUS_COLOR, STATUS_LABEL, UNITS, lineTotal, money, orderBy, orderNow, qtyText,
+  FULFIL_LABEL, NEXT_STATUS, STATUS_COLOR, STATUS_LABEL, UNITS, forWhat, lineTotal, money, orderBy, orderNow, qtyText,
   type BuyStatus, type Fulfil, type MaterialInput, type MaterialLine, type MaterialsJob, type Unit,
 } from "@/lib/materials/types";
 
@@ -28,7 +28,7 @@ export interface BuyDefaults { jobId: string; buyer: string | null }
 export function blankLine(jobId: string, t: Partial<BuyTarget> | null, s: Partial<Suggestion> & { name: string }, buyer: string | null): MaterialInput {
   return {
     job_id: jobId, group_id: null, name: s.name, qty: s.qty ?? 1, unit: s.unit ?? "ea", unit_cost: s.unit_cost || null, store: null, link: s.link ?? null, sku: null,
-    status: "to_buy", fulfil: "pickup", deliver_to: null, buyer, installer: null, needed_by: null, stage_id: null, note: s.why ?? null,
+    status: "to_buy", fulfil: "pickup", deliver_to: null, buyer, installer: null, task_id: null, needed_by: null, stage_id: null, note: s.why ?? null,
     lead_days: s.lead ?? null, trade: s.group ?? null,
     element_id: t?.element_id ?? null, floor_id: t?.floor_id ?? null, x: t?.x ?? null, y: t?.y ?? null, anchor: t?.anchor ?? null,
   };
@@ -263,11 +263,13 @@ export function AddMaterial({ target, preset, jobs, defaults, stages, existing, 
   const [deliverTo, setDeliverTo] = useState("");
   const [needed, setNeeded] = useState("");
   const [stage, setStage] = useState("");
+  const [task, setTask] = useState("");
   const [lead, setLead] = useState(preset?.lead ? String(preset.lead) : "");
   const [trade, setTrade] = useState<SuggestGroup | null>(preset?.group ?? null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const stores = useMemo(() => [...new Set(existing.map((l) => l.store).filter(Boolean) as string[])], [existing]);
+  const tasks = jobs.find((j) => j.id === defaults.jobId)?.tasks ?? [];
   const dupes = name.trim() ? existing.filter((l) => l.status !== "installed" && l.status !== "returned" && l.name.toLowerCase() === name.trim().toLowerCase() && split.some((s) => s.job === l.job_id)) : [];
   const jobName = (id: string) => jobs.find((j) => j.id === id)?.name ?? "Job";
   const free = jobs.filter((j) => !split.some((s) => s.job === j.id));
@@ -300,7 +302,7 @@ export function AddMaterial({ target, preset, jobs, defaults, stages, existing, 
       await onAdd(rows.map((s) => ({
         ...blankLine(s.job, s.job === defaults.jobId ? target : null, { name: nm, qty: Number(s.qty), unit, unit_cost: Number(cost) || 0, link: link || null, lead: Number(lead) || undefined, group: trade ?? undefined }, buyer),
         group_id: group, store: store || null, installer, fulfil, deliver_to: fulfil === "delivery" ? deliverTo || null : null,
-        needed_by: needed || null, stage_id: s.job === defaults.jobId ? stage || null : null, note: preset?.why ?? null,
+        needed_by: needed || null, stage_id: s.job === defaults.jobId ? stage || null : null, task_id: s.job === defaults.jobId ? task || null : null, note: preset?.why ?? null,
       })));
     } catch (x) {
       setErr(x instanceof Error ? x.message : "Could not add it.");
@@ -373,6 +375,14 @@ export function AddMaterial({ target, preset, jobs, defaults, stages, existing, 
 
       <div><label className="label">Buyer</label><PersonPick value={buyer} onChange={setBuyer} /></div>
       <div><label className="label">Installer</label><PersonPick value={installer} onChange={setInstaller} none="Not set" /></div>
+      {tasks.length > 0 && (
+        <div><label className="label">For task</label>
+          <select className="input !h-9" value={task} aria-label="For task"
+            onChange={(e) => { const t = tasks.find((x) => x.id === e.target.value); setTask(e.target.value); if (t && !installer && t.tagged[0]) setInstaller(t.tagged[0]); if (t?.stage_id && !stage) setStage(t.stage_id); }}>
+            <option value="">No task</option>{tasks.map((t) => <option key={t.id} value={t.id}>#{t.number} {t.title}</option>)}
+          </select>
+        </div>
+      )}
       <div>
         <label className="label">Pick up or delivery</label>
         <Seg value={fulfil} onChange={setFulfil} options={[["pickup", "Pick up"], ["delivery", "Delivery"], ["stock", "From stock"]]} />
@@ -439,6 +449,12 @@ function LineDetail({ line, all, plan, jobs, stages, onUpdate, onRemove, onShow,
       </div>
       {orderBy(line) && line.status === "to_buy" && <p className={`text-[12px] -mt-1 ${orderNow(line, today()) ? "text-red" : "text-amber"}`}>{orderNow(line, today()) ? `Order today. ${line.lead_days}-day lead time, needed ${day(line.needed_by!)}.` : `Order by ${day(orderBy(line)!)} (${line.lead_days}-day lead time).`}</p>}
       <select className="input !h-8 !text-[13px]" value={line.stage_id ?? ""} onChange={(e) => onUpdate({ stage_id: e.target.value || null })} aria-label="For stage"><option value="">Any stage</option>{stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+      {(jobs.find((x) => x.id === line.job_id)?.tasks?.length ?? 0) > 0 && (
+        <select className="input !h-8 !text-[13px]" value={line.task_id ?? ""} aria-label="For task"
+          onChange={(e) => { const t = jobs.find((x) => x.id === line.job_id)?.tasks?.find((x) => x.id === e.target.value); onUpdate({ task_id: t?.id ?? null, ...(t && !line.installer && t.tagged[0] ? { installer: t.tagged[0] } : {}) }); }}>
+          <option value="">No task</option>{jobs.find((x) => x.id === line.job_id)!.tasks!.map((t) => <option key={t.id} value={t.id}>For #{t.number} {t.title}</option>)}
+        </select>
+      )}
       {plan && (
         <select className="input !h-8 !text-[13px]" value={line.element_id ?? ""} aria-label="Where it goes"
           onChange={(e) => { const r = plan.floors.flatMap((f) => f.rooms.map((x) => ({ x, f }))).find((y) => y.x.id === e.target.value); onUpdate({ element_id: r?.x.id ?? null, floor_id: r?.f.id ?? null, x: null, y: null, anchor: null }); }}>
@@ -484,7 +500,7 @@ export function LineRow({ line, plan, jobs, open, onToggle, onTick, sub, childre
         <span className="min-w-0 flex-1">
           <span className={`block text-[14px] truncate ${done ? "line-through text-muted" : ""}`}><span className="font-mono text-[14px] font-semibold text-text mr-1.5">{qtyText(line.qty, line.unit)}</span>{line.name}</span>
           <span className="block text-[12px] text-muted truncate">
-            {sub ?? ([otherJob, placed(line) ? where(plan, line) : null, line.store, line.fulfil !== "pickup" ? FULFIL_LABEL[line.fulfil] : null].filter(Boolean).join(" · ") || "No spot, no store")}
+            {sub ?? ([forWhat(line, jobs ?? [], members), otherJob, placed(line) ? where(plan, line) : null, line.store, line.fulfil !== "pickup" ? FULFIL_LABEL[line.fulfil] : null].filter(Boolean).join(" · ") || "No spot, no store")}
             {line.status !== "to_buy" && <span style={{ color: STATUS_COLOR[line.status] }}> · {STATUS_LABEL[line.status]}</span>}
             {late && <span className="text-red"> · late</span>}
             {!late && orderNow(line, today()) && <span className="text-red"> · order today ({line.lead_days}-day lead)</span>}
@@ -499,7 +515,7 @@ export function LineRow({ line, plan, jobs, open, onToggle, onTick, sub, childre
   );
 }
 
-type Group = "where" | "who" | "store" | "trade" | "status";
+type Group = "where" | "for" | "who" | "store" | "trade" | "status";
 
 /** The Buy tab: this job's list, grouped by where it goes, who gets it, the store or the status. */
 export function MaterialsPanel({ jobId, lines, jobs, plan, stages, focus, onAdd, onUpdate, onRemove, onShow, onSplit, onShoppingRun }: {
@@ -526,6 +542,7 @@ export function MaterialsPanel({ jobId, lines, jobs, plan, stages, focus, onAdd,
     if (group === "store") return l.fulfil === "stock" ? "From stock" : l.store ?? "No store yet";
     if (group === "status") return STATUS_LABEL[l.status];
     if (group === "trade") return l.trade ?? "Other";
+    if (group === "for") return forWhat(l, jobs, members) || "Not assigned to anyone";
     if (!plan || !placed(l)) return "No spot yet";
     // by room: the room an element sits in, or the room of the wall side it's on
     const e = l.element_id ? findElement(plan, l.element_id) : null;
@@ -570,7 +587,7 @@ export function MaterialsPanel({ jobId, lines, jobs, plan, stages, focus, onAdd,
           <button key={f} onClick={() => setFilter(f)} className={`chip ${filter === f ? "!text-accent-ink !bg-accent !border-accent" : "hover:text-text"}`}>{f === "open" ? "Still to get" : f === "mine" ? "Mine" : "All"}</button>
         ))}
         <select className="input !h-7 !w-auto !text-[12.5px] !py-0 ml-auto" value={group} onChange={(e) => setGroup(e.target.value as Group)} aria-label="Group by">
-          <option value="where">By where it goes</option><option value="who">By buyer</option><option value="store">By store</option><option value="trade">By trade</option><option value="status">By status</option>
+          <option value="where">By where it goes</option><option value="for">By who it&apos;s for</option><option value="who">By buyer</option><option value="store">By store</option><option value="trade">By trade</option><option value="status">By status</option>
         </select>
       </div>
       {shown.length ? [...groups].map(([k, ls]) => (
@@ -579,7 +596,7 @@ export function MaterialsPanel({ jobId, lines, jobs, plan, stages, focus, onAdd,
           <div className="space-y-1.5">
             {ls.map((l) => (
               <LineRow key={l.id} line={l} plan={plan} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} onTick={() => onUpdate(l.id, { status: NEXT_STATUS[l.status] })}
-                sub={group === "where" ? [l.store, members.find((m) => m.id === l.installer) ? `for ${members.find((m) => m.id === l.installer)!.full_name.split(" ")[0]}` : null, l.fulfil !== "pickup" ? FULFIL_LABEL[l.fulfil] : null, l.needed_by ? `by ${l.needed_by.slice(5)}` : null].filter(Boolean).join(" · ") || undefined : undefined}>
+                sub={[group !== "for" ? forWhat(l, jobs, members) : null, group !== "where" && placed(l) ? where(plan, l) : null, group !== "store" ? l.store : null, l.fulfil !== "pickup" ? FULFIL_LABEL[l.fulfil] : null, l.needed_by ? `by ${l.needed_by.slice(5)}` : null].filter(Boolean).join(" · ") || undefined}>
                 <LineDetail line={l} all={lines} plan={plan} jobs={jobs} stages={stages} onUpdate={(p) => onUpdate(l.id, p)} onRemove={() => onRemove(l.id)}
                   onShow={placed(l) ? () => onShow(l) : undefined} onSplit={(j, q) => onSplit(l, j, q)} />
               </LineRow>

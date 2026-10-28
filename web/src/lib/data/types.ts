@@ -1,5 +1,6 @@
 import type { Part } from "@/lib/plan/catalog";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
+import type { BuildLook, Furnish } from "@/lib/plan/build";
 
 export interface Company {
   id: string; name: string; logo_url: string | null; brand_color: string; phone: string | null;
@@ -46,6 +47,8 @@ export interface ElementEdit {
   removed?: boolean;
   /** an object added in the app, not in the drawing: the edit's key is its new id */
   added?: AddedObject;
+  /** job-wide, under the "@job" key: which floors are furnished, and the build stages the contractor added */
+  furnish?: Furnish; stage_looks?: Record<string, BuildLook>;
 }
 /** Something added to the plan in the app (furniture, an appliance): where it stands, its size and front. */
 export interface AddedObject {
@@ -114,6 +117,17 @@ export interface SharedView {
   people: { id: string; full_name: string; title: string | null }[];
   /** the photos posted on each of these pins, by pin id */
   photos: Record<string, string[]>;
+  /** materials this person needs or is picking up, and the ones for these tasks */
+  materials?: SharedMaterial[];
+}
+/** A material line as a shared link shows it: what, for which task, and who's getting it. */
+export interface SharedMaterial {
+  id: string; name: string; qty: number; unit: string; status: "to_buy" | "ordered" | "got" | "installed" | "returned";
+  task_id: string | null; task: string | null; needed_by: string | null; store: string | null; note: string | null;
+  /** first name of whoever is getting it, null when nobody is yet */
+  buyer: string | null;
+  /** this link's person is the one getting it */
+  you_get: boolean;
 }
 /** Everything one link opens: one job, or every job with something for that person. */
 export interface SharedWork {

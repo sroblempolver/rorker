@@ -11,7 +11,7 @@ import { speak, stopSpeaking, useDictation, VoiceNote } from "@/components/voice
 
 const HINT = "Say what to change: \"put a sofa facing the TV in the living room\", \"move the bed 30 cm north\", \"turn the desk to face the window\", \"rename the study to Office\".";
 
-export function PlanChat({ send, context, rooms, onChanged }: { send: AssistantSend; context: AssistantContext; rooms: string[]; onChanged?: () => void }) {
+export function PlanChat({ send, context, rooms, onChanged, onFurnish }: { send: AssistantSend; context: AssistantContext; rooms: string[]; onChanged?: () => void; onFurnish?: (room: string | null) => void }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [text, setText] = useState("");
   const [typing, setTyping] = useState(false);
@@ -104,7 +104,7 @@ export function PlanChat({ send, context, rooms, onChanged }: { send: AssistantS
           </select>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {FURNISH.map((a) => <button key={a.label} className="chip !h-7" disabled={busy} onClick={() => void ask(a.ask(where ? `the ${where}` : "the whole house").replace("the the ", "the "))}>{a.label}</button>)}
+          {FURNISH.map((a) => <button key={a.label} className="chip !h-7" disabled={busy} onClick={() => { if (a.label !== "Clear the furniture") onFurnish?.(where || null); void ask(a.ask(where ? `the ${where}` : "the whole house").replace("the the ", "the ")); }}>{a.label}</button>)}
         </div>
       </div>
     </section>

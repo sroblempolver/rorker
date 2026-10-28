@@ -457,11 +457,26 @@ export function fixtureObject(f: Fixture, mt: Materials, base: number): THREE.Ob
   }
   if (h <= 0) h = 0.85;
   const g = model(f, mt, Math.max(w, 0.05), Math.max(d, 0.05), h);
+  if (f.facing != null) g.add(frontArrow(Math.max(w, 0.05), Math.max(d, 0.05)));
   const holder = new THREE.Group();
   holder.add(g);
   g.rotation.y = rot;
   holder.position.set(f.center[0] * S, base + bottom * S, f.center[1] * S);
   return holder;
+}
+
+/** A yellow arrow on the floor out from its front (the side with the doors or opening), shown while selected. */
+function frontArrow(w: number, d: number): THREE.Object3D {
+  const k = Math.min(0.35, Math.max(0.18, w * 0.4));
+  const shape = new THREE.Shape([new THREE.Vector2(-k * 0.5, 0), new THREE.Vector2(k * 0.5, 0), new THREE.Vector2(0, k * 0.8)]);
+  const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({ color: "#ffd23f", transparent: true, opacity: 0.95, depthTest: false, side: THREE.DoubleSide }));
+  mesh.rotation.x = Math.PI / 2; // lie flat, pointing out of the front (+z)
+  mesh.position.set(0, 0.02, d / 2 + 0.06);
+  mesh.renderOrder = 25;
+  mesh.name = "front";
+  mesh.visible = false;
+  mesh.raycast = () => {};
+  return mesh;
 }
 
 function hullRing(points: [number, number][]): [number, number][] {
