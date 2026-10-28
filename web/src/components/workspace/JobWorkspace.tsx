@@ -6,7 +6,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementStatus, Question } from "@/lib/plan/types";
 import { clearMarks, MARK_COLORS, showMarks } from "@/lib/plan/marks";
-import type { ElementEdit, ItemInput, JobItem, Pin, PinInput, PinKind, PlanRow } from "@/lib/data/types";
+import { clientMember, type ElementEdit, type ItemInput, type JobItem, type Member, type Pin, type PinInput, type PinKind, type PlanRow } from "@/lib/data/types";
+import { ClientThread } from "./ClientThread";
 import { today } from "@/lib/dates";
 import { PlanChat } from "./PlanChat";
 import { applyEdits, turnedFacing } from "@/lib/plan/edits";
@@ -36,7 +37,7 @@ import { AddMaterial, MaterialsPanel, blankLine, type BuyTarget } from "@/compon
 import { parseQty, type Suggestion } from "@/lib/materials/suggest";
 import { NEXT_STATUS, pinSummary, qtyText, type MaterialInput, type MaterialLine } from "@/lib/materials/types";
 
-const TABS: Tab[] = ["feed", "details", "pins", "buy", "stages", "plan", "money"];
+const TABS: Tab[] = ["feed", "details", "pins", "buy", "stages", "plan", "money", "client"];
 
 interface Undo { id: number; label: string; run: () => void | Promise<void>; key?: string }
 
@@ -50,7 +51,7 @@ function levelFits(plan: PlanRow["data"], l: Level) {
 }
 const sameLevel = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-type Tab = "feed" | "details" | "pins" | "buy" | "stages" | "plan" | "money";
+type Tab = "feed" | "details" | "pins" | "buy" | "stages" | "plan" | "money" | "client";
 export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; api: WorkspaceApi; onAllJobs: () => void }) {
   const [plan, setPlan] = useState(data.plan);
   const [runs, setRuns] = useState(data.runs);
@@ -493,7 +494,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   useEscape(back);
 
   // the tabs this job shows (Buy and Money only when they're wired up); 1, 2, 3... open them in order
-  const shownTabs = TABS.filter((t) => (t !== "buy" || !!api.materials) && (t !== "money" || !!(billing && api.money)));
+  const shownTabs = TABS.filter((t) => (t !== "buy" || !!api.materials) && (t !== "money" || !!(billing && api.money)) && (t !== "client" || !!(api.client && job.client_name)));
   const openTab = useCallback((t: Tab) => { if (t === "buy" && tab === "buy") setBuyDraft(null); setTab(t); if (t !== "pins") setDraft(null); }, [tab]);
   useHotkeys({
     p: () => { if (plan) setPinMode((m) => !m); },
@@ -505,7 +506,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   });
 
   // this job's places and actions in the Go to box (Ctrl+K): floors, rooms, open pins, people, tabs
-  const tabName: Record<Tab, string> = { feed: "Feed", details: "Details", pins: "Pins", buy: "Buy list", stages: "Stages", plan: "Plan questions", money: "Money" };
+  const tabName: Record<Tab, string> = { feed: "Feed", details: "Details", pins: "Pins", buy: "Buy list", stages: "Stages", plan: "Plan questions", money: "Money", client: "Client" };
   const goItems = useMemo<GoItem[]>(() => {
     const out: GoItem[] = [];
     const k = job.id;
@@ -663,6 +664,22 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         api={{ say, openClient: money.openClient, save: (b) => { setBilling(b); money.save(b); },
           showRoom: (roomId) => { const f = view?.floors.find((fl) => fl.rooms.some((r) => r.id === roomId)); if (f) { setLevelRaw({ kind: "room", floorId: f.id, roomId }); setSelected(roomId); } } }} />;
     }
+    if (tab === "client" && api.client && job.client_name) {
+      const c = api.client;
+      return (
+        <div className="flex flex-col gap-3 p-4 h-[calc(100vh-190px)] min-h-[420px]">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="flex-1 min-w-0 text-[13px] text-muted">Your thread with {job.client_name}. Tag them on a pin and it shows on their map; set them as the buyer on a material and it&apos;s on their shopping list.</p>
+            <button className="btn btn-sm" onClick={c.open}>See their page</button>
+          </div>
+          <label className="flex items-start gap-2 text-[13.5px] cursor-pointer">
+            <input type="checkbox" className="mt-1" checked={!!job.client_can_add} onChange={(e) => c.setCanAdd(e.target.checked)} />
+            <span>Let {job.client_name} add notes to the map that you see. <span className="text-muted">Their private notes stay theirs either way.</span></span>
+          </label>
+          <div className="flex-1 min-h-0"><ClientThread key={job.id} api={c.thread} side="contractor" tone="app" other={job.client_name} /></div>
+        </div>
+      );
+    }
     if (tab === "plan") return (
       <div className="space-y-3">
       {api.ask && view && (
@@ -708,7 +725,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     </button>
   );
 
-  const team = useMemo(() => ({ members: data.members, me: data.me }), [data.members, data.me]);
+  // the job's client can be tagged here like anyone on the team (they're not on the team list)
+  const team = useMemo(() => ({ members: [...data.members, ...[clientMember(job)].filter((m): m is Member => !!m)], me: data.me }), [data.members, data.me, job]);
 
   return (
     <TeamContext.Provider value={team}>
@@ -804,6 +822,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
             {tabBtn("plan", "Plan", questions)}
             {billing && api.money && tabBtn("money", "Money", billing.quotes.filter((q) => q.status === "approved")
               .flatMap((q) => q.schedule).filter((d) => !d.invoice_id && stages.some((s) => s.status === "done" && s.name === d.stage_name)).length)}
+            {api.client && job.client_name && tabBtn("client", "Client")}
           </div>
           {backTo && (
             <button onClick={back} className="shrink-0 h-10 px-4 flex items-center gap-2 border-b border-line text-[13.5px] text-muted hover:text-text hover:bg-panel-2 text-left" title="Back (Esc)">

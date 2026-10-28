@@ -16,6 +16,8 @@ export interface Job {
   id: string; company_id: string; name: string; address: string | null; client_name: string | null;
   client_email: string | null; client_phone: string | null; job_type: string; status: JobStatus;
   start_date: string | null; current_plan_id: string | null; created_at: string;
+  /** the client may add notes to the map that the contractor sees (their private notes are always allowed) */
+  client_can_add?: boolean;
 }
 export interface JobInput {
   name: string; address?: string | null; job_type: string; template_id?: string | null;
@@ -99,6 +101,28 @@ export interface Member {
   title: string | null; role: MemberRole; is_owner: boolean;
   /** for role "employee": on the payroll or a subcontractor; left out, an employee */
   crew?: CrewKind;
+  /** the job's client (the homeowner), taggable on that job's pins; not on the team */
+  client?: boolean;
+}
+
+/** The job's client as a person to tag: id "client:<job id>", named from the job's client contact. */
+export const clientMemberId = (jobId: string) => `client:${jobId}`;
+export function clientMember(job: Pick<Job, "id" | "client_name" | "client_email" | "client_phone">): Member | null {
+  if (!job.client_name?.trim()) return null;
+  return { id: clientMemberId(job.id), user_id: null, full_name: job.client_name.trim(), email: job.client_email, phone: job.client_phone, title: "Client", role: "employee", is_owner: false, client: true };
+}
+
+/** One message between the contractor and the job's client: their shared thread, both ways. */
+/** A note the client drops on their map. Private notes only they see; shared ones (when the job lets
+ *  them) become a note pin the contractor sees, tagged to the client. */
+export interface ClientNoteInput {
+  title: string; body: string | null; floor_id: string | null; x: number | null; y: number | null;
+  element_id: string | null; anchor: PinAnchor | null; shared: boolean;
+}
+export interface JobMessage {
+  id: string; job_id: string; from: "contractor" | "client"; author_name: string; body: string | null;
+  /** stored file paths when saved; addresses to show when handed to a page */
+  photos: string[]; created_at: string;
 }
 export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole; crew?: CrewKind }
 

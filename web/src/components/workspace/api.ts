@@ -1,6 +1,7 @@
 // What the job workspace needs from the outside world. The app wires it to server actions; the
 // standalone preview wires it to memory, so the same screens run in both.
 import type { AssistantSend } from "@/components/assistant/Assistant";
+import type { ThreadApi } from "./ClientThread";
 import type { ClientStart } from "@/components/billing/MoneyPanel";
 import type { Billing, Brand } from "@/lib/billing/types";
 import type { MaterialLine, MaterialsApi, MaterialsJob } from "@/lib/materials/types";
@@ -79,4 +80,12 @@ export interface WorkspaceApi {
   materials?: MaterialsApi;
   /** open the shopping run across every job */
   openShopping?: () => void;
+  /** the job's client: one thread with them, whether they may add notes you see, and their page; left
+   *  out (or no client on the job), the Client tab is hidden */
+  client?: {
+    thread: ThreadApi;
+    setCanAdd(on: boolean): void;
+    /** show what the client sees on their link */
+    open(): void;
+  };
 }

@@ -5,10 +5,15 @@
 //   photo   a crew member sends a photo onto one of their own tasks
 //   done    a crew member marks one of their own tasks done
 //   client  a client signs, declines or pays on their money page (prices and lines can't change)
+//   message a client writes to the contractor (words and a photo) on the job's thread
+//   messages the job's thread again, for a client page that's open
+//   note    a client drops a note on their map: private, or shared with the contractor if the job allows
+//   unnote  a client takes one of their own notes off
+//   got     a client ticks off something on their shopping list
 // The rules for what a link shows and what a client may change are in core.js, built from the page's own
 // code (web/preview/build-links.mjs), so both sides agree.
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
-import { clientBilling, clientView, companyOf, crewPinIds, crewWork, findLink, forClient, fromRecords, linkLive } from "./core.js";
+import { clientBilling, clientBuys, clientNote, clientPinIds, clientView, companyOf, crewPinIds, crewWork, findLink, forClient, fromRecords, linkLive } from "./core.js";
 
 const ORIGINS = [/^https:\/\/([a-z0-9-]+\.)?rorker\.com$/, /^https:\/\/[a-z0-9-]+\.github\.io$/, /^https?:\/\/localhost(:\d+)?$/, /^https?:\/\/127\.0\.0\.1(:\d+)?$/];
 const extra = (Deno.env.get("ALLOWED_ORIGINS") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -32,14 +37,12 @@ type Row = { account_id: string; kind: string; id: string; job_id: string | null
 const str = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(0, n) : "");
 const uid = () => crypto.randomUUID().replace(/-/g, "").slice(0, 16);
 
-/** The link with this token, its account, and that account's rows (without plans for a client link). */
+/** The link with this token, its account, and that account's rows. */
 async function open(token: string) {
   if (!/^[A-Za-z0-9_-]{16,64}$/.test(token)) return null;
   const { data: hit } = await db.from("records").select("account_id, data").eq("kind", "share").eq("data->>token", token).maybeSingle();
   if (!hit || !linkLive(hit.data)) return null;
-  const client = hit.data.audience === "client";
-  let q = db.from("records").select("account_id, kind, id, job_id, data").eq("account_id", hit.account_id);
-  if (client) q = q.in("kind", ["job", "stage", "billing", "settings", "share"]);
+  const q = db.from("records").select("account_id, kind, id, job_id, data").eq("account_id", hit.account_id);
   const [{ data: rows, error }, { data: acct }] = await Promise.all([q.limit(20000), db.from("accounts").select("name").eq("id", hit.account_id).single()]);
   if (error) throw error;
   const saved = fromRecords(rows as Row[]);
@@ -63,6 +66,21 @@ async function photosByPin(comments: { pin_id: string; photos: string[] }[], pin
   const by: Record<string, string[]> = {};
   for (const c of mine) for (const p of c.photos) { const u = urls.get(p); if (u) (by[c.pin_id] ??= []).push(u); }
   return by;
+}
+
+type Msg = { id: string; job_id: string; photos: string[] };
+/** A job's thread with addresses to show its photos. */
+async function thread(messages: Msg[], jobId: string) {
+  const mine = messages.filter((m) => m.job_id === jobId);
+  const urls = await sign(mine.flatMap((m) => m.photos));
+  return mine.map((m) => ({ ...m, photos: m.photos.map((p) => urls.get(p)).filter(Boolean) }));
+}
+async function photo(body: Record<string, unknown>) {
+  const type = str(body.type, 40) || "image/jpeg";
+  if (!/^image\/(jpeg|png|webp|heic|heif|gif)$/.test(type)) return { error: "Send a photo (JPG, PNG or HEIC)." };
+  const b64 = typeof body.data === "string" ? body.data : "";
+  if (!b64 || b64.length > MAX_PHOTO * 1.37) return { error: "That photo is too big. Try a smaller one." };
+  return { type, bytes: Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)), ext: type.split("/")[1].replace("jpeg", "jpg") };
 }
 
 Deno.serve(async (req) => {
@@ -106,7 +124,7 @@ Deno.serve(async (req) => {
 
     if (action === "link") {
       if (link.audience === "client") {
-        const view = clientView(link, company, saved);
+        const view = clientView(link, company, saved, await photosByPin(saved.comments, clientPinIds(link, saved)), await thread(saved.messages, link.job_id));
         return view ? json({ kind: "client", view }) : json({ error: "This job isn't there any more." }, 404);
       }
       const pins = new Set(saved.jobs.flatMap((d: { pins: { id: string }[] }) => d.pins.map((p) => p.id)));
@@ -133,13 +151,10 @@ Deno.serve(async (req) => {
       }
 
       if (limited(`photo:${token}`, 60)) return json({ error: "That's a lot of photos at once. Give it a minute." }, 429);
-      const type = str(body.type, 40) || "image/jpeg";
-      if (!/^image\/(jpeg|png|webp|heic|heif|gif)$/.test(type)) return json({ error: "Send a photo (JPG, PNG or HEIC)." }, 400);
-      const b64 = typeof body.data === "string" ? body.data : "";
-      if (!b64 || b64.length > MAX_PHOTO * 1.37) return json({ error: "That photo is too big. Try a smaller one." }, 413);
-      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-      const path = `${accountId}/${job.job.id}/pins/${pinId}/${uid()}.${type.split("/")[1].replace("jpeg", "jpg")}`;
-      const up = await db.storage.from(BUCKET).upload(path, bytes, { contentType: type });
+      const f = await photo(body);
+      if ("error" in f) return json({ error: f.error }, 400);
+      const path = `${accountId}/${job.job.id}/pins/${pinId}/${uid()}.${f.ext}`;
+      const up = await db.storage.from(BUCKET).upload(path, f.bytes, { contentType: f.type });
       if (up.error) throw up.error;
       const comment = { id: uid(), pin_id: pinId, author_id: null, author_name: link.label, body: `Photo from ${link.label}`, photos: [path], created_at: new Date().toISOString() };
       const { error } = await db.from("records").insert({ account_id: accountId, kind: "comment", id: comment.id, job_id: job.job.id, data: comment });
@@ -159,6 +174,58 @@ Deno.serve(async (req) => {
       const { error } = await db.from("records").upsert({ account_id: accountId, kind: "billing", id: job.job.id, job_id: job.job.id, data: r.billing, updated_at: new Date().toISOString() });
       if (error) throw error;
       return json({ billing: forClient(r.billing) });
+    }
+
+    if (action === "message" || action === "messages") {
+      if (link.audience !== "client" || !link.job_id) return json({ error: "Not on this link." }, 403);
+      const job = saved.jobs.find((d: { job: { id: string } }) => d.job.id === link.job_id);
+      if (!job) return json({ error: "This job isn't there any more." }, 404);
+      if (action === "messages") return json({ messages: await thread(saved.messages, job.job.id) });
+      if (limited(`message:${token}`, 60)) return json({ error: "That's a lot of messages at once. Give it a minute." }, 429);
+      const text = str(body.body, 4000);
+      const photos: string[] = [];
+      if (body.data) {
+        const f = await photo(body);
+        if ("error" in f) return json({ error: f.error }, 400);
+        const path = `${accountId}/${job.job.id}/messages/${uid()}.${f.ext}`;
+        const up = await db.storage.from(BUCKET).upload(path, f.bytes, { contentType: f.type });
+        if (up.error) throw up.error;
+        photos.push(path);
+      }
+      if (!text && !photos.length) return json({ error: "Write something or add a photo." }, 400);
+      const m = { id: uid(), job_id: job.job.id, from: "client", author_name: job.job.client_name || "Client", body: text || null, photos, created_at: new Date().toISOString() };
+      const { error } = await db.from("records").insert({ account_id: accountId, kind: "message", id: m.id, job_id: job.job.id, data: m });
+      if (error) throw error;
+      return json({ messages: await thread([...saved.messages, m], job.job.id) });
+    }
+
+    if (action === "note" || action === "unnote" || action === "got") {
+      if (link.audience !== "client" || !link.job_id) return json({ error: "Not on this link." }, 403);
+      const at = new Date().toISOString();
+      if (action === "got") {
+        const id = str(body.id, 80);
+        if (!clientBuys(link, saved).has(id)) return json({ error: "That isn't on your list." }, 403);
+        const line = saved.materials.find((m: { id: string }) => m.id === id);
+        const { error } = await db.from("records").update({ data: { ...line, status: body.undo ? "to_buy" : "got" }, updated_at: at }).eq("account_id", accountId).eq("kind", "material").eq("id", id);
+        if (error) throw error;
+        return json({ ok: true });
+      }
+      if (action === "unnote") {
+        const id = str(body.id, 80);
+        const own = (p: { id: string; job_id: string; created_by: string | null }) => p.id === id && p.job_id === link.job_id && p.created_by === "client";
+        const kind = saved.notes.some(own) ? "note" : saved.jobs.some((d: { pins: { id: string; job_id: string; created_by: string | null }[] }) => d.pins.some(own)) ? "pin" : null;
+        if (!kind) return json({ error: "That note isn't yours." }, 403);
+        const { error } = await db.from("records").delete().eq("account_id", accountId).eq("kind", kind).eq("id", id);
+        if (error) throw error;
+        return json({ ok: true });
+      }
+      if (limited(`note:${token}`, 60)) return json({ error: "That's a lot of notes at once. Give it a minute." }, 429);
+      const n = clientNote(link, saved, body.note, uid(), at);
+      if (!n) return json({ error: "That note couldn't be added. Give it a title." }, 400);
+      const shared = !!(body.note as { shared?: boolean })?.shared;
+      const { error } = await db.from("records").insert({ account_id: accountId, kind: shared ? "pin" : "note", id: n.id, job_id: n.job_id, data: n });
+      if (error) throw error;
+      return json({ note: n, shared });
     }
 
     return json({ error: "Not found." }, 404);

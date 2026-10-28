@@ -2,10 +2,10 @@
 // supabase/build/). The page turns its jobs into rows to save them and back into jobs when it loads;
 // the `build` edge function reads the same rows to open crew and client links.
 import type { Billing, Brand } from "@/lib/billing/types";
-import type { ElementEdit, ElementState, Job, JobItem, JobStage, Member, Pin, PinComment, PlanRow, PlanRun, ShareLink } from "@/lib/data/types";
+import type { ElementEdit, ElementState, Job, JobItem, JobMessage, JobStage, Member, Pin, PinComment, PlanRow, PlanRun, ShareLink } from "@/lib/data/types";
 import type { MaterialLine } from "@/lib/materials/types";
 
-export type RecordKind = "job" | "plan" | "stage" | "pin" | "item" | "edits" | "states" | "run" | "billing" | "material" | "member" | "share" | "comment" | "settings";
+export type RecordKind = "job" | "plan" | "stage" | "pin" | "item" | "edits" | "states" | "run" | "billing" | "material" | "member" | "share" | "comment" | "message" | "note" | "settings";
 export interface Rec { kind: RecordKind; id: string; job_id: string | null; data: unknown }
 
 /** One job as the page holds it (the parts that are saved). */
@@ -19,10 +19,18 @@ export interface SavedAccount {
   jobs: SavedJob[]; members: Member[]; materials: MaterialLine[]; shares: ShareLink[]; settings: Settings | null;
   /** pin threads; photos are stored file paths */
   comments: PinComment[];
+  /** contractor and client threads, every job; photos are stored file paths */
+  messages: JobMessage[];
+  /** the clients' private notes on their map; only their own link shows them */
+  notes: Pin[];
 }
+/** Kinds saved one by one as they're posted (from the page or a link), never by the page's saver. */
+export const POSTED: RecordKind[] = ["comment", "message", "note"];
+/** What the page's saver writes. */
+export type PageSaved = Omit<SavedAccount, "comments" | "messages" | "notes">;
 
-/** Rows for everything but comments (those are saved one by one as they're posted). */
-export function toRecords(a: Omit<SavedAccount, "comments">): Rec[] {
+/** Rows for everything but what's posted one by one (comments, messages, clients' notes). */
+export function toRecords(a: PageSaved): Rec[] {
   const out: Rec[] = [];
   for (const d of a.jobs) {
     const j = d.job.id;
@@ -74,6 +82,8 @@ export function fromRecords(rows: Rec[]): SavedAccount {
   return {
     jobs: [...jobs.values()].sort((a, b) => b.job.created_at.localeCompare(a.job.created_at)),
     members, comments,
+    notes: of("note").map((r) => r.data as Pin),
+    messages: of("message").map((r) => r.data as JobMessage).sort((a, b) => a.created_at.localeCompare(b.created_at)),
     materials: of("material").map((r) => r.data as MaterialLine),
     shares: of("share").map((r) => r.data as ShareLink).sort((a, b) => b.created_at.localeCompare(a.created_at)),
     settings: (of("settings")[0]?.data as Settings | undefined) ?? null,

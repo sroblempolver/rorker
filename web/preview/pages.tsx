@@ -1,13 +1,13 @@
 // The build site's own screens around the app: signing in or making an account, and the pages a crew
 // or client link opens. Links show only what the `build` function hands back for that link.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { Logo } from "@/components/ui/AuthShell";
 import { SharedWorkView } from "@/components/share/SharedJob";
-import { ClientMoneyView } from "@/components/billing/ClientMoneyView";
+import { ClientPage, type ClientApi } from "@/components/share/ClientPage";
 import type { ClientStart } from "@/components/billing/MoneyPanel";
 import type { Billing } from "@/lib/billing/types";
-import type { SharedWork } from "@/lib/data/types";
+import type { JobMessage, Pin, SharedWork } from "@/lib/data/types";
 import type { ClientView } from "@/lib/cloud/links";
 import * as cloud from "./cloud";
 
@@ -99,38 +99,30 @@ export function CrewLinkPage({ token, pin }: { token: string; pin: string | null
   );
 }
 
-/** What the contractor's client opens: where the job is, and their quotes, invoices and receipts. */
-export function ClientLinkPage({ token, open }: { token: string; open: string | null }) {
+/** What the contractor's client opens: their project, their thread with the contractor, their money. */
+export function ClientLinkPage({ token, open, pin }: { token: string; open: string | null; pin: string | null }) {
   const { data, error } = useLink<{ kind: "client"; view: ClientView } | { kind: "crew" }>(token);
   const [err, setErr] = useState<string | null>(null);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => { if (data?.kind === "client") document.title = `${data.view.job.name} · ${data.view.company.name}`; }, [data]);
+  const api = useMemo<ClientApi>(() => ({
+    thread: {
+      list: async () => (await cloud.call<{ messages: JobMessage[] }>("messages", { token })).messages,
+      send: async (body, file) => (await cloud.call<{ messages: JobMessage[] }>("message", { token, body, ...(file ? await cloud.photoData(file) : {}) })).messages,
+    },
+    // each change goes out in order; the server takes only what a client may change
+    billing: (b: Billing) => {
+      setErr(null);
+      queue.current = queue.current.then(() => cloud.call("client", { token, billing: b })).catch((e) => setErr(e instanceof Error ? e.message : "That didn't save. Reload and try again."));
+    },
+    addNote: async (note) => (await cloud.call<{ note: Pin }>("note", { token, note })).note,
+    removeNote: async (id) => { await cloud.call("unnote", { token, id }); },
+    got: async (id, undo) => { await cloud.call("got", { token, id, undo }); },
+  }), [token]);
   if (error) return <Problem title="This link doesn't open" body={error} />;
   if (!data) return <Loading text="Opening your project…" />;
   if (data.kind === "crew") { location.hash = `#/s/${token}`; return null; }
-  const v = data.view;
   const [kind, id] = (open ?? "").split(":");
   const start: ClientStart = id && (kind === "quote" || kind === "invoice" || kind === "change") ? { kind, id } : null;
-  const done = v.stages.filter((s) => s.status === "done").length;
-  const now = v.stages.find((s) => s.status === "active");
-  // each change goes out in order; the server takes only what a client may change
-  const save = (b: Billing) => {
-    setErr(null);
-    queue.current = queue.current.then(() => cloud.call("client", { token, billing: b })).catch((e) => setErr(e instanceof Error ? e.message : "That didn't save. Reload and try again."));
-  };
-  return (
-    <div className="h-full overflow-y-auto bg-neutral-100">
-      {v.stages.length > 0 && (
-        <div className="bg-white border-b border-neutral-200 text-neutral-800">
-          <div className="mx-auto max-w-[760px] px-4 py-3">
-            <p className="text-[12px] uppercase tracking-[0.12em] text-neutral-500">{v.job.name}{v.job.address ? ` · ${v.job.address}` : ""}</p>
-            <p className="text-[15px] font-medium">{now ? `Now: ${now.name}` : done === v.stages.length ? "Finished" : "Not started yet"} <span className="text-neutral-500 font-normal">· {done} of {v.stages.length} stages done</span></p>
-            <div className="mt-2 flex gap-1" aria-hidden>{v.stages.map((s, i) => <span key={i} title={s.name} className="h-1.5 flex-1 rounded-full" style={{ background: s.status === "done" ? v.company.brand_color : s.status === "active" ? `${v.company.brand_color}88` : "#e5e5e5" }} />)}</div>
-          </div>
-        </div>
-      )}
-      {err && <p className="mx-auto max-w-[760px] px-4 py-2 text-[14px] text-red-700 bg-red-50 border border-red-200">{err}</p>}
-      <ClientMoneyView billing={v.billing} brand={v.brand} job={v.job} start={start} onChange={save} />
-    </div>
-  );
+  return <ClientPage view={data.view} api={api} start={start} pin={pin} error={err} />;
 }

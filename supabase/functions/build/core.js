@@ -34,6 +34,8 @@ function fromRecords(rows) {
     jobs: [...jobs.values()].sort((a, b) => b.job.created_at.localeCompare(a.job.created_at)),
     members,
     comments,
+    notes: of("note").map((r) => r.data),
+    messages: of("message").map((r) => r.data).sort((a, b) => a.created_at.localeCompare(b.created_at)),
     materials: of("material").map((r) => r.data),
     shares: of("share").map((r) => r.data).sort((a, b) => b.created_at.localeCompare(a.created_at)),
     settings: of("settings")[0]?.data ?? null
@@ -123,6 +125,9 @@ function forClient(b) {
   return { ...s, payments: s.payments.map((p) => ({ ...p, fee: 0 })) };
 }
 
+// src/lib/data/types.ts
+var clientMemberId = (jobId) => `client:${jobId}`;
+
 // src/lib/share.ts
 function linkLive(l, now = /* @__PURE__ */ new Date()) {
   return !l.revoked_at && (!l.expires_at || new Date(l.expires_at) > now);
@@ -208,7 +213,11 @@ function crewPinIds(l, a) {
   if (!linkLive(l) || l.audience === "client") return /* @__PURE__ */ new Set();
   return new Set(a.jobs.filter((d) => !l.job_id || d.job.id === l.job_id).flatMap((d) => linkPins(l, d.pins).map((p) => p.id)));
 }
-function clientView(l, company, a) {
+function clientPinIds(l, a) {
+  const d = a.jobs.find((x) => x.job.id === l.job_id);
+  return new Set(d ? d.pins.filter((p) => p.tagged.includes(clientMemberId(d.job.id))).map((p) => p.id) : []);
+}
+function clientView(l, company, a, photos = {}, messages = []) {
   if (!linkLive(l) || l.audience !== "client") return null;
   const d = a.jobs.find((x) => x.job.id === l.job_id);
   if (!d) return null;
@@ -218,11 +227,67 @@ function clientView(l, company, a) {
     brand,
     job: { id: d.job.id, name: d.job.name, address: d.job.address, client_name: d.job.client_name, client_email: d.job.client_email, client_phone: d.job.client_phone },
     stages: d.stages.map((s) => ({ name: s.name, status: s.status })),
-    billing: forClient(d.billing ?? { quotes: [], invoices: [], payments: [] })
+    billing: forClient(d.billing ?? { quotes: [], invoices: [], payments: [] }),
+    // the same view a crew link builds, as if for a person tagged as the client: their pins only, no
+    // crew, names only for whoever else is on those pins, and materials they're buying or that go with
+    // their pins
+    view: (() => {
+      const v = shareView(
+        { ...l, audience: "crew", job_id: d.job.id, member_id: clientMemberId(d.job.id), pin_ids: [] },
+        { company, job: d.job, plan: d.plan?.data ?? null, edits: d.edits, items: d.items, pins: d.pins, stages: d.stages, members: a.members, photos, materials: a.materials.filter((m) => m.job_id === d.job.id) }
+      );
+      const theirs = new Set(d.pins.filter((p) => p.created_by === "client").map((p) => p.id));
+      return v && { ...v, label: d.job.client_name || "you", pins: v.pins.map((p) => theirs.has(p.id) ? { ...p, created_by: "client" } : p) };
+    })(),
+    messages,
+    notes: a.notes.filter((n) => n.job_id === d.job.id),
+    can_add: !!d.job.client_can_add
+  };
+}
+function clientBuys(l, a) {
+  if (!linkLive(l) || l.audience !== "client" || !l.job_id) return /* @__PURE__ */ new Set();
+  const me = clientMemberId(l.job_id);
+  return new Set(a.materials.filter((m) => m.job_id === l.job_id && m.buyer === me).map((m) => m.id));
+}
+function clientNote(l, a, n, id, at) {
+  const d = a.jobs.find((x) => x.job.id === l.job_id);
+  if (!d || !linkLive(l) || l.audience !== "client" || typeof n?.title !== "string") return null;
+  const title = n.title.trim().slice(0, 140);
+  if (!title || n.shared && !d.job.client_can_add) return null;
+  const num = (v) => typeof v === "number" && Number.isFinite(v) ? v : null;
+  const str = (v, max) => typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
+  const floor = str(n.floor_id, 80);
+  const anchor = n.anchor && typeof n.anchor === "object" && ["site", "exterior", "wall", "point"].includes(n.anchor.view) && num(n.anchor.x) !== null && num(n.anchor.y) !== null ? { view: n.anchor.view, x: n.anchor.x, y: n.anchor.y, ...num(n.anchor.z) !== null ? { z: n.anchor.z } : {}, ...str(n.anchor.side, 80) ? { side: str(n.anchor.side, 80) } : {} } : null;
+  const mine = a.notes.filter((x) => x.job_id === d.job.id);
+  return {
+    id,
+    job_id: d.job.id,
+    number: 1 + Math.max(0, ...(n.shared ? d.pins : mine).map((p) => p.number)),
+    element_id: str(n.element_id, 80),
+    floor_id: floor && d.plan?.data.floors.some((f) => f.id === floor) ? floor : null,
+    x: num(n.x),
+    y: num(n.y),
+    anchor,
+    kind: "note",
+    title,
+    body: str(n.body, 2e3),
+    status: "open",
+    priority: 1,
+    due_date: null,
+    tagged: [clientMemberId(d.job.id)],
+    close_requirement: "confirm",
+    stage_id: null,
+    links: [],
+    created_by: "client",
+    created_at: at,
+    closed_at: null
   };
 }
 export {
   clientBilling,
+  clientBuys,
+  clientNote,
+  clientPinIds,
   clientView,
   companyOf,
   crewPinIds,
