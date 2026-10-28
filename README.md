@@ -90,6 +90,26 @@ Everything is new for this project: a new GitHub repo, Supabase project, Railway
 Keys go in the Railway and Supabase settings only. The Supabase code path is written against the
 schema but has not run against a live project yet; expect a short shakedown when it exists.
 
+## The build site: real accounts (build.rorker.com)
+
+The build site is the preview page with real accounts on the Supabase project "rorker". A contractor
+makes an account on the page (the `build` function signs them up, no email to confirm) and gets the
+sample jobs to start from; every change is saved a moment later and loads on any device.
+
+- **Tables** (`supabase/build/`): `accounts`, `account_users` (who signs in, as which team member) and
+  `records`, one row per thing (job, plan, pin, stage, wall item, material, team member, share link,
+  the job's money, pin threads) with the thing as JSON. Only the account's admins can read or write
+  them (row-level security). Photos go in the private `build-files` bucket.
+- **Links** (`supabase/functions/build`): crew and clients don't sign in and never read the tables.
+  The function opens the link and hands back only what it may show. Crew (`#/s/<token>`): the plan and
+  their tasks, never money or client details; an employee also sees the crew's other open tasks, a sub
+  only their own; they can send photos and mark their own tasks done. Client (`#/c/<token>`): the job's
+  stages and their quotes, invoices and receipts, never crew or costs; they can sign and pay, and the
+  function refuses any other change (`web/src/lib/billing/clientGuard.ts`).
+- The link rules are the page's own code, copied into the function by `node preview/build-links.mjs`
+  (run it after changing `src/lib/share.ts`, `src/lib/cloud/` or the client guard, then redeploy).
+- "Look around on sample data" on the sign-in screen runs the old in-memory preview.
+
 ## Preview build
 
 `npm run preview` in `web/` builds the same screens into one HTML file on the sample house, with data

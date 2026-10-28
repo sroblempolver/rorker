@@ -91,11 +91,16 @@ export interface ElementState { element_id: string; status: ElementStatus }
 /** Admin: everything, including the company, the team and stage templates. Employee: jobs, pins and
  *  stages only ("editor"). The owner is an admin who can't be removed or demoted. */
 export type MemberRole = "admin" | "employee";
+/** Crew who aren't admins work as one of two kinds. An employee's link shows the rest of the crew's open
+ *  work on their jobs too; a sub's shows only what's tagged to them. Neither ever sees money. */
+export type CrewKind = "employee" | "sub";
 export interface Member {
   id: string; user_id: string | null; full_name: string; email: string | null; phone: string | null;
   title: string | null; role: MemberRole; is_owner: boolean;
+  /** for role "employee": on the payroll or a subcontractor; left out, an employee */
+  crew?: CrewKind;
 }
-export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole }
+export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole; crew?: CrewKind }
 
 /** A no-sign-in link for a team member or a one-time sub. It shows the plan and only the pins that are
  *  theirs: the ones tagged to `member_id` (now and later), plus any listed in `pin_ids`. With a `job_id`
@@ -104,6 +109,8 @@ export interface MemberInput { full_name: string; email?: string | null; phone?:
 export interface ShareLink {
   id: string; job_id: string | null; company_id?: string; token: string; label: string; member_id: string | null; pin_ids: string[];
   expires_at: string | null; revoked_at: string | null; created_at: string;
+  /** who it's for: crew (the default) or the job's client (their progress and money page) */
+  audience?: "crew" | "client";
 }
 export interface ShareLinkInput { label: string; member_id?: string | null; pin_ids?: string[]; expires_at?: string | null }
 /** What a shared link shows. Built by shareView(), never straight from the database. */
@@ -119,6 +126,8 @@ export interface SharedView {
   photos: Record<string, string[]>;
   /** materials this person needs or is picking up, and the ones for these tasks */
   materials?: SharedMaterial[];
+  /** an employee's link only: the rest of the crew's open tasks on this job, to see, not to work on */
+  crew_pins?: Pin[];
 }
 /** A material line as a shared link shows it: what, for which task, and who's getting it. */
 export interface SharedMaterial {
