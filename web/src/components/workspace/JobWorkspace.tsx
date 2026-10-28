@@ -9,7 +9,7 @@ import { clearMarks, MARK_COLORS, showMarks } from "@/lib/plan/marks";
 import type { ElementEdit, ItemInput, JobItem, Pin, PinInput, PinKind, PlanRow } from "@/lib/data/types";
 import { today } from "@/lib/dates";
 import { PlanChat } from "./PlanChat";
-import { applyEdits } from "@/lib/plan/edits";
+import { applyEdits, turnedFacing } from "@/lib/plan/edits";
 import { JOB_KEY, furnishWhere, jobSettings, stageLook } from "@/lib/plan/build";
 import { elementLabel, findElement, roomOf } from "@/lib/plan/geometry";
 import { recall, remember } from "@/lib/remember";
@@ -494,6 +494,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     p: () => { if (plan) setPinMode((m) => !m); },
     ...Object.fromEntries(shownTabs.map((t, i) => [String(i + 1), () => openTab(t)])),
     "Mod+z": undo,
+    // turn the selected item a quarter turn clockwise
+    r: () => { const f = selected ? view?.floors.flatMap((fl) => fl.fixtures).find((x) => x.id === selected) : null; if (f) void saveEdit(f.id, { facing: turnedFacing(f, 90) }); },
     "?": () => setHelp(true),
   });
 
@@ -780,6 +782,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         ] },
         { title: "Doing things", items: [
           { keys: ["P"], does: "Pick up a pin, click to drop it" },
+          { keys: ["R"], does: "Turn the selected item a quarter turn" },
           { keys: ["Mod", "Z"], does: "Undo the last change" },
           { keys: ["?"], does: "This list" },
         ] },

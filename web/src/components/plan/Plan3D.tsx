@@ -22,7 +22,7 @@ import { buildRoofs, buildSite, buildZone, garagePanels, openingTrim, sidingMate
 import { planExterior } from "@/lib/plan/exterior";
 import { FINISH, FRAMING, openingSpan } from "@/lib/plan/rules";
 import { runOf, studsAlong, type BuildLook } from "@/lib/plan/build";
-import { getMarks, useMarks } from "@/lib/plan/marks";
+import { getMarks, markFade, useMarks } from "@/lib/plan/marks";
 import { CHALK, CHALK_LINE, DRYWALL, GLASS, MATERIAL_BASE, PIN_COLOR, SUBFLOOR, ROOM_MATERIAL, STATUS_COLOR, type Material } from "./style";
 import type { Controls, PinTarget, ScreenPoint } from "./target";
 
@@ -669,16 +669,17 @@ export function Plan3D(p: Props) {
         }
       }
       // the assistant's dots pulse: the ball blinks, the ring on the floor spreads out
-      const now = performance.now() / 1000;
+      const now = performance.now() / 1000, fade = dots.children.length ? markFade() : 1;
       for (const d of dots.children) {
+        d.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material | undefined; if (m && o.userData.base == null) o.userData.base = m.opacity; if (m) m.opacity = o.userData.base * fade; });
         const [ball, ring] = d.children as THREE.Mesh[];
         // about the same size on screen near and far, so close up they don't hide what they point at
         const z = THREE.MathUtils.clamp(camera.position.distanceTo(ball.position) / 12, 0.2, 2.2);
         ball.scale.setScalar(z);
-        (ball.material as THREE.MeshBasicMaterial).opacity = 0.55 + 0.45 * Math.abs(Math.sin(now * 3.4));
+        (ball.material as THREE.MeshBasicMaterial).opacity = fade * (0.55 + 0.45 * Math.abs(Math.sin(now * 3.4)));
         const k = (now * 0.7) % 1;
         ring.scale.setScalar(z * (1 + k * 3));
-        (ring.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - k);
+        (ring.material as THREE.MeshBasicMaterial).opacity = fade * 0.9 * (1 - k);
       }
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);
@@ -834,6 +835,10 @@ export function Plan3D(p: Props) {
     if (!t?.built) return;
     const id = cb.current.selected;
     const o = id ? t.built.byId.get(id) : null;
+    // the selected item's front arrow, so you see which side opens
+    t.built.root.traverse((x) => { if (x.name === "front") x.visible = false; });
+    const front = o?.getObjectByName("front");
+    if (front) front.visible = true;
     if (o && (o.userData.pick as Pick).type !== "room") {
       t.sel.box.setFromObject(o);
       t.sel.visible = true;

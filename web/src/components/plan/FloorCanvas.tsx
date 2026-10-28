@@ -315,6 +315,7 @@ export function FloorCanvas(props: Props) {
                   <text x={f.center[0]} y={f.center[1] + fs * 0.35} textAnchor="middle" fontSize={fs * 0.8} fill={FIXTURE_STROKE}>{f.name}</text>
                 </>
               )}
+              {f.facing != null && <FrontEdge b={b} facing={f.facing} lw={lw} strong={sel || hot} />}
               {live && <text x={f.center[0]} y={b[1] - 10 * lw} textAnchor="middle" fontSize={11 * lw} fontFamily="var(--font-mono)" fill="#55b2ff" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>moved {Math.round(Math.hypot(live.dx, live.dy))} mm</text>}
             </g>
           );
@@ -481,5 +482,24 @@ export function FloorCanvas(props: Props) {
       </g>
       {floorMarks.map((m, i) => <MarkDot key={`${markN}-${i}`} x={m.x} y={m.y} color={m.color} label={m.label} px={lw} />)}
     </svg>
+  );
+}
+
+/** Its front, the side with the doors, drawers or opening: a bright edge and a small arrow pointing out. */
+function FrontEdge({ b, facing, lw, strong }: { b: [number, number, number, number]; facing: number; lw: number; strong: boolean }) {
+  const r = (facing * Math.PI) / 180, vx = Math.round(Math.cos(r)), vy = Math.round(Math.sin(r));
+  if (!vx && !vy) return null;
+  const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+  const hx = (b[2] - b[0]) / 2, hy = (b[3] - b[1]) / 2;
+  const fx = cx + vx * hx, fy = cy + vy * hy; // middle of the front edge
+  const ax = -vy, ay = vx; // along the front
+  const half = (vx ? hy : hx) - 15, inset = Math.min(30, (vx ? hx : hy) * 0.15);
+  const ex = fx - vx * inset, ey = fy - vy * inset;
+  const k = Math.min(110, (vx ? hy : hx) * 0.45, (vx ? hx : hy) * 0.6);
+  return (
+    <g pointerEvents="none" stroke="#ffd23f" strokeLinecap="round" strokeLinejoin="round" opacity={strong ? 1 : 0.75}>
+      <path d={`M${ex + ax * half} ${ey + ay * half}L${ex - ax * half} ${ey - ay * half}`} strokeWidth={(strong ? 3 : 2) * lw} fill="none" />
+      <path d={`M${ex - vx * k + ax * k * 0.7} ${ey - vy * k + ay * k * 0.7}L${ex - vx * k * 0.25} ${ey - vy * k * 0.25}L${ex - vx * k - ax * k * 0.7} ${ey - vy * k - ay * k * 0.7}`} strokeWidth={(strong ? 2.5 : 1.6) * lw} fill="none" />
+    </g>
   );
 }

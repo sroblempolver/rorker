@@ -155,6 +155,8 @@ export function MarkDot({ x, y, color, label, px }: { x: number; y: number; colo
   const r = 9 * px;
   return (
     <g pointerEvents="none">
+      {/* blinks for 10 seconds, fading over the last 1.5 */}
+      <animate attributeName="opacity" values="1;1;0" keyTimes="0;0.85;1" dur="10s" fill="freeze" />
       <circle cx={x} cy={y} r={r} fill="none" stroke={color} strokeWidth={3 * px}>
         <animate attributeName="r" values={`${r};${r * 4}`} dur="1.4s" repeatCount="indefinite" />
         <animate attributeName="opacity" values="0.9;0" dur="1.4s" repeatCount="indefinite" />
