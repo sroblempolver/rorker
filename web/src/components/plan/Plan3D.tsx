@@ -769,8 +769,10 @@ export function Plan3D(p: Props) {
     // frame the camera when the place changes, not when a pin is added
     const where = `${cb.current.mode}|${cb.current.floor?.id ?? ""}|${cb.current.room?.id ?? ""}`;
     if (framed.current !== where) {
+      // stepping between levels keeps the way you were looking; only the first view starts from the front
+      const first = !framed.current;
       framed.current = where;
-      frame(true);
+      frame(true, !first);
       t.focus = 0;
     }
     highlight();
@@ -810,7 +812,7 @@ export function Plan3D(p: Props) {
   }
   useEffect(placeDots, [markN]);
 
-  function frame(reset: boolean) {
+  function frame(reset: boolean, keepHeading = false) {
     const t = three.current;
     if (!t?.built) return;
     const { camera, controls, built } = t;
@@ -827,11 +829,13 @@ export function Plan3D(p: Props) {
     controls.enableDamping = false;
     controls.update();
     controls.enableDamping = true;
+    // the side and tilt you were looking from, so zooming in or out never turns the house
+    const was = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target));
     controls.target.copy(built.centre);
     const fv = building ? frontView(cb.current.plan) : null;
     // look at the front of the house from a little above, or at a floor from a high corner
-    const az = building ? (fv?.side === "top" ? Math.PI : 0) + 0.55 : 0.6;
-    const pol = building ? 1.12 : cb.current.room ? 0.3 : 0.75;
+    const az = keepHeading ? was.theta : building ? (fv?.side === "top" ? Math.PI : 0) + 0.55 : 0.6;
+    const pol = keepHeading && !cb.current.room ? THREE.MathUtils.clamp(was.phi, 0.35, controls.maxPolarAngle) : building ? 1.12 : cb.current.room ? 0.3 : 0.75;
     // a room is small next to its own walls: stand back far enough to see all of it over them
     const r = building ? R * 3.3 : cb.current.room ? Math.max(R, 2.6) * 3.4 : R * 2.3;
     camera.position.set(built.centre.x + r * Math.sin(pol) * Math.sin(az), built.centre.y + r * Math.cos(pol), built.centre.z + r * Math.sin(pol) * Math.cos(az));
