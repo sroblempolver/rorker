@@ -41,7 +41,7 @@ function snapAxis(values: number[]): Map<number, number> {
   return out;
 }
 
-function roomType(t: string | undefined, name: string): RoomType {
+export function roomType(t: string | undefined, name: string): RoomType {
   const s = (t ?? "").toLowerCase().replace(/[^a-z_]/g, "");
   if ((ROOM_TYPES as string[]).includes(s)) return s as RoomType;
   const n = name.toLowerCase();

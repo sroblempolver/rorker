@@ -17,6 +17,7 @@ import { previewAsk } from "./assistant";
 import { SharedWorkView } from "@/components/share/SharedJob";
 import { newToken, shareWork } from "@/lib/share";
 import { NewProject, type NewProjectResult } from "@/components/newjob/NewProject";
+import { PlanBench } from "@/components/bench/PlanBench";
 import { ClientMoneyView } from "@/components/billing/ClientMoneyView";
 import type { ClientStart } from "@/components/billing/MoneyPanel";
 import type { Brand } from "@/lib/billing/types";
@@ -254,7 +255,7 @@ function fromAssistant(r: NewProjectResult, team: Member[]): WorkspaceData {
   };
 }
 
-type Page = "jobs" | "job" | "team" | "shared" | "new" | "client" | "money" | "shop";
+type Page = "jobs" | "job" | "team" | "shared" | "new" | "client" | "money" | "shop" | "bench";
 
 /** A small job with no drawing yet (the materials sample spreads across these too). */
 function plainJob(j: (typeof EXTRA_JOBS)[number], team: Member[]): WorkspaceData {
@@ -270,11 +271,11 @@ function plainJob(j: (typeof EXTRA_JOBS)[number], team: Member[]): WorkspaceData
  * and a copied link all land where you were. */
 function fromHash(): { page: Page; id?: string } {
   const [a, b] = location.hash.replace(/^#\/?/, "").split("/");
-  if (a === "jobs" || a === "team" || a === "new" || a === "shared" || a === "money" || a === "shop") return { page: a };
+  if (a === "jobs" || a === "team" || a === "new" || a === "shared" || a === "money" || a === "shop" || a === "bench") return { page: a };
   return { page: "job", id: a === "job" ? b : undefined };
 }
 const hashFor = (page: Page, id: string) => (page === "job" ? `#/job/${id}` : `#/${page}`);
-const TITLES: Partial<Record<Page, string>> = { jobs: "Jobs", team: "Team", new: "New project", shared: "Shared link", money: "Money", shop: "Shopping", client: "Client view" };
+const TITLES: Partial<Record<Page, string>> = { jobs: "Jobs", team: "Team", new: "New project", shared: "Shared link", money: "Money", shop: "Shopping", client: "Client view", bench: "Plan tests" };
 
 function App() {
   const sample = useMemo(seed, []);
@@ -345,6 +346,7 @@ function App() {
     { id: "page:shop", group: "Go to", label: "Shopping", sub: "everything to buy, by store", run: () => setPage("shop") },
     { id: "page:team", group: "Go to", label: "Team", run: () => setPage("team") },
     { id: "page:new", group: "Go to", label: "New project", sub: "from a drawing, PDF or photo", run: () => setPage("new") },
+    { id: "page:bench", group: "Go to", label: "Plan tests", sub: "how well the plan reader reads real plans", run: () => setPage("bench") },
   ], [jobs]); // eslint-disable-line react-hooks/exhaustive-deps
   useGoTo("app", goItems);
   const tab = (p: Page, label: string) => (
@@ -376,6 +378,8 @@ function App() {
       <div key={page === "job" ? `job-${active.job.id}` : page} className="flex-1 min-h-0 flex flex-col fade-in pb-14 sm:pb-0">
       {page === "new" ? (
         <NewProject onCreate={created} onCancel={() => setPage("jobs")} />
+      ) : page === "bench" ? (
+        <div className="flex-1 overflow-y-auto"><PlanBench /></div>
       ) : page === "money" ? (
         <div className="flex-1 overflow-y-auto">
           <MoneyOverview rows={[...jobs.filter((j) => j.billing).map((j) => ({ jobId: j.job.id, jobName: j.job.name, clientName: j.job.client_name, address: j.job.address, billing: j.billing! })), ...otherJobs]}

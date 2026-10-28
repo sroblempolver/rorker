@@ -23,8 +23,12 @@ export const INTAKE_URL = "https://uofdydjfwdsvaribvsfy.supabase.co/functions/v1
 export class IntakeChat {
   private history: Msg[] = [];
   private pending: IntakeStep | null = null;
+  private drawn: Sketch | null = null;
   /** `plan`: the company's plan; paying plans get the best plan reader, the free plan a cheaper one. */
   constructor(private description: string, private parts: IntakePart[], private url = INTAKE_URL, private plan: "paid" | "free" = "paid") {}
+
+  /** The contractor redrew the plan by hand: the next turn tells the assistant, so it keeps their fixes. */
+  handDrawn(sketch: Sketch) { this.drawn = sketch; }
 
   /** Send the next turn: nothing for the first one, answers to the questions, a reply to a message, or what to change in the design. */
   async next(reply?: { answers?: Record<string, string>; text?: string }, signal?: AbortSignal): Promise<IntakeStep> {
@@ -34,7 +38,9 @@ export class IntakeChat {
       this.history.push({ role: "user", content: [{ type: "tool_result", tool_use_id: p.toolId, content: lines }] });
     } else if (p?.kind === "project") {
       // the contractor looked over the design: their corrections, or their OK
-      this.history.push({ role: "user", content: [{ type: "tool_result", tool_use_id: p.toolId, content: `The contractor reviewed the design and says: ${reply?.text?.trim() || "(no changes)"}` }] });
+      const drawn = this.drawn ? `The contractor fixed the plan by hand with the drawing tools. This is the sketch now; start from it and keep their changes:\n${JSON.stringify(this.drawn)}\n\n` : "";
+      this.drawn = null;
+      this.history.push({ role: "user", content: [{ type: "tool_result", tool_use_id: p.toolId, content: `${drawn}The contractor reviewed the design and says: ${reply?.text?.trim() || "(no changes)"}` }] });
     } else if (p?.kind === "message") {
       this.history.push({ role: "user", content: reply?.text?.trim() || "Go ahead and make it with what you have." });
     }

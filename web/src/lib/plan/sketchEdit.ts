@@ -1,0 +1,210 @@
+// Geometry for drawing a plan by hand (the sketch editor): which rooms share a wall, where a door or
+// window of a sketch sits, snapping, and cutting a room in two. Works on the same sketch the plan reader
+// hands back, so a hand fix and a read are one format. Rooms are mostly straight walls at right angles.
+import type { Pt } from "./types";
+import { expandUnits, type Side, type Sketch, type SketchFloor, type SketchRoom } from "./sketch";
+import { polyArea } from "./geometry";
+
+export type Seg = [Pt, Pt];
+const E = 1; // mm: closer than this is the same line
+
+export const edgesOf = (p: Pt[]): Seg[] => p.map((a, i) => [a, p[(i + 1) % p.length]] as Seg);
+const horiz = (s: Seg) => Math.abs(s[0][1] - s[1][1]) < E;
+const vert = (s: Seg) => Math.abs(s[0][0] - s[1][0]) < E;
+export const segLen = (s: Seg) => Math.hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]);
+
+export function pointInPoly(p: Pt, poly: Pt[]) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > p[1]) !== (yj > p[1]) && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** The overlap of two straight edges lying on one horizontal or vertical line, low end first. */
+function overlap(s: Seg, t: Seg): Seg | null {
+  if (horiz(s) && horiz(t) && Math.abs(s[0][1] - t[0][1]) < E) {
+    const lo = Math.max(Math.min(s[0][0], s[1][0]), Math.min(t[0][0], t[1][0])), hi = Math.min(Math.max(s[0][0], s[1][0]), Math.max(t[0][0], t[1][0]));
+    return hi - lo > 50 ? [[lo, s[0][1]], [hi, s[0][1]]] : null;
+  }
+  if (vert(s) && vert(t) && Math.abs(s[0][0] - t[0][0]) < E) {
+    const lo = Math.max(Math.min(s[0][1], s[1][1]), Math.min(t[0][1], t[1][1])), hi = Math.min(Math.max(s[0][1], s[1][1]), Math.max(t[0][1], t[1][1]));
+    return hi - lo > 50 ? [[s[0][0], lo], [s[0][0], hi]] : null;
+  }
+  return null;
+}
+
+/** The longest stretch of wall two rooms share, or null when they don't touch. */
+export function sharedEdge(a: Pt[], b: Pt[]): Seg | null {
+  let best: Seg | null = null;
+  for (const s of edgesOf(a)) for (const t of edgesOf(b)) { const o = overlap(s, t); if (o && (!best || segLen(o) > segLen(best))) best = o; }
+  return best;
+}
+
+/** Which side of the room an edge is on: the way you'd face standing in the room looking at it. */
+export function sideOf(poly: Pt[], s: Seg): Side {
+  const mid: Pt = [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2];
+  const dx = s[1][0] - s[0][0], dy = s[1][1] - s[0][1], L = Math.hypot(dx, dy) || 1;
+  let nx = -dy / L, ny = dx / L;
+  if (pointInPoly([mid[0] + nx * 30, mid[1] + ny * 30], poly)) { nx = -nx; ny = -ny; }
+  return Math.abs(nx) > Math.abs(ny) ? (nx > 0 ? "east" : "west") : ny > 0 ? "south" : "north";
+}
+
+/** The parts of a room's edges that no other room on the floor shares: its outside walls. */
+export function outsidePieces(f: SketchFloor, ri: number): Seg[] {
+  const me = f.rooms[ri];
+  const out: Seg[] = [];
+  for (const s of edgesOf(me.polygon)) {
+    if (!horiz(s) && !vert(s)) { out.push(s); continue; }
+    const h = horiz(s), k = h ? 0 : 1, fixed = h ? s[0][1] : s[0][0];
+    const lo = Math.min(s[0][k], s[1][k]), hi = Math.max(s[0][k], s[1][k]);
+    let pieces: [number, number][] = [[lo, hi]];
+    f.rooms.forEach((r, j) => {
+      if (j === ri) return;
+      for (const t of edgesOf(r.polygon)) {
+        const o = overlap(s, t);
+        if (!o) continue;
+        const [a, b] = [o[0][k], o[1][k]];
+        pieces = pieces.flatMap(([p, q]) => (b <= p || a >= q ? [[p, q]] : ([[p, a], [b, q]] as [number, number][]).filter(([x, y]) => y - x > 100)));
+      }
+    });
+    for (const [p, q] of pieces) out.push(h ? [[p, fixed], [q, fixed]] : [[fixed, p], [fixed, q]]);
+  }
+  return out;
+}
+
+const byName = (f: SketchFloor, n: string) => {
+  const s = n.toLowerCase().trim();
+  const i = f.rooms.findIndex((r) => r.name.toLowerCase().trim() === s);
+  return i >= 0 ? i : f.rooms.findIndex((r) => r.name.toLowerCase().includes(s) || s.includes(r.name.toLowerCase()));
+};
+export const OUTSIDE = /^(outside|exterior|out|garden|yard|street)$/i;
+
+/** The outside wall of a room on one side (its longest piece), where an outside door or windows go. */
+export function sideWall(f: SketchFloor, ri: number, side: Side): Seg | null {
+  const poly = f.rooms[ri].polygon;
+  return outsidePieces(f, ri).filter((s) => sideOf(poly, s) === side).sort((a, b) => segLen(b) - segLen(a))[0] ?? null;
+}
+
+const along = (s: Seg, t: number): Pt => [s[0][0] + (s[1][0] - s[0][0]) * t, s[0][1] + (s[1][1] - s[0][1]) * t];
+
+/** Where a door of the sketch is drawn: a short piece of its wall, or null when it can't be placed. */
+export function doorSpot(f: SketchFloor, d: { rooms: [string, string]; at?: number; width_mm?: number; side?: Side; kind?: string }): Seg | null {
+  const i = byName(f, d.rooms[0] ?? "");
+  if (i < 0) return null;
+  const out = !d.rooms[1] || OUTSIDE.test(d.rooms[1]);
+  let wall: Seg | null;
+  if (out) wall = d.side ? sideWall(f, i, d.side) : outsidePieces(f, i).sort((a, b) => segLen(b) - segLen(a))[0] ?? null;
+  else { const j = byName(f, d.rooms[1]); wall = j >= 0 ? sharedEdge(f.rooms[i].polygon, f.rooms[j].polygon) : null; }
+  if (!wall) return null;
+  const L = segLen(wall);
+  const w = Math.min(d.width_mm ?? (d.kind === "garage_door" ? 2400 : d.kind === "double_door" || d.kind === "sliding_door" ? 1500 : d.kind === "opening" ? 1200 : 820), L - 200);
+  const c = Math.max(w / 2 + 100, Math.min(L - w / 2 - 100, (d.at ?? 0.5) * L));
+  return [along(wall, (c - w / 2) / L), along(wall, (c + w / 2) / L)];
+}
+
+/** Where a sketch's windows are drawn: evenly along the room's outside wall on that side. */
+export function windowSpots(f: SketchFloor, w: { room: string; side: Side; width_mm?: number; count?: number }): Seg[] {
+  const i = byName(f, w.room);
+  const wall = i >= 0 ? sideWall(f, i, w.side) : null;
+  if (!wall) return [];
+  const n = Math.max(1, Math.min(4, w.count ?? 1)), L = segLen(wall), wd = Math.min(w.width_mm ?? 1200, L / n - 100);
+  return Array.from({ length: n }, (_, k) => { const c = ((k + 1) / (n + 1)) * L; return [along(wall, (c - wd / 2) / L), along(wall, (c + wd / 2) / L)] as Seg; });
+}
+
+/** Distance from a point to a segment, and how far along it (0 to 1) the nearest point is. */
+export function nearSeg(p: Pt, s: Seg) {
+  const dx = s[1][0] - s[0][0], dy = s[1][1] - s[0][1], L2 = dx * dx + dy * dy || 1;
+  const t = Math.max(0, Math.min(1, ((p[0] - s[0][0]) * dx + (p[1] - s[0][1]) * dy) / L2));
+  return { d: Math.hypot(p[0] - (s[0][0] + dx * t), p[1] - (s[0][1] + dy * t)), t };
+}
+
+/** Where a click on a wall would put a door: between two rooms, or an outside door of one room. */
+export function wallAt(f: SketchFloor, p: Pt, tol: number): { rooms: [number, number | null]; wall: Seg; t: number; side: Side } | null {
+  let best: { ri: number; s: Seg; d: number } | null = null;
+  f.rooms.forEach((r, ri) => { for (const s of edgesOf(r.polygon)) { const { d } = nearSeg(p, s); if (d < tol && (!best || d < best.d)) best = { ri, s, d }; } });
+  if (!best) return null;
+  const { ri, s } = best as { ri: number; s: Seg };
+  // a neighbour on the other side of the same stretch of wall
+  for (let j = 0; j < f.rooms.length; j++) {
+    if (j === ri) continue;
+    for (const t of edgesOf(f.rooms[j].polygon)) {
+      const o = overlap(s, t);
+      if (!o || nearSeg(p, o).d > tol) continue;
+      const shared = sharedEdge(f.rooms[ri].polygon, f.rooms[j].polygon) ?? o;
+      return { rooms: [ri, j], wall: shared, t: nearSeg(p, shared).t, side: sideOf(f.rooms[ri].polygon, s) };
+    }
+  }
+  const side = sideOf(f.rooms[ri].polygon, s);
+  const wall = sideWall(f, ri, side) ?? s;
+  return { rooms: [ri, null], wall, t: nearSeg(p, wall).t, side };
+}
+
+/** Pull a value onto a nearby line (another room's wall) when there is one, else onto the grid. */
+export function snapTo(v: number, lines: number[], tol: number, grid: number) {
+  let best = v, d = tol;
+  for (const l of lines) if (Math.abs(l - v) < d) { d = Math.abs(l - v); best = l; }
+  return d < tol ? best : Math.round(v / grid) * grid;
+}
+
+/** Cut a polygon along x = v (axis "x") or y = v (axis "y") into the part below and the part above. */
+export function splitPoly(poly: Pt[], axis: "x" | "y", v: number): [Pt[], Pt[]] {
+  const k = axis === "x" ? 0 : 1;
+  const clip = (keep: (q: Pt) => boolean) => {
+    const out: Pt[] = [];
+    poly.forEach((a, i) => {
+      const b = poly[(i + 1) % poly.length];
+      if (keep(a)) out.push(a);
+      if (keep(a) !== keep(b)) { const t = (v - a[k]) / (b[k] - a[k]); out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); }
+    });
+    return out.map((q) => [Math.round(q[0]), Math.round(q[1])] as Pt).filter((q, i, arr) => i === 0 || q[0] !== arr[i - 1][0] || q[1] !== arr[i - 1][1]);
+  };
+  return [clip((q) => q[k] <= v), clip((q) => q[k] >= v)];
+}
+
+/** Move a corner and keep the walls either side of it straight (a wall that ran across stays across). */
+export function moveCorner(poly: Pt[], i: number, to: Pt): Pt[] {
+  const n = poly.length, out = poly.map((p) => [...p] as Pt);
+  const prev = (i - 1 + n) % n, next = (i + 1) % n;
+  for (const j of [prev, next]) {
+    const s: Seg = [poly[j], poly[i]];
+    if (horiz(s)) out[j][1] = to[1];
+    else if (vert(s)) out[j][0] = to[0];
+  }
+  out[i] = [to[0], to[1]];
+  return out;
+}
+
+/** Slide a straight wall: every room edge on that line within its span moves with it, so the rooms
+ *  either side stay joined. */
+export function moveWall(rooms: SketchRoom[], s: Seg, by: number): SketchRoom[] {
+  const h = horiz(s), v = vert(s);
+  if (!h && !v) return rooms;
+  const k = h ? 1 : 0, along = h ? 0 : 1, line = s[0][k];
+  const lo = Math.min(s[0][along], s[1][along]), hi = Math.max(s[0][along], s[1][along]);
+  return rooms.map((r) => {
+    const poly = r.polygon.map((p) => [...p] as Pt);
+    let hit = false;
+    edgesOf(r.polygon).forEach((t, i) => {
+      const same = h ? horiz(t) : vert(t);
+      if (!same || Math.abs(t[0][k] - line) > E) return;
+      const tl = Math.min(t[0][along], t[1][along]), th = Math.max(t[0][along], t[1][along]);
+      if (th - lo < 50 || hi - tl < 50) return;
+      poly[i][k] = line + by;
+      poly[(i + 1) % poly.length][k] = line + by;
+      hit = true;
+    });
+    return hit ? { ...r, polygon: poly } : r;
+  });
+}
+
+export const roomArea = (r: SketchRoom) => polyArea(r.polygon) / 1e6;
+
+/** The sketch with every repeated home drawn out in full (a copy becomes real rooms), so each one can be
+ *  fixed on its own. */
+export function flatten(s: Sketch): Sketch {
+  const c: Sketch = JSON.parse(JSON.stringify(s));
+  if (!c.units?.some((u) => u.copy_of)) return c;
+  return { ...c, floors: expandUnits(c), units: c.units.map((u) => ({ name: u.name })) };
+}
