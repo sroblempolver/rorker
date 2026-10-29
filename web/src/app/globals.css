@@ -104,6 +104,26 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 @keyframes rise-in { from { opacity: 0; transform: translateY(6px); } }
 .fade-in { animation: fade-in .16s ease-out; }
 .pop-in { animation: pop-in .18s cubic-bezier(.2,.8,.2,1); }
+/* a win: the banner drops in, light sweeps across once, the check draws, the bar fills from where it was */
+@keyframes win-in { 0% { opacity: 0; transform: translateY(-10px) scale(.97); } 12% { opacity: 1; transform: none; } 88% { opacity: 1; } 100% { opacity: 0; transform: translateY(-6px); } }
+@keyframes win-sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@keyframes win-check { from { stroke-dashoffset: 24; } to { stroke-dashoffset: 0; } }
+@keyframes win-fill { from { transform: scaleX(var(--from, 0)); } }
+.win-in { animation: win-in var(--win-life, 2.6s) ease-out forwards; }
+.win-sweep { opacity: .14; animation: win-sweep .7s .15s ease-out both; }
+.win-check { stroke-dasharray: 24; animation: win-check .35s .2s ease-out both; }
+.win-fill { animation: win-fill .7s .35s cubic-bezier(.2,.8,.2,1) both; }
+
+/* the living map: crews idle on site, work in progress pulses, deliveries roll in */
+@keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-260px); } }
+@keyframes beacon { from { transform: scale(.55); opacity: .55; } to { transform: scale(1.25); opacity: 0; } }
+@keyframes drive { 0% { transform: translateX(0); opacity: 0; } 8% { opacity: 1; } 70% { transform: translateX(var(--to)); opacity: 1; } 85%, 100% { transform: translateX(var(--to)); opacity: 0; } }
+@keyframes grow-x { from { transform: scaleX(0); } }
+.bob { animation: bob 2.6s ease-in-out infinite; }
+.beacon { transform-box: fill-box; transform-origin: center; animation: beacon 2.2s ease-out infinite; }
+.drive { animation: drive 9s linear infinite; }
+.grow-x { transform-box: fill-box; transform-origin: left; animation: grow-x .9s .2s cubic-bezier(.2,.8,.2,1) both; }
+
 /* a phone's bottom bar: floating buttons sit above it */
 @media (max-width: 639px) { body:has(.mobile-nav) { --nav-h: 56px; } }
 

@@ -30,7 +30,8 @@ import { TeamContext } from "@/components/team/context";
 import { FeedbackProvider } from "@/components/ui/feedback";
 import { GoToButton, GoToHost, useGoTo, type GoItem } from "@/components/ui/GoTo";
 import { JobCards } from "@/components/JobCards";
-import { jobGlance } from "@/lib/feed";
+import { feedItems, jobGlance } from "@/lib/feed";
+import type { JobLive, MapEvent } from "@/components/AllJobsMap";
 import { today } from "@/lib/dates";
 
 /** when this preview was built, so an out-of-date copy in the browser cache is easy to spot */
@@ -254,6 +255,26 @@ function fromAssistant(r: NewProjectResult, team: Member[]): WorkspaceData {
   };
 }
 
+/** The all-jobs map as a living city: who's on which job today, what's going on, what's late and on the way. */
+function liveCity(jobs: WorkspaceData[]): { live: Record<string, JobLive>; events: MapEvent[] } {
+  const day = today();
+  const live: Record<string, JobLive> = {};
+  const events: MapEvent[] = [];
+  for (const d of jobs) {
+    const lines = materials.lines.filter((l) => l.job_id === d.job.id);
+    const items = feedItems(d.pins, lines, day);
+    const names = new Map(d.members.map((m) => [m.id, m.full_name]));
+    const crew = new Map<string, { id: string; name: string; working?: boolean }>();
+    for (const it of items) if (it.when === "now" || it.when === "today" || it.when === "late")
+      for (const p of it.people) if (names.has(p)) { const c = crew.get(p) ?? { id: p, name: names.get(p)! }; if (it.when === "now") c.working = true; crew.set(p, c); }
+    live[d.job.id] = { crew: [...crew.values()], now: items.filter((i) => i.when === "now").length, late: items.filter((i) => i.when === "late").length, enRoute: lines.filter((l) => l.status === "ordered").length };
+    for (const it of items) if (it.when === "now" || it.when === "late" || it.when === "today")
+      events.push({ jobId: d.job.id, jobName: d.job.name, who: it.people.map((p) => names.get(p)?.split(" ")[0]).filter(Boolean)[0], text: it.title, tone: it.when as MapEvent["tone"] });
+  }
+  const rank = { late: 0, now: 1, today: 2 } as const;
+  return { live, events: events.sort((a, b) => rank[a.tone] - rank[b.tone]) };
+}
+
 type Page = "jobs" | "job" | "team" | "shared" | "new" | "client" | "money" | "shop";
 
 /** A small job with no drawing yet (the materials sample spreads across these too). */
@@ -423,7 +444,7 @@ function App() {
               <p className="text-muted text-sm">Click a building or a card to go inside. Press <kbd className="kbd !h-5 !text-[10.5px]">/</kbd> to jump straight to any job, room or pin.</p>
             </div>
           </div>
-          <div className="px-4 sm:px-6"><AllJobsMap jobs={jobs.map(summary)} /></div>
+          <div className="px-4 sm:px-6"><AllJobsMap jobs={jobs.map(summary)} {...liveCity(jobs)} /></div>
           <div className="px-4 sm:px-6 py-6"><JobCards jobs={jobs.map((d) => ({ ...summary(d), ...jobGlance(d.pins, materials.lines.filter((l) => l.job_id === d.job.id), today()) }))} /></div>
         </div>
       ) : (
