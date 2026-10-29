@@ -267,7 +267,7 @@ export function runChecks(sk: Sketch, before?: Sketch | null): { open: Nudge[]; 
       if (st.shape !== "straight" && g.landing < (g.width * std("stair.landing")) / 100 - 0.5) add({ id: `${id}:landing`, severity: "warn", title: "Landing is short", text: `The landing is ${says(g.landing)} deep. It should be at least as deep as the stairs are wide (${says(g.width)}).`, std: "stair.landing", at: g.steps.find((s) => s.landing) ? centroid(g.steps.find((s) => s.landing)!.polygon) : c, el });
       if (g.headroom < std("stair.headroom") - 0.5) add({ id: `${id}:headroom`, severity: "warn", title: "Low headroom on the stairs", text: `Only ${says(g.headroom)} under the floor above. People need ${says(std("stair.headroom"))}.`, std: "stair.headroom", at: c, el });
       if (rise > std("stair.guardDrop")) {
-        const edges = f.rooms.flatMap((r) => edgesOf(r.polygon));
+        const edges = [...f.rooms.flatMap((r) => edgesOf(r.polygon)), ...(f.walls ?? []).map((w) => [w.a, w.b] as [Pt, Pt])];
         const walled = ([a, b]: [Pt, Pt]) => [0.1, 0.3, 0.5, 0.7, 0.9].every((k) => edges.some((s) => nearSeg([a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k], s).d < 150));
         const open = g.sides.filter((s) => !walled(s));
         if (open.length) add({ id: `${id}:guard`, severity: "info", title: "Open side of the stairs needs a guard", text: `${open.length === 1 ? "One side isn't" : `${open.length} sides aren't`} against a wall. Open sides and the edge of the opening upstairs need a guard ${says(std("check.room.guardHeight"))} high, and the stairs a handrail.`, std: "stair.guardDrop", at: mid(open[0]), el });

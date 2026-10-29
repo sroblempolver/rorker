@@ -12,8 +12,6 @@ import { std } from "./standards";
 import { INCH, fmtLen } from "./units";
 import { bottomFor, cabCode, defaultConfig, defaults, famOf, newSpec, wallTop, type CabFamily, type CabSpec } from "./cabinets";
 
-// wall thicknesses the plan is built with (sketch.ts): the room outline runs down the middle of each wall
-const EXT_T = 250, INT_T = 120;
 
 /** Things that aren't cabinets but go in a cabinet run or a bathroom, at US sizes from the standards. */
 export interface PlainItem { id: string; label: string; kind: string; group: "Appliances" | "Bath"; widths: number[]; size: () => { w: number; d: number; h: number; z: number } }
@@ -41,10 +39,15 @@ export interface Face { ri: number; edge: number; A: Pt; u: Pt; n: Pt; L: number
 const dot = (a: Pt, b: Pt) => a[0] * b[0] + a[1] * b[1];
 const sub = (a: Pt, b: Pt): Pt => [a[0] - b[0], a[1] - b[1]];
 
-/** How thick the wall along a room's edge is: outside walls are thicker. */
+/** How thick the wall along a room's edge is, as the plan builds it (sketch.ts): a wall piece drawn on
+ *  that line sets its own thickness, else the company's inside or outside wall. The room outline runs
+ *  down the middle of each wall. */
 function thick(f: SketchFloor, ri: number, s: Seg): number {
   const mid: Pt = [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2];
-  return outsidePieces(f, ri).some((o) => sameLine(o, s) && Math.min(o[0][0], o[1][0]) - 1 <= mid[0] && mid[0] <= Math.max(o[0][0], o[1][0]) + 1 && Math.min(o[0][1], o[1][1]) - 1 <= mid[1] && mid[1] <= Math.max(o[0][1], o[1][1]) + 1) ? EXT_T : INT_T;
+  const within = (o: Seg) => Math.min(o[0][0], o[1][0]) - 1 <= mid[0] && mid[0] <= Math.max(o[0][0], o[1][0]) + 1 && Math.min(o[0][1], o[1][1]) - 1 <= mid[1] && mid[1] <= Math.max(o[0][1], o[1][1]) + 1;
+  const piece = (f.walls ?? []).find((w) => w.thickness_mm && sameLine([w.a, w.b], s) && within([w.a, w.b]));
+  if (piece) return piece.thickness_mm!;
+  return outsidePieces(f, ri).some((o) => sameLine(o, s) && within(o)) ? std("wall.exterior") : std("wall.interior");
 }
 
 /** A room's wall as seen standing in the room, with its inside corners. Null for a slanted wall. */
