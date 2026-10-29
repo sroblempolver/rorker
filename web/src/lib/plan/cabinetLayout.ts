@@ -10,8 +10,7 @@ import { CATALOG, bottomOf, topOf } from "./catalog";
 import { RULES } from "./rules";
 import { std } from "./standards";
 import { INCH, fmtLen } from "./units";
-import { addTrayGroup } from "./tray";
-import { FAMILIES, bottomFor, cabCode, defaultConfig, defaults, famOf, newSpec, wallTop, type CabFamily, type CabSpec } from "./cabinets";
+import { bottomFor, cabCode, defaultConfig, defaults, famOf, newSpec, wallTop, type CabFamily, type CabSpec } from "./cabinets";
 
 // wall thicknesses the plan is built with (sketch.ts): the room outline runs down the middle of each wall
 const EXT_T = 250, INT_T = 120;
@@ -30,10 +29,10 @@ export const PLAIN: PlainItem[] = [
 ];
 export const plainOf = (id: string) => PLAIN.find((p) => p.id === id) ?? null;
 
-/** What the Cabinets tool puts down next: a cabinet family (or an appliance / bath fixture) at a width,
- *  or, in fill mode, a whole wall. */
-export interface CabPick { item: string; w?: number; h?: number; config?: string; hinge?: "L" | "R"; mode: "place" | "fill"; fillBase: boolean; fillWall: boolean }
-export const DEFAULT_PICK: CabPick = { item: "base", mode: "place", fillBase: true, fillWall: true };
+/** What a click puts down: a cabinet family (or an appliance / bath fixture) at a size picked in the
+ *  catalogue tray, or, with the Cabinets tool, a whole wall filled. */
+export interface CabPick { item: string; w?: number; d?: number; h?: number; config?: string; hinge?: "L" | "R"; mode: "place" | "fill"; fillBase: boolean; fillWall: boolean }
+export const DEFAULT_PICK: CabPick = { item: "base", mode: "fill", fillBase: true, fillWall: true };
 
 /** One wall of a room seen from inside: x runs left to right along the room outline's edge (as in the
  *  wall view), the run between the inside corners is [s0, s1], and the inside face is `t/2` in from it. */
@@ -163,7 +162,7 @@ export function pickSize(pick: CabPick) {
   const plain = plainOf(pick.item);
   if (plain) {
     const s = plain.size();
-    return { size: { ...s, w: pick.w ?? s.w }, kind: plain.kind, name: plain.label, cab: undefined as CabSpec | undefined };
+    return { size: { ...s, w: pick.w ?? s.w, d: pick.d ?? s.d, h: pick.h ?? s.h }, kind: plain.kind, name: plain.label, cab: undefined as CabSpec | undefined };
   }
   const fam = pick.item as CabFamily, F = famOf(fam), def = defaults(fam);
   const w = pick.w ?? def.w, h = pick.h ?? def.h;
@@ -349,23 +348,3 @@ export function fillWall(f: SketchFloor, ri: number, edge: number, opt: { base: 
 }
 
 /** Families and plain items in the order the Cabinets panel shows them. */
-export const PANEL_GROUPS: { group: string; items: { id: string; label: string }[] }[] = [
-  ...(["Base", "Wall", "Tall", "Corners", "Fillers and panels"] as const).map((g) => ({ group: g, items: FAMILIES.filter((x) => x.group === g).map((x) => ({ id: x.id as string, label: x.label })) })),
-  { group: "Appliances", items: PLAIN.filter((p) => p.group === "Appliances").map((p) => ({ id: p.id, label: p.label })) },
-  { group: "Bath", items: [...FAMILIES.filter((x) => x.group === "Bath").map((x) => ({ id: x.id as string, label: x.label })), ...PLAIN.filter((p) => p.group === "Bath").map((p) => ({ id: p.id, label: p.label }))] },
-];
-
-// the tray's Cabinets tab: every stock cabinet by its code (fillers and panels are in the Cabinets tool)
-const TRAY_FAMS: CabFamily[] = ["base", "drawer", "sink", "blind", "susan", "wall", "fridge_wall", "wall_end", "wall_corner", "wall_blind", "tall", "oven", "vanity", "vanity_drawer", "linen", "medicine"];
-addTrayGroup({
-  id: "cabinets", label: "Cabinets", by: "kind",
-  items: TRAY_FAMS.flatMap((fam) => {
-    const F = famOf(fam), d = defaults(fam);
-    // wall cabinets at their usual heights, the rest at the one they come in
-    const hs = fam === "wall" ? [30, 36, 42] : fam === "fridge_wall" ? [12, 15] : [d.h / INCH];
-    return hs.flatMap((hIn) => F.widths.map((wIn) => {
-      const w = wIn * INCH, h = hIn * INCH, cab = { ...newSpec(fam, w), config: defaultConfig(fam, w) };
-      return { kind: F.kind, label: `${cabCode(cab, w, d.d, h)} ${F.label.toLowerCase()}`, w, ...(F.heights ? { h } : {}), cab };
-    }));
-  }),
-});
