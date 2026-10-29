@@ -127,7 +127,7 @@ export function ShareDialog({ api, members, pins, plan, onClose }: { api: Worksp
                   <div key={l.id} className={`flex items-center gap-2 px-3 py-2 rounded-[3px] border border-line ${live ? "" : "opacity-55"}`}>
                     <span className="min-w-0 flex-1">
                       <span className="block text-[13.5px] truncate">{l.label}</span>
-                      <span className="block text-[11.5px] text-muted truncate">{live ? `${scope(l)}${l.expires_at ? ` · until ${l.expires_at.slice(0, 10)}` : ""}` : l.revoked_at ? "Turned off" : "Ran out"}</span>
+                      <span className="block text-[11.5px] text-muted truncate">{live ? `${scope(l)}${l.expires_at ? ` · until ${l.expires_at.slice(0, 10)}` : ""}${l.saved_by?.length ? ` · in ${l.saved_by.join(", ")}'s account` : ""}` : l.revoked_at ? "Turned off" : "Ran out"}</span>
                     </span>
                     {live && <>
                       {api.openShare && <button className="text-[12.5px] text-muted hover:text-text" onClick={() => api.openShare!(l.token)}>Open</button>}

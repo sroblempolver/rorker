@@ -3,7 +3,7 @@
 // (one row per thing, see supabase/build/) a moment later. Crew and client links go through the `build`
 // edge function, which shows them only what their link may see.
 import { createClient, type Session } from "@supabase/supabase-js";
-import type { JobMessage, PinComment } from "@/lib/data/types";
+import type { JobMessage, JobPhoto, JobPhotoInput, PhotoBy, PinComment, TeamMessage } from "@/lib/data/types";
 import type { PlaceTag } from "@/lib/plan/places";
 import { fromRecords, POSTED, recKey, toRecords, type PageSaved, type Rec, type SavedAccount } from "@/lib/cloud/records";
 
@@ -17,12 +17,24 @@ export const sb = createClient(URL_, KEY, { auth: { persistSession: true, storag
 export async function call<T>(action: string, body: Record<string, unknown> = {}): Promise<T> {
   let r: Response;
   try {
-    r = await fetch(`${URL_}/functions/v1/build`, { method: "POST", headers: { "content-type": "application/json", apikey: KEY }, body: JSON.stringify({ action, ...body }) });
+    // signed in (on this site's accounts page): the function knows who, to keep links in their account
+    const { data } = await sb.auth.getSession();
+    const auth: Record<string, string> = data.session ? { authorization: `Bearer ${data.session.access_token}` } : {};
+    r = await fetch(`${URL_}/functions/v1/build`, { method: "POST", headers: { "content-type": "application/json", apikey: KEY, ...auth }, body: JSON.stringify({ action, ...body }) });
   } catch { throw new Error("Can't reach Rorker. Check your connection and try again."); }
   const j = await r.json().catch(() => null);
   if (!r.ok) throw new Error(j?.error ?? "Something went wrong. Try again.");
   return j as T;
 }
+
+/** A link someone saved to their account, as their "Shared with you" list shows it. */
+export interface SharedItem {
+  id: string; token: string; kind: "s" | "c"; label: string; company: string;
+  job: { name: string; address: string | null } | null; live: boolean; saved_at: string;
+}
+export const sharedWithMe = async () => (await call<{ shared: SharedItem[] }>("shared")).shared;
+export const saveLink = (token: string) => call<{ id: string }>("save", { token });
+export const unsaveLink = (id: string) => call("unsave", { id });
 
 export async function signUp(input: { email: string; password: string; name: string; company: string }) {
   await call("signup", input);
@@ -214,4 +226,66 @@ export async function addMessage(accountId: string, jobId: string, author: strin
   const m: JobMessage = { id: shortId(), job_id: jobId, from: "contractor", author_name: author, body: body || null, photos, created_at: new Date().toISOString(), ...(places.length ? { places } : {}) };
   const { error } = await sb.from("records").insert({ account_id: accountId, kind: "message", id: m.id, job_id: jobId, data: m });
   if (error) throw new Error("Couldn't send that. Check your connection and try again.");
+}
+
+/** The team board, fresh from the database (crew answer from their links). */
+export async function listTeam(accountId: string): Promise<TeamMessage[]> {
+  const { data, error } = await sb.from("records").select("data").eq("account_id", accountId).eq("kind", "team");
+  if (error) throw new Error("Couldn't load the messages.");
+  const list = (data ?? []).map((r) => r.data as TeamMessage).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const urls = await fileUrls(list.flatMap((m) => m.photos));
+  return list.map((m) => ({ ...m, photos: m.photos.map((p) => urls.get(p) ?? p) }));
+}
+
+/** The office writes to everyone (to = null) or to picked people. */
+export async function addTeamMessage(accountId: string, author: string, to: string[] | null, body: string, file: File | null) {
+  const photos = file ? [await upload(accountId, "team", "messages", file)] : [];
+  const m: TeamMessage = { id: shortId(), from: "office", author_name: author, member_id: null, to, body: body || null, photos, created_at: new Date().toISOString() };
+  const { error } = await sb.from("records").insert({ account_id: accountId, kind: "team", id: m.id, job_id: null, data: m });
+  if (error) throw new Error("Couldn't send that. Check your connection and try again.");
+}
+
+/** A job's Photos, fresh from the database (crew and the client add photos from their links): photos
+ *  added there, the job's pin threads and its client thread, all with addresses to show. */
+export async function listPhotos(accountId: string, jobId: string): Promise<{ uploads: JobPhoto[]; comments: PinComment[]; messages: JobMessage[] }> {
+  const { data, error } = await sb.from("records").select("kind, data").eq("account_id", accountId).eq("job_id", jobId).in("kind", ["photo", "comment"]);
+  if (error) throw new Error("Couldn't load the photos.");
+  const rows = data ?? [];
+  const uploads = rows.filter((r) => r.kind === "photo").map((r) => r.data as JobPhoto);
+  const comments = rows.filter((r) => r.kind === "comment").map((r) => r.data as PinComment).filter((c) => c.photos.length);
+  const messages = await listMessages(accountId, jobId);
+  const urls = await fileUrls([...uploads.map((p) => p.src), ...comments.flatMap((c) => c.photos)]);
+  return {
+    uploads: uploads.map((p) => ({ ...p, src: urls.get(p.src) ?? p.src })),
+    comments: comments.map((c) => ({ ...c, photos: c.photos.map((x) => urls.get(x) ?? x) })),
+    messages,
+  };
+}
+
+/** A photo straight into a job's Photos. Returned with an address to show. */
+export async function addPhoto(accountId: string, jobId: string, by: PhotoBy, input: JobPhotoInput, f: File): Promise<JobPhoto> {
+  const src = await upload(accountId, jobId, "photos", f);
+  const p: JobPhoto = { id: shortId(), job_id: jobId, src, by, created_at: new Date().toISOString(), ...input };
+  const { error } = await sb.from("records").insert({ account_id: accountId, kind: "photo", id: p.id, job_id: jobId, data: p });
+  if (error) throw new Error("Couldn't add that photo. Check your connection and try again.");
+  return { ...p, src: (await fileUrls([src])).get(src) ?? src };
+}
+
+/** Retag a photo (room, stage, note, whether the client sees it). */
+export async function updatePhoto(accountId: string, id: string, patch: Partial<JobPhotoInput>): Promise<JobPhoto> {
+  const { data, error } = await sb.from("records").select("data").eq("account_id", accountId).eq("kind", "photo").eq("id", id).single();
+  if (error || !data) throw new Error("That photo isn't there any more.");
+  const p = { ...(data.data as JobPhoto), ...patch };
+  const { error: e2 } = await sb.from("records").update({ data: p, updated_at: new Date().toISOString() }).eq("account_id", accountId).eq("kind", "photo").eq("id", id);
+  if (e2) throw new Error("That didn't save. Check your connection and try again.");
+  return { ...p, src: (await fileUrls([p.src])).get(p.src) ?? p.src };
+}
+
+/** Take a photo off the job, and its file with it. */
+export async function removePhoto(accountId: string, id: string) {
+  const { data } = await sb.from("records").select("data").eq("account_id", accountId).eq("kind", "photo").eq("id", id).maybeSingle();
+  const { error } = await sb.from("records").delete().eq("account_id", accountId).eq("kind", "photo").eq("id", id);
+  if (error) throw new Error("Couldn't remove it. Check your connection and try again.");
+  const src = (data?.data as JobPhoto | undefined)?.src;
+  if (src && !/^(https?:|blob:|data:)/.test(src)) await sb.storage.from(BUCKET).remove([src]);
 }

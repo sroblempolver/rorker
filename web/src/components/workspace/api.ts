@@ -3,10 +3,11 @@
 import type { AssistantSend } from "@/components/assistant/Assistant";
 import type { ThreadApi } from "./ClientThread";
 import type { PlaceTag } from "@/lib/plan/places";
+import type { PhotoItem } from "@/lib/photos";
 import type { ClientStart } from "@/components/billing/MoneyPanel";
 import type { Billing, Brand } from "@/lib/billing/types";
 import type { MaterialLine, MaterialsApi, MaterialsJob } from "@/lib/materials/types";
-import type { ElementEdit, ElementState, ItemInput, Job, JobItem, JobStage, Member, Pin, PinComment, PinInput, PinStatus, PlanRow, PlanRun, ShareLink, ShareLinkInput, StageStatus } from "@/lib/data/types";
+import type { ElementEdit, ElementState, ItemInput, Job, JobItem, JobMessage, JobPhoto, JobPhotoInput, JobStage, Member, Pin, PinComment, PinInput, PinStatus, PlanRow, PlanRun, ShareLink, ShareLinkInput, StageStatus } from "@/lib/data/types";
 
 export interface WorkspaceData {
   job: Job;
@@ -33,6 +34,8 @@ export interface WorkspaceData {
   payoutsConnected?: boolean;
   /** open on the Client tab (from a "new from your client" notice), showing the place they tagged */
   startOnClient?: { place: PlaceTag | null };
+  /** open at a photo's spot (from Photos in the top bar): its pin, or its room or the thing in it */
+  startOnPhoto?: PhotoItem;
   /** the materials list: lines on every job this person can see, and those jobs (to split an add) */
   materials?: { lines: MaterialLine[]; jobs: MaterialsJob[] };
 }
@@ -89,4 +92,14 @@ export interface WorkspaceApi {
     /** show what the client sees on their link */
     open(): void;
   };
+}
+
+/** one job's Photos: everything added straight there, and the photos on its pins and in its client
+ *  thread (with addresses to show) */
+export interface PhotosApi {
+  /** everything Photos shows, fresh (crew and the client add photos from their links) */
+  list(): Promise<{ uploads: JobPhoto[]; comments: PinComment[]; messages: JobMessage[] }>;
+  add(file: File, input: JobPhotoInput): Promise<JobPhoto>;
+  update(id: string, patch: Partial<JobPhotoInput>): Promise<JobPhoto>;
+  remove(id: string): Promise<void>;
 }

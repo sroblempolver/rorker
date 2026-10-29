@@ -5,6 +5,7 @@
 import type { ElementEdit, JobStage } from "@/lib/data/types";
 import { pointInPoly } from "./geometry";
 import type { Fixture, Plan, Pt } from "./types";
+import type { BuildSpec } from "./buildSpec";
 
 export type BuildLook = "slab" | "framing" | "drywall" | "finished";
 
@@ -21,8 +22,9 @@ export type Furnish = "all" | string[];
 
 /** The job-wide settings live in the edits under this key (it never matches a plan element). */
 export const JOB_KEY = "@job";
-/** stage_looks: the look a stage was set to by hand, by stage id, over the one guessed from its name */
-export interface JobSettings { furnish?: Furnish; stage_looks?: Record<string, BuildLook> }
+/** stage_looks: the look a stage was set to by hand, by stage id, over the one guessed from its name;
+ *  build: how the house is built (the answers to the build questions, lib/plan/buildSpec.ts) */
+export interface JobSettings { furnish?: Furnish; stage_looks?: Record<string, BuildLook>; build?: BuildSpec }
 export const jobSettings = (edits: Record<string, ElementEdit>): JobSettings => edits[JOB_KEY] ?? {};
 
 /** What can be furnished one by one: each home when the drawing has several, otherwise each floor. */
@@ -56,7 +58,9 @@ export function stagedPlan(plan: Plan, look: BuildLook, furnish: Furnish | undef
 /** The look that goes with a job stage, from its name ("Framing", "Insulation and drywall" ...). */
 export function lookForStage(name: string): BuildLook {
   const n = name.toLowerCase();
-  if (/final|punch|handover|close|walkthrough|cabinet|counter|fixture|appliance|trim|glass|backsplash|exterior finish/.test(n)) return "finished";
+  if (/vapou?r|sheath|weather barrier|house wrap|felt|block wall/.test(n)) return "framing";
+  if (/insulation:/.test(n)) return "framing";
+  if (/final|punch|handover|close|walkthrough|cabinet|counter|fixture|appliance|trim|glass|backsplash|exterior finish|siding|cladding/.test(n)) return "finished";
   if (/drywall|sheetrock|plaster|board|insulation|waterproof|paint|tile|flooring|interior finish/.test(n)) return "drywall";
   if (/fram|structur|rough|roof|window|inspection/.test(n)) return "framing";
   if (/permit|survey|site|foundation|slab|demo|design|measure|layout|mitigation|damage|approval/.test(n)) return "slab";

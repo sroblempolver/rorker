@@ -2,6 +2,7 @@ import type { PlaceTag } from "@/lib/plan/tags";
 import type { Part } from "@/lib/plan/catalog";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
 import type { BuildLook, Furnish } from "@/lib/plan/build";
+import type { BuildSpec } from "@/lib/plan/buildSpec";
 
 export interface Company {
   id: string; name: string; logo_url: string | null; brand_color: string; phone: string | null;
@@ -51,7 +52,7 @@ export interface ElementEdit {
   /** an object added in the app, not in the drawing: the edit's key is its new id */
   added?: AddedObject;
   /** job-wide, under the "@job" key: which floors are furnished, and the build stages the contractor added */
-  furnish?: Furnish; stage_looks?: Record<string, BuildLook>;
+  furnish?: Furnish; stage_looks?: Record<string, BuildLook>; build?: BuildSpec;
   /** Build mode. A door or window: its bottom above the floor, and how far it slid along its wall (mm) */
   sill_mm?: number; slide?: number;
   /** a wall moved straight across: the side of a room it is (which way it faces, a point on it as
@@ -146,6 +147,37 @@ export interface JobMessage {
   /** rooms and objects tagged in the words ("@Bedroom 1 › Bed"); a tap shows them on the map */
   places?: PlaceTag[];
 }
+/** The team board: the office writes to everyone or to picked people, and each crew member answers the
+ *  office. A member sees what's to everyone, what's to them, and their own answers. */
+export interface TeamMessage {
+  id: string; from: "office" | "crew"; author_name: string;
+  /** the crew member who wrote it (an answer); null from the office */
+  member_id: string | null;
+  /** who it's for: everyone (null) or these members; an answer goes to the office */
+  to: string[] | null;
+  body: string | null;
+  /** stored file paths when saved; addresses to show when handed to a page */
+  photos: string[]; created_at: string;
+}
+/** Who put a photo on the job: someone signed in to the company, crew from their link, or the client. */
+export interface PhotoBy { kind: "team" | "crew" | "client"; name: string; member_id?: string | null }
+/** A photo added straight to the job's Photos (not on a pin or in a message), tagged with where it was
+ *  taken. Photos on pins and in the client thread show in Photos too, tagged from where they were posted. */
+export interface JobPhoto {
+  id: string; job_id: string;
+  /** a stored file path when saved; an address to show when handed to a page */
+  src: string;
+  by: PhotoBy; created_at: string;
+  room_id: string | null;
+  /** a thing in the room (a window, the sink), when it was picked */
+  element_id: string | null;
+  floor_id: string | null;
+  stage_id: string | null;
+  caption: string | null;
+  /** the job's client sees it on their page */
+  client: boolean;
+}
+export type JobPhotoInput = Pick<JobPhoto, "room_id" | "element_id" | "floor_id" | "stage_id" | "caption" | "client">;
 export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole; crew?: CrewKind }
 
 /** A no-sign-in link for a team member or a one-time sub. It shows the plan and only the pins that are
@@ -157,7 +189,11 @@ export interface ShareLink {
   expires_at: string | null; revoked_at: string | null; created_at: string;
   /** who it's for: crew (the default) or the job's client (their progress and money page) */
   audience?: "crew" | "client";
+  /** shown only: the people who saved this link to their own account (never saved with the link) */
+  saved_by?: string[];
 }
+/** Someone who saved a link to their own Rorker account, so it's in their "Shared with you". */
+export interface ShareAccess { id: string; share_id: string; user_id: string; email: string | null; name: string | null; saved_at: string }
 export interface ShareLinkInput { label: string; member_id?: string | null; pin_ids?: string[]; expires_at?: string | null }
 /** What a shared link shows. Built by shareView(), never straight from the database. */
 export interface SharedView {

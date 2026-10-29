@@ -7,7 +7,9 @@
 // A person's own link covers every job they have tasks on, with a row of jobs to
 // switch between, and a link copied from one task opens on that task.
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import type { Member, SharedMaterial, SharedView, SharedWork } from "@/lib/data/types";
+import { TeamInbox, type TeamInboxApi } from "@/components/team/TeamBoard";
+import type { JobPhotoInput, Member, SharedMaterial, SharedView, SharedWork } from "@/lib/data/types";
+import { roomOptions } from "@/lib/photos";
 import { STATUS_COLOR, STATUS_LABEL, qtyText, type Unit } from "@/lib/materials/types";
 import type { ElementStatus } from "@/lib/plan/types";
 import { applyEdits } from "@/lib/plan/edits";
@@ -36,9 +38,13 @@ export const postPhoto = (token: string): SendPhoto => async (pinId, file) => {
 /** Everything a link opens: one job, or the person's jobs with a row to switch between them. */
 /** Mark one of their own tasks done. */
 export type MarkDone = (pinId: string) => Promise<void>;
+/** Add a photo to the job's Photos (not onto a task), tagged with a room. */
+export type SendJobPhoto = (jobId: string, file: File, input: Partial<JobPhotoInput>) => Promise<void>;
 
-export function SharedWorkView({ work, pin, token, send: sendProp, done, onBack }: { work: SharedWork; /** open on this task (from a link copied off it) */ pin?: string | null;
-  /** the link's token, for sending photos; or `send` to handle them another way (the preview) */ token?: string; send?: SendPhoto; done?: MarkDone; onBack?: () => void }) {
+export function SharedWorkView({ work, pin, token, send: sendProp, done, addPhoto, onBack, inbox }: { work: SharedWork; /** open on this task (from a link copied off it) */ pin?: string | null;
+  /** the link's token, for sending photos; or `send` to handle them another way (the preview) */ token?: string; send?: SendPhoto; done?: MarkDone; addPhoto?: SendJobPhoto; onBack?: () => void;
+  /** the team board, on a person's own link: messages from the office, and their answers */
+  inbox?: TeamInboxApi }) {
   const send = sendProp ?? (token ? postPhoto(token) : undefined);
   const start = work.jobs.find((v) => v.pins.some((p) => p.id === pin)) ?? work.jobs[0];
   const [jobId, setJobId] = useState(start?.job.id ?? null);
@@ -63,10 +69,12 @@ export function SharedWorkView({ work, pin, token, send: sendProp, done, onBack 
       ))}
     </nav>
   ) : null;
-  return <SharedJob key={view.job.id} view={view} pin={view.job.id === start?.job.id ? pin : null} switcher={switcher} send={send} done={done} onBack={onBack} />;
+  return <SharedJob key={view.job.id} view={view} pin={view.job.id === start?.job.id ? pin : null} switcher={switcher} send={send} done={done} addPhoto={addPhoto && ((f, input) => addPhoto(view.job.id, f, input))} onBack={onBack} inbox={inbox} />;
 }
 
-export function SharedJob({ view: given, pin: firstPin, switcher, send, done: markDone, onBack }: { view: SharedView; pin?: string | null; switcher?: ReactNode; send?: SendPhoto; done?: MarkDone; /** the preview's way back to the full app */ onBack?: () => void }) {
+export function SharedJob({ view: given, pin: firstPin, switcher, send, done: markDone, addPhoto, onBack, inbox }: { view: SharedView; pin?: string | null; switcher?: ReactNode; send?: SendPhoto; done?: MarkDone;
+  /** add a photo to the job's Photos */ addPhoto?: (f: File, input: Partial<JobPhotoInput>) => Promise<void>; /** the preview's way back to the full app */ onBack?: () => void; inbox?: TeamInboxApi }) {
+  const [side, setSide] = useState<"work" | "messages">("work");
   const [photos, setPhotos] = useState(given.photos);
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
   const [closing, setClosing] = useState(false);
@@ -125,6 +133,19 @@ export function SharedJob({ view: given, pin: firstPin, switcher, send, done: ma
             ) : <div className="h-full grid place-items-center text-muted p-6 text-center">The plan for this job isn&apos;t ready yet.</div>}
           </div>
           <aside className="lg:w-[380px] shrink-0 flex flex-col min-h-0 bg-panel">
+            {inbox && (
+              <div className="shrink-0 flex border-b border-line" role="tablist" aria-label="Your link">
+                {(["work", "messages"] as const).map((k) => (
+                  <button key={k} role="tab" aria-selected={side === k} onClick={() => setSide(k)}
+                    className={`flex-1 h-11 text-[13px] font-display font-bold tracking-[0.08em] uppercase border-b-2 ${side === k ? "border-accent text-text" : "border-transparent text-muted hover:text-text"}`}>
+                    {k === "work" ? "Your tasks" : "Messages"}
+                  </button>
+                ))}
+              </div>
+            )}
+            {inbox && side === "messages" ? (
+              <div className="flex-1 min-h-[420px] lg:min-h-0 p-3"><TeamInbox api={inbox} company={view.company.name} /></div>
+            ) : (
             <div className="flex-1 min-h-0 overflow-y-auto scroll-thin p-4 space-y-3">
               {pin ? (
                 <div className="space-y-3">
@@ -175,6 +196,7 @@ export function SharedJob({ view: given, pin: firstPin, switcher, send, done: ma
                     <p className="text-[13px] text-muted">{open.length ? `${open.length} open` : "Nothing open right now"}{stage ? ` · job stage: ${stage}` : ""}. Tap one to see where it is.</p>
                   </div>
                   <div className="space-y-1.5">{open.map((p) => <PinRow key={p.id} pin={p} plan={plan} onClick={() => show(p.id)} />)}</div>
+                  {addPhoto && <JobPhotoButton plan={plan} at={level.kind === "room" || level.kind === "wall" ? level.roomId : null} send={addPhoto} />}
                   {mats.length > 0 && <Materials title="Materials for your work" list={mats} showTask />}
                   {crewPins.length > 0 && (
                     <>
@@ -194,11 +216,53 @@ export function SharedJob({ view: given, pin: firstPin, switcher, send, done: ma
                 </>
               )}
             </div>
+            )}
             <p className="shrink-0 border-t border-line px-4 py-2 text-[11.5px] text-muted">Shared by {view.company.name} with Rorker. This link shows only what&apos;s yours{view.expires_at ? ` and works until ${view.expires_at.slice(0, 10)}` : ""}.</p>
           </aside>
         </div>
       </div>
     </TeamContext.Provider>
+  );
+}
+
+/** A photo for the job's Photos, not for one task: a room to tag it with (the one they're looking at on
+ *  the map, when they're in one) and a note. It goes to the contractor's team. */
+function JobPhotoButton({ plan, at, send }: { plan: SharedView["plan"]; at: string | null; send: (f: File, input: Partial<JobPhotoInput>) => Promise<void> }) {
+  const rooms = useMemo(() => roomOptions(plan), [plan]);
+  const ref = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [room, setRoom] = useState("");
+  const [caption, setCaption] = useState("");
+  const [state, setState] = useState<"idle" | "busy" | "sent">("idle");
+  const [err, setErr] = useState<string | null>(null);
+  const pick = (f: File | undefined) => { if (!f) return; setFile(f); setRoom(at ?? ""); setErr(null); setState("idle"); };
+  const go = async () => {
+    if (!file) return;
+    setState("busy"); setErr(null);
+    try { await send(file, { room_id: room || null, caption: caption.trim() || null }); setFile(null); setCaption(""); setState("sent"); }
+    catch (x) { setErr(x instanceof Error ? x.message : "Couldn't send the photo."); setState("idle"); }
+  };
+  return (
+    <div className="space-y-2">
+      <input ref={ref} type="file" accept="image/*" capture="environment" className="hidden" aria-label="Job photo" onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ""; }} />
+      {file ? (
+        <div className="card !rounded-[3px] p-2.5 space-y-2">
+          <p className="eyebrow !text-[11px]">Photo for the job</p>
+          <select className="input" aria-label="Room" value={room} onChange={(e) => setRoom(e.target.value)}>
+            <option value="">Which room? (optional)</option>
+            {rooms.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+          </select>
+          <input className="input" placeholder="A note (optional)" value={caption} onChange={(e) => setCaption(e.target.value)} />
+          <div className="flex gap-2">
+            <button className="btn btn-primary btn-sm flex-1" disabled={state === "busy"} onClick={() => void go()}>{state === "busy" ? "Sending…" : "Send photo"}</button>
+            <button className="btn btn-sm" disabled={state === "busy"} onClick={() => setFile(null)}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <button className="btn btn-sm w-full" onClick={() => ref.current?.click()}>{state === "sent" ? "Sent to the job's photos. Add another" : "+ Add a photo of the job"}</button>
+      )}
+      {err && <p className="text-red text-[13px]">{err}</p>}
+    </div>
   );
 }
 

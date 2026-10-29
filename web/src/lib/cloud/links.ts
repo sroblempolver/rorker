@@ -2,9 +2,10 @@
 // (with the service key) so crew and clients never read the tables themselves.
 import type { Billing, Brand, DocJob } from "@/lib/billing/types";
 import { forClient } from "@/lib/billing/clientGuard";
-import { clientMemberId, type ClientNoteInput, type Company, type JobMessage, type Pin, type ShareLink, type SharedView, type SharedWork, type StageStatus } from "@/lib/data/types";
+import { clientMemberId, type ClientNoteInput, type Company, type JobPhoto, type JobPhotoInput, type PhotoBy, type JobMessage, type Pin, type ShareLink, type SharedView, type SharedWork, type StageStatus } from "@/lib/data/types";
 import { linkLive, linkPins, shareView, shareWork } from "@/lib/share";
 import type { SavedAccount, Settings } from "./records";
+import { cleanPhotoInput, gatherPhotos, type PhotoItem } from "@/lib/photos";
 
 /** What a client's link shows: their job's progress, the 3D/2D plan with what's tagged to them (things to
  *  look at) and its photos, their shopping list, their own notes, their thread with the contractor, and
@@ -23,6 +24,9 @@ export interface ClientView {
   notes: Pin[];
   /** the contractor lets them add notes the contractor sees */
   can_add: boolean;
+  /** the job's photos they may see (theirs, the ones the contractor shared, the ones on their pins and
+   *  in their thread), newest first; src is an address to show */
+  photos?: PhotoItem[];
 }
 
 export function companyOf(accountId: string, name: string, s: Settings | null): Company {
@@ -51,8 +55,23 @@ export function clientPinIds(l: ShareLink, a: SavedAccount): Set<string> {
   return new Set(d ? d.pins.filter((p) => p.tagged.includes(clientMemberId(d.job.id))).map((p) => p.id) : []);
 }
 
-/** photos: addresses by pin id, for the client's pins; messages: the job's thread with addresses */
-export function clientView(l: ShareLink, company: Company, a: SavedAccount, photos: Record<string, string[]> = {}, messages: JobMessage[] = []): ClientView | null {
+/** The job's photos a client's link shows, with stored file paths (the caller turns them into addresses):
+ *  photos the client added or the contractor shared with them, photos on pins tagged to them, and the
+ *  photos in their thread. Never crew photos the contractor kept to the team. */
+export function clientPhotos(l: ShareLink, a: SavedAccount): PhotoItem[] {
+  const d = linkLive(l) && l.audience === "client" ? a.jobs.find((x) => x.job.id === l.job_id) : undefined;
+  if (!d) return [];
+  const pins = new Set(d.pins.map((p) => p.id));
+  return gatherPhotos({ plan: d.plan?.data ?? null, pins: d.pins, comments: a.comments.filter((c) => pins.has(c.pin_id)), messages: a.messages.filter((m) => m.job_id === d.job.id),
+    uploads: (a.photos ?? []).filter((p) => p.job_id === d.job.id), clientId: clientMemberId(d.job.id) })
+    .filter((p) => p.client)
+    // the crew's names stay off the client's page
+    .map((p) => (p.by.kind === "crew" ? { ...p, by: { kind: "crew", name: "Crew" } } : p));
+}
+
+/** photos: addresses by pin id, for the client's pins; messages: the job's thread with addresses;
+ *  jobPhotos: the job's photos they may see, with addresses */
+export function clientView(l: ShareLink, company: Company, a: SavedAccount, photos: Record<string, string[]> = {}, messages: JobMessage[] = [], jobPhotos?: PhotoItem[]): ClientView | null {
   if (!linkLive(l) || l.audience !== "client") return null;
   const d = a.jobs.find((x) => x.job.id === l.job_id);
   if (!d) return null;
@@ -76,6 +95,7 @@ export function clientView(l: ShareLink, company: Company, a: SavedAccount, phot
     messages,
     notes: a.notes.filter((n) => n.job_id === d.job.id),
     can_add: !!d.job.client_can_add,
+    ...(jobPhotos ? { photos: jobPhotos } : {}),
   };
 }
 
@@ -105,4 +125,23 @@ export function clientNote(l: ShareLink, a: SavedAccount, n: ClientNoteInput, id
     x: num(n.x), y: num(n.y), anchor, kind: "note", title, body: str(n.body, 2000), status: "open", priority: 1, due_date: null,
     tagged: [clientMemberId(d.job.id)], close_requirement: "confirm", stage_id: null, links: [], created_by: "client", created_at: at, closed_at: null,
   };
+}
+
+/** The jobs a link may add photos to: a client's own job; for crew, the job on the link, or (a person's
+ *  own link) every job they have tasks on. */
+export function photoJobIds(l: ShareLink, a: SavedAccount): Set<string> {
+  if (!linkLive(l)) return new Set();
+  if (l.audience === "client") return new Set(l.job_id ? [l.job_id] : []);
+  return new Set(a.jobs.filter((d) => (l.job_id ? d.job.id === l.job_id : linkPins(l, d.pins).length > 0)).map((d) => d.job.id));
+}
+
+/** A photo sent from a link into a job's Photos, with its tags checked; null when the link can't add to
+ *  that job. A client's photos are on their page; crew photos stay with the team until the contractor
+ *  shares them. */
+export function linkPhoto(l: ShareLink, a: SavedAccount, jobId: string, input: Partial<JobPhotoInput> | null | undefined, id: string, path: string, at: string): JobPhoto | null {
+  const d = a.jobs.find((x) => x.job.id === jobId);
+  if (!d || !photoJobIds(l, a).has(jobId)) return null;
+  const client = l.audience === "client";
+  const by: PhotoBy = client ? { kind: "client", name: d.job.client_name || "Client" } : { kind: "crew", name: l.label, member_id: l.member_id };
+  return { id, job_id: jobId, src: path, by, created_at: at, ...cleanPhotoInput(d.plan?.data ?? null, d.stages, input), client };
 }
