@@ -2,10 +2,10 @@
 // supabase/build/). The page turns its jobs into rows to save them and back into jobs when it loads;
 // the `build` edge function reads the same rows to open crew and client links.
 import type { Billing, Brand } from "@/lib/billing/types";
-import type { ElementEdit, ElementState, Job, JobItem, JobMessage, JobStage, Member, Pin, PinComment, PlanRow, PlanRun, ShareLink } from "@/lib/data/types";
+import type { ElementEdit, ElementState, Job, JobItem, JobMessage, JobStage, Member, Pin, PinComment, PlanRow, PlanRun, ShareLink, ShareAccess, TeamMessage } from "@/lib/data/types";
 import type { MaterialLine } from "@/lib/materials/types";
 
-export type RecordKind = "job" | "plan" | "stage" | "pin" | "item" | "edits" | "states" | "run" | "billing" | "material" | "member" | "share" | "comment" | "message" | "note" | "settings";
+export type RecordKind = "job" | "plan" | "stage" | "pin" | "item" | "edits" | "states" | "run" | "billing" | "material" | "member" | "share" | "comment" | "message" | "note" | "team" | "access" | "settings";
 export interface Rec { kind: RecordKind; id: string; job_id: string | null; data: unknown }
 
 /** One job as the page holds it (the parts that are saved). */
@@ -23,11 +23,15 @@ export interface SavedAccount {
   messages: JobMessage[];
   /** the clients' private notes on their map; only their own link shows them */
   notes: Pin[];
+  /** the team board (office to crew, crew answers); photos are stored file paths */
+  team: TeamMessage[];
+  /** who saved which link to their own account (the server writes these) */
+  access: ShareAccess[];
 }
 /** Kinds saved one by one as they're posted (from the page or a link), never by the page's saver. */
-export const POSTED: RecordKind[] = ["comment", "message", "note"];
+export const POSTED: RecordKind[] = ["comment", "message", "note", "team", "access"];
 /** What the page's saver writes. */
-export type PageSaved = Omit<SavedAccount, "comments" | "messages" | "notes">;
+export type PageSaved = Omit<SavedAccount, "comments" | "messages" | "notes" | "team" | "access">;
 
 /** Rows for everything but what's posted one by one (comments, messages, clients' notes). */
 export function toRecords(a: PageSaved): Rec[] {
@@ -84,6 +88,8 @@ export function fromRecords(rows: Rec[]): SavedAccount {
     members, comments,
     notes: of("note").map((r) => r.data as Pin),
     messages: of("message").map((r) => r.data as JobMessage).sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    team: of("team").map((r) => r.data as TeamMessage).sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    access: of("access").map((r) => r.data as ShareAccess),
     materials: of("material").map((r) => r.data as MaterialLine),
     shares: of("share").map((r) => r.data as ShareLink).sort((a, b) => b.created_at.localeCompare(a.created_at)),
     settings: (of("settings")[0]?.data as Settings | undefined) ?? null,

@@ -147,6 +147,18 @@ export interface JobMessage {
   /** rooms and objects tagged in the words ("@Bedroom 1 › Bed"); a tap shows them on the map */
   places?: PlaceTag[];
 }
+/** The team board: the office writes to everyone or to picked people, and each crew member answers the
+ *  office. A member sees what's to everyone, what's to them, and their own answers. */
+export interface TeamMessage {
+  id: string; from: "office" | "crew"; author_name: string;
+  /** the crew member who wrote it (an answer); null from the office */
+  member_id: string | null;
+  /** who it's for: everyone (null) or these members; an answer goes to the office */
+  to: string[] | null;
+  body: string | null;
+  /** stored file paths when saved; addresses to show when handed to a page */
+  photos: string[]; created_at: string;
+}
 export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole; crew?: CrewKind }
 
 /** A no-sign-in link for a team member or a one-time sub. It shows the plan and only the pins that are
@@ -158,7 +170,11 @@ export interface ShareLink {
   expires_at: string | null; revoked_at: string | null; created_at: string;
   /** who it's for: crew (the default) or the job's client (their progress and money page) */
   audience?: "crew" | "client";
+  /** shown only: the people who saved this link to their own account (never saved with the link) */
+  saved_by?: string[];
 }
+/** Someone who saved a link to their own Rorker account, so it's in their "Shared with you". */
+export interface ShareAccess { id: string; share_id: string; user_id: string; email: string | null; name: string | null; saved_at: string }
 export interface ShareLinkInput { label: string; member_id?: string | null; pin_ids?: string[]; expires_at?: string | null }
 /** What a shared link shows. Built by shareView(), never straight from the database. */
 export interface SharedView {

@@ -3,7 +3,7 @@
 // (one row per thing, see supabase/build/) a moment later. Crew and client links go through the `build`
 // edge function, which shows them only what their link may see.
 import { createClient, type Session } from "@supabase/supabase-js";
-import type { JobMessage, PinComment } from "@/lib/data/types";
+import type { JobMessage, PinComment, TeamMessage } from "@/lib/data/types";
 import type { PlaceTag } from "@/lib/plan/places";
 import { fromRecords, POSTED, recKey, toRecords, type PageSaved, type Rec, type SavedAccount } from "@/lib/cloud/records";
 
@@ -17,12 +17,24 @@ export const sb = createClient(URL_, KEY, { auth: { persistSession: true, storag
 export async function call<T>(action: string, body: Record<string, unknown> = {}): Promise<T> {
   let r: Response;
   try {
-    r = await fetch(`${URL_}/functions/v1/build`, { method: "POST", headers: { "content-type": "application/json", apikey: KEY }, body: JSON.stringify({ action, ...body }) });
+    // signed in (on this site's accounts page): the function knows who, to keep links in their account
+    const { data } = await sb.auth.getSession();
+    const auth: Record<string, string> = data.session ? { authorization: `Bearer ${data.session.access_token}` } : {};
+    r = await fetch(`${URL_}/functions/v1/build`, { method: "POST", headers: { "content-type": "application/json", apikey: KEY, ...auth }, body: JSON.stringify({ action, ...body }) });
   } catch { throw new Error("Can't reach Rorker. Check your connection and try again."); }
   const j = await r.json().catch(() => null);
   if (!r.ok) throw new Error(j?.error ?? "Something went wrong. Try again.");
   return j as T;
 }
+
+/** A link someone saved to their account, as their "Shared with you" list shows it. */
+export interface SharedItem {
+  id: string; token: string; kind: "s" | "c"; label: string; company: string;
+  job: { name: string; address: string | null } | null; live: boolean; saved_at: string;
+}
+export const sharedWithMe = async () => (await call<{ shared: SharedItem[] }>("shared")).shared;
+export const saveLink = (token: string) => call<{ id: string }>("save", { token });
+export const unsaveLink = (id: string) => call("unsave", { id });
 
 export async function signUp(input: { email: string; password: string; name: string; company: string }) {
   await call("signup", input);
@@ -213,5 +225,22 @@ export async function addMessage(accountId: string, jobId: string, author: strin
   const photos = file ? [await upload(accountId, jobId, "messages", file)] : [];
   const m: JobMessage = { id: shortId(), job_id: jobId, from: "contractor", author_name: author, body: body || null, photos, created_at: new Date().toISOString(), ...(places.length ? { places } : {}) };
   const { error } = await sb.from("records").insert({ account_id: accountId, kind: "message", id: m.id, job_id: jobId, data: m });
+  if (error) throw new Error("Couldn't send that. Check your connection and try again.");
+}
+
+/** The team board, fresh from the database (crew answer from their links). */
+export async function listTeam(accountId: string): Promise<TeamMessage[]> {
+  const { data, error } = await sb.from("records").select("data").eq("account_id", accountId).eq("kind", "team");
+  if (error) throw new Error("Couldn't load the messages.");
+  const list = (data ?? []).map((r) => r.data as TeamMessage).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const urls = await fileUrls(list.flatMap((m) => m.photos));
+  return list.map((m) => ({ ...m, photos: m.photos.map((p) => urls.get(p) ?? p) }));
+}
+
+/** The office writes to everyone (to = null) or to picked people. */
+export async function addTeamMessage(accountId: string, author: string, to: string[] | null, body: string, file: File | null) {
+  const photos = file ? [await upload(accountId, "team", "messages", file)] : [];
+  const m: TeamMessage = { id: shortId(), from: "office", author_name: author, member_id: null, to, body: body || null, photos, created_at: new Date().toISOString() };
+  const { error } = await sb.from("records").insert({ account_id: accountId, kind: "team", id: m.id, job_id: null, data: m });
   if (error) throw new Error("Couldn't send that. Check your connection and try again.");
 }
