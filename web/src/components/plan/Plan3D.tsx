@@ -19,7 +19,7 @@ import { HIDDEN_KINDS, TOP_FILL, isWallMounted } from "./fixtures";
 import { ITEM_SIZE } from "./items";
 import { fixtureObject, Materials, SHARED_GEOMETRY } from "./models3d";
 import { buildRoofs, buildSite, buildZone, garagePanels, openingTrim, sidingMaterial, trimMaterial, type Fade } from "./exterior3d";
-import { planExterior } from "@/lib/plan/exterior";
+import { outward, planExterior } from "@/lib/plan/exterior";
 import { FINISH, FRAMING, openingSpan, RULES } from "@/lib/plan/rules";
 import { runOf, studsAlong, type BuildLook } from "@/lib/plan/build";
 import { getMarks, markFade, useMarks } from "@/lib/plan/marks";
@@ -34,6 +34,8 @@ export type WallMode = "full" | "low" | "none";
 interface Props {
   plan: Plan;
   mode: "building" | "floor";
+  /** the floors picked to show, by id; null shows them all (and a floor you're in lifts off the ones above) */
+  only?: string[] | null;
   floor: Floor | null;
   room: Room | null;
   selected: string | null;
@@ -178,6 +180,12 @@ interface Built {
   pinLabels: THREE.Sprite[];
   /** where the grade is, metres: below the foundation in the whole building, under the slab otherwise */
   groundY: number;
+  /** the size of the whole house, metres: the outside and a floor share it, so one zoom runs through both */
+  outerR: number;
+  /** the side the entrance faces, as a camera heading: the front door is always toward you (the house's south) */
+  frontAz: number;
+  /** which storeys are on show, 1 or 0 by level: the ones picked, or in a floor the ones up to it */
+  on: number[];
 }
 
 /** Framing members as one instanced mesh: each a box placed along its run, in slightly varied wood. */
@@ -211,7 +219,12 @@ function buildScene(p: Props, mt: Materials): Built {
   const fades: Fade[] = [];
   const floorsAll = [...p.plan.floors].sort((a, b) => a.level - b.level);
   // on the bare slab there's nothing above the ground floor yet
-  const shown = p.mode === "building" ? (p.look === "slab" ? floorsAll.slice(0, 1) : floorsAll) : p.floor ? [p.floor] : [];
+  const standing = p.look === "slab" ? floorsAll.slice(0, 1) : floorsAll;
+  // a floor is the same house with the storeys above lifted off (they fade out), so zooming in and out
+  // never swaps one model for another; only a room's own top view stands alone
+  const cur = p.mode === "floor" && p.floor ? floorsAll.indexOf(p.floor) : -1;
+  const whole = p.mode === "building" || (cur >= 0 && !p.room);
+  const shown = whole ? standing : p.floor ? [p.floor] : [];
   const prog = p.colorMode === "progress";
   const statusTint = (id: string, fallback: string) => (prog ? (p.states.get(id) ? STATUS_COLOR[p.states.get(id)!] : "#5d5a53") : fallback);
   const floorsMeta: Built["floors"] = [];
@@ -227,13 +240,18 @@ function buildScene(p: Props, mt: Materials): Built {
   // trim, porches and the dressed outside once it's finished; the roof is on from sheetrock
   const dressed = skin && p.wallMode === "full";
   const roofed = outside && p.wallMode === "full" && (dressed || look === "drywall");
-  const pick = (o: THREE.Object3D, data: Pick) => { o.userData.pick = data; picks.push(o); byId.set(data.id, o); };
+  const pickAny = (o: THREE.Object3D, data: Pick) => { o.userData.pick = data; picks.push(o); byId.set(data.id, o); };
+  const pick = pickAny;
 
   const roomBox = p.room ? p.room.polygon.reduce((a, q) => [Math.min(a[0], q[0] - 300), Math.min(a[1], q[1] - 300), Math.max(a[2], q[0] + 300), Math.max(a[3], q[1] + 300)], [Infinity, Infinity, -Infinity, -Infinity]) : [0, 0, 0, 0];
   // a room seen from above in the 2D plan's colours: each object in its top-view colour
   const roomTint = new Map<string, Materials>();
   shown.forEach((fl) => {
     const fi = floorsAll.indexOf(fl);
+    // the storey you're in: its plan shows (room names, floor finishes, open doors) and only it answers clicks
+    const here = p.mode === "building" || fl === p.floor;
+    const inside = p.mode === "floor" && fl === p.floor;
+    const pick = here ? pickAny : () => undefined;
     // a floor sits at its real height in both views, so an upper floor never looks like the ground floor
     const base = fl.elevation_mm || fi * (p.plan.building.exterior.storey_height_mm || RULES.storey);
     const H = fl.height_mm || RULES.ceiling;
@@ -251,8 +269,8 @@ function buildScene(p: Props, mt: Materials): Built {
       fades.push({ mats, centre, floorIndex: fi, role: "thing" });
     };
 
-    // an upper floor on its own stands on the floors below it, drawn as plain blocks
-    if (p.mode === "floor") {
+    // a room's top view stands on the floors below it, drawn as plain blocks
+    if (p.mode === "floor" && !whole) {
       const below = floorsAll.slice(0, fi);
       below.forEach((lf, li) => {
         const lb = lf.elevation_mm || li * (p.plan.building.exterior.storey_height_mm || RULES.storey);
@@ -283,7 +301,7 @@ function buildScene(p: Props, mt: Materials): Built {
     // room floors in their material
     for (const r of fl.rooms) {
       const mat = ROOM_MATERIAL[r.type] ?? "concrete";
-      const patterned = p.mode === "floor" && !prog && finished;
+      const patterned = inside && !prog && finished;
       // before the finishes go down: the bare slab on the ground, plywood subfloor upstairs
       const bare = fi === 0 ? MATERIAL_BASE.concrete : SUBFLOOR;
       const m = new THREE.MeshStandardMaterial({ color: patterned ? "#ffffff" : statusTint(r.id, finished ? MATERIAL_BASE[mat] : bare), map: patterned ? floorTexture(mat) : null, roughness: 0.85, transparent: true });
@@ -294,7 +312,7 @@ function buildScene(p: Props, mt: Materials): Built {
       pick(mesh, { type: "room", id: r.id, floorId: fl.id });
       const lp = labelPoint(r.polygon);
       fades.push({ mats: [m], centre: new THREE.Vector3(lp[0] * S, base * S, lp[1] * S), floorIndex: fi, role: "slab" });
-      if (p.mode === "floor" && !p.room) {
+      if (inside && !p.room) {
         const sp = label(r.name.toUpperCase(), { color: "#f4efe6", size: 0.022 });
         sp.position.set(lp[0] * S, 0.05, lp[1] * S);
         sp.material.opacity = 0.85;
@@ -398,7 +416,7 @@ function buildScene(p: Props, mt: Materials): Built {
         const nx = -dy / L, ny = dx / L, t = 20;
         const leaf: Pt[] = [[o.a[0] + nx * t, o.a[1] + ny * t], [o.b[0] + nx * t, o.b[1] + ny * t], [o.b[0] - nx * t, o.b[1] - ny * t], [o.a[0] - nx * t, o.a[1] - ny * t]];
         // inside a floor the doors between rooms stay open; the outside doors are drawn shut
-        if (p.mode === "building" || o.kind === "garage_door" || face) og.add(new THREE.Mesh(extrude(leaf, 0, Math.min(top, wallH)), dm));
+        if (!inside || o.kind === "garage_door" || face) og.add(new THREE.Mesh(extrude(leaf, 0, Math.min(top, wallH)), dm));
         fades.push({ mats: [dm], centre: new THREE.Vector3(((o.a[0] + o.b[0]) / 2) * S, (base + 1000) * S, ((o.a[1] + o.b[1]) / 2) * S), floorIndex: fi, role: "wall" });
       }
       g.add(og);
@@ -414,7 +432,8 @@ function buildScene(p: Props, mt: Materials): Built {
       const n = Math.max(6, Math.round(H / 185));
       const alongX = b[2] - b[0] > b[3] - b[1];
       const L = alongX ? b[2] - b[0] : b[3] - b[1];
-      const m = mt.get("#8a6a48");
+      const m = whole ? new THREE.MeshStandardMaterial({ color: "#8a6a48", roughness: 0.8, transparent: true }) : mt.get("#8a6a48");
+      if (whole) fades.push({ mats: [m], centre: new THREE.Vector3(((b[0] + b[2]) / 2) * S, base * S, ((b[1] + b[3]) / 2) * S), floorIndex: fi, role: "thing" });
       for (let i = 0; i < n; i++) {
         const step = new THREE.Mesh(new THREE.BoxGeometry(alongX ? (L / n) * S : (b[2] - b[0]) * S, ((i + 1) * H / n) * S, alongX ? (b[3] - b[1]) * S : (L / n) * S), m);
         step.castShadow = step.receiveShadow = true;
@@ -426,11 +445,11 @@ function buildScene(p: Props, mt: Materials): Built {
       pick(sg, { type: "stair", id: st.id, floorId: fl.id });
     }
 
-    if (frame.length) g.add(framingMesh(frame));
+    if (frame.length) { const fr = framingMesh(frame); (fr.material as THREE.Material).transparent = true; g.add(fr); fades.push({ mats: [fr.material as THREE.Material], centre: new THREE.Vector3(0, base * S, 0), floorIndex: fi, role: "thing" }); }
 
     // fixtures at real size
     // each storey gets its own materials in the building, so the floors above can fade on their own
-    const fm = prog ? null : p.mode === "building" ? new Materials() : mt;
+    const fm = prog ? null : whole ? new Materials() : mt;
     if (fm && fm !== mt) g.userData.ownMaterials = fm;
     // a room's own view shows just that room's things
     for (const f of p.empty ? [] : p.room ? fl.fixtures.filter((x) => x.room_id ? x.room_id === p.room!.id : pointInPoly(x.center, p.room!.polygon)) : fl.fixtures) {
@@ -456,7 +475,7 @@ function buildScene(p: Props, mt: Materials): Built {
     // things on the walls: outlets, switches, lights
     const sides = new Map<string, WallSide>();
     for (const r of fl.rooms) for (const s of roomSides(fl, r)) sides.set(s.key, s);
-    for (const it of p.empty || !finished ? [] : p.items) {
+    for (const it of p.empty || !finished || !here ? [] : p.items) {
       const side = sides.get(it.side);
       if (!side) continue;
       const [w, h] = ITEM_SIZE[it.kind];
@@ -472,7 +491,7 @@ function buildScene(p: Props, mt: Materials): Built {
     }
 
     // pins as flags
-    for (const pin of p.pins) {
+    for (const pin of here ? p.pins : []) {
       const at = pinPosition(p.plan, fl, sides, pin);
       if (!at) continue;
       const flag = pinFlag(String(pin.number), PIN_COLOR[pin.kind], pin.status === "done", pin.id === p.selectedPin);
@@ -482,7 +501,7 @@ function buildScene(p: Props, mt: Materials): Built {
       pick(flag, { type: "pin", id: pin.id, floorId: fl.id });
       thing(flag, new THREE.Vector3(at.x, base * S, at.z));
     }
-    if (p.draft && (p.draft.floorId === fl.id || (p.draft.anchor?.view === "wall" && sides.has(p.draft.anchor.side ?? "")))) {
+    if (here && p.draft && (p.draft.floorId === fl.id || (p.draft.anchor?.view === "wall" && sides.has(p.draft.anchor.side ?? "")))) {
       const fake = { id: "draft", anchor: p.draft.anchor, element_id: p.draft.elementId, floor_id: p.draft.floorId, x: p.draft.x, y: p.draft.y } as unknown as Pin;
       const at = pinPosition(p.plan, fl, sides, fake);
       if (at) { const d = pinFlag("+", "#ff6a1f", false, true); d.position.set(at.x, at.y, at.z); g.add(d); }
@@ -497,29 +516,31 @@ function buildScene(p: Props, mt: Materials): Built {
       const flag = pin ? pinFlag(String(pin.number), PIN_COLOR[pin.kind], pin.status === "done", pin.id === p.selectedPin) : pinFlag("+", "#ff6a1f", false, true);
       flag.position.set(a.x * S, (a.z ?? 0) * S, a.y * S);
       root.add(flag);
+      // a pin on the roof or an outside wall goes with the top storey when the floors are picked
+      fades.push({ mats: allMats(flag), centre: new THREE.Vector3(a.x * S, 0, a.y * S), floorIndex: floorsAll.length - 1, role: "thing" });
       if (pin) pick(flag, { type: "pin", id: pin.id, floorId: pin.floor_id ?? floorsAll[0].id });
     }
   }
 
   // the outside, built to the house rules: roofs with eaves and gutters, porches and balconies, the lot
-  // a floor on its own keeps the lot and the porches up to its level, so the house looks the same zoomed in
-  const top = p.mode === "floor" && p.floor ? floorsAll.indexOf(p.floor) : floorsAll.length - 1;
+  // a floor keeps the lot and the porches, so the house looks the same zoomed in; the ones above it fade out
+  const on = floorsAll.map((f, i) => (p.only ? (p.only.includes(f.id) ? 1 : 0) : cur < 0 || i <= cur ? 1 : 0));
   if (finish && floorsAll.length) {
     root.add(buildSite(ex, floorsAll[0]));
     for (const z of ex.zones) {
       const fi = floorsAll.findIndex((f) => f.id === z.floorId);
-      if (fi < 0 || fi > top || (outside && !shown.includes(floorsAll[fi]))) continue;
+      if (fi < 0 || !shown.includes(floorsAll[fi])) continue;
       const zg = new THREE.Group();
       zg.position.y = ex.base(fi) * S;
       root.add(zg);
       const c = new THREE.Vector3(((z.rect[0] + z.rect[2]) / 2) * S, ex.base(fi) * S, ((z.rect[1] + z.rect[3]) / 2) * S);
-      buildZone(z, ex, outside && dressed, (o, mats, role) => { zg.add(o); if (mats.length) fades.push({ mats, centre: c, floorIndex: fi, role }); });
+      buildZone(z, ex, outside && dressed, (o, mats, role) => { zg.add(o); fades.push({ mats: allMats(o, mats), centre: c, floorIndex: fi, role }); });
     }
     if (roofed) {
       const last = floorsAll[floorsAll.length - 1];
       buildRoofs(ex, (o, mats, centre, floorIndex, main) => {
         root.add(o);
-        fades.push({ mats, centre, floorIndex, role: "roof" });
+        fades.push({ mats: allMats(o, mats), centre, floorIndex, role: "roof" });
         o.traverse((x) => { if ((x as THREE.Mesh).isMesh) pick(x, { type: "roof", id: x === main ? "roof" : `roof-${x.id}`, floorId: last.id }); });
       });
     }
@@ -529,13 +550,35 @@ function buildScene(p: Props, mt: Materials): Built {
   let bb = p.mode === "building" ? unionBBox(floorsAll.map(floorBBox)) : p.floor ? floorBBox(p.floor) : [0, 0, 10000, 10000];
   if (p.mode === "floor" && p.room) bb = p.room.polygon.reduce((a, q) => [Math.min(a[0], q[0]), Math.min(a[1], q[1]), Math.max(a[2], q[0]), Math.max(a[3], q[1])], [Infinity, Infinity, -Infinity, -Infinity]);
   const totalH = p.mode === "building" ? floorsMeta.length ? floorsMeta[floorsMeta.length - 1].y1 : 3 : 0;
-  const centre = new THREE.Vector3(((bb[0] + bb[2]) / 2) * S, p.mode === "building" ? totalH * 0.3 : floorsMeta[0]?.y0 ?? 0, ((bb[1] + bb[3]) / 2) * S);
+  const curY = floorsMeta.find((f) => f.id === p.floor?.id)?.y0 ?? floorsMeta[0]?.y0 ?? 0;
+  const centre = new THREE.Vector3(((bb[0] + bb[2]) / 2) * S, p.mode === "building" ? totalH * 0.3 : curY, ((bb[1] + bb[3]) / 2) * S);
   const radius = Math.max(2, (Math.max(bb[2] - bb[0], bb[3] - bb[1]) / 2) * S, totalH / 2);
+  const ob = unionBBox(floorsAll.map(floorBBox));
+  const houseH = floorsAll.length ? (ex.base(floorsAll.length - 1) + ex.height(floorsAll.length - 1)) * S : 3;
+  const outerR = Math.max(2, (Math.max(ob[2] - ob[0], ob[3] - ob[1]) / 2) * S, houseH / 2);
   // the room view's colour sets are freed with the scene
   roomTint.forEach((m) => { const holder = new THREE.Object3D(); holder.userData.ownMaterials = m; root.add(holder); });
   const pinLabels: THREE.Sprite[] = [];
   root.traverse((o) => { if (o.userData.pinLabel) pinLabels.push(o as THREE.Sprite); });
-  return { root, picks, byId, fades, floors: floorsMeta, centre, radius, pinLabels, groundY: finish ? -(ex.rules.plinth + 5) * S : -0.21 };
+  return { root, picks, byId, fades, floors: floorsMeta, centre, radius, pinLabels, groundY: finish ? -(ex.rules.plinth + 5) * S : -0.21, outerR, frontAz: entranceAz(p.plan, ex), on };
+}
+
+/** Every material in an object, so all of it fades together (gutters, steps and posts included). */
+function allMats(o: THREE.Object3D, extra: THREE.Material[] = []): THREE.Material[] {
+  const out = new Set(extra);
+  o.traverse((x) => { const m = (x as THREE.Mesh).material; if (m) for (const mm of Array.isArray(m) ? m : [m]) out.add(mm); });
+  return [...out];
+}
+
+/** The camera heading that faces the main entrance: the door is the house's south, at the bottom of the view. */
+function entranceAz(plan: Plan, ex: ReturnType<typeof planExterior>): number {
+  const g = [...plan.floors].sort((a, b) => a.level - b.level)[0];
+  const door = ex.entry ?? g?.openings.filter((o) => o.exterior && ["door", "double_door"].includes(o.kind)).sort((a, b) => b.width_mm - a.width_mm)[0];
+  if (g && door) {
+    const n = outward(g, door);
+    return Math.atan2(n[0], n[1]);
+  }
+  return frontView(plan).side === "top" ? Math.PI : 0;
 }
 
 function pinPosition(plan: Plan, fl: Floor, sides: Map<string, WallSide>, pin: Pin): { x: number; y: number; z: number; side?: WallSide } | null {
@@ -600,6 +643,10 @@ export function Plan3D(p: Props) {
     built: Built | null; mt: Materials; sel: THREE.Box3Helper; focus: number; hoverFloor: string | null; sun: THREE.DirectionalLight; lockUntil: number;
     /** the assistant's blinking dots */
     dots: THREE.Group;
+    /** storeys lifting off or coming back: the top one on show before and after, and when it changed */
+    vis: { t0: number; from: number[]; to: number[] };
+    /** the zoom range the camera eases into, so a new level never snaps it */
+    want: { min: number; max: number } | null;
   } | null>(null);
 
   // one renderer for the life of the view
@@ -648,7 +695,7 @@ export function Plan3D(p: Props) {
     const mt = new Materials();
     const dots = new THREE.Group();
     scene.add(dots);
-    three.current = { renderer, scene, camera, controls, built: null, mt, sel, focus: 0, hoverFloor: null, sun, lockUntil: 0, dots };
+    three.current = { renderer, scene, camera, controls, built: null, mt, sel, focus: 0, hoverFloor: null, sun, lockUntil: 0, dots, vis: { t0: 0, from: [], to: [] }, want: null };
 
     const resize = () => {
       const w = el.clientWidth || 1, h = el.clientHeight || 1;
@@ -665,6 +712,12 @@ export function Plan3D(p: Props) {
     let raf = 0;
     const tmp = new THREE.Vector3();
     const tick = () => {
+      // ease into a new level's zoom range instead of jumping to it
+      const w = three.current?.want;
+      if (w) {
+        if (controls.maxDistance > w.max) controls.maxDistance = Math.max(w.max, controls.maxDistance * 0.94);
+        if (controls.minDistance < w.min) controls.minDistance = Math.min(w.min, controls.minDistance * 1.06 + 0.01);
+      }
       controls.update();
       cutaway();
       // pins scale with distance, within limits: the ones nearer you (higher up, further out) read bigger
@@ -713,7 +766,7 @@ export function Plan3D(p: Props) {
     const { camera, controls, built } = t;
     const target = controls.target;
     const dist = camera.position.distanceTo(target);
-    const R = built.radius;
+    const R = built.outerR;
     const dir = new THREE.Vector3(camera.position.x - target.x, 0, camera.position.z - target.z);
     const polar = controls.getPolarAngle();
     dir.normalize();
@@ -721,16 +774,21 @@ export function Plan3D(p: Props) {
     // 0 = closed up, 1 = fully open
     const open = building ? THREE.MathUtils.clamp((R * 2.7 - dist) / (R * 1.1), 0, 1) : polar < 0.3 ? 0 : THREE.MathUtils.clamp((polar - 0.3) / 0.4, 0, 1);
     const focus = t.focus;
+    // the storeys above the floor you're in lift off, and come back as you zoom out, over half a second
+    const k = THREE.MathUtils.clamp((performance.now() - t.vis.t0) / 450, 0, 1);
+    const shownAt = (fi: number) => { const a = t.vis.from[fi] ?? 1, b = t.vis.to[fi] ?? 1; return a + (b - a) * k; };
     for (const f of built.fades) {
-      let o = 1;
+      // a roof is numbered as the storey above the walls it sits on: it goes with those walls
+      let o = shownAt(f.role === "roof" ? f.floorIndex - 1 : f.floorIndex);
       const toward = (f.centre.x - target.x) * dir.x + (f.centre.z - target.z) * dir.z;
       if (building) {
         // a doll's house: the roof lifts off and the walls facing you fall away on every floor at once,
         // so all the floors show stacked; the floor under the cursor opens a little more
-        if (f.role === "roof") o = 1 - open;
-        else if (f.role === "wall" && toward > R * 0.05) o = 1 - open * (f.floorIndex === focus ? 0.95 : 0.88);
-        else if (f.role === "slab" && f.floorIndex > focus) o = 1 - open * 0.3;
-      } else if (f.role === "wall" && toward > R * 0.25) o = 1 - open * 0.85;
+        if (f.role === "roof") o *= 1 - open;
+        else if (f.role === "wall" && toward > R * 0.05) o *= 1 - open * (f.floorIndex === focus ? 0.95 : 0.88);
+        else if (f.role === "slab" && f.floorIndex > focus) o *= 1 - open * 0.3;
+        // inside a floor the walls facing you stay open the same way, so stepping in changes nothing
+      } else if (f.role === "wall" && toward > R * 0.05) o *= 1 - open * 0.95;
       for (const m of f.mats) {
         const base = (m.userData.baseOpacity as number | undefined) ?? (m.userData.baseOpacity = m.opacity);
         const v = base * o;
@@ -745,7 +803,7 @@ export function Plan3D(p: Props) {
   }
 
   // (re)build the model when the job changes
-  const key = useMemo(() => ({}), [p.plan, p.mode, p.floor, p.room, p.items, p.pins, p.states, p.colorMode, p.wallMode, p.empty, p.look, p.draft, p.selectedPin, p.selectedItem]); // eslint-disable-line react-hooks/exhaustive-deps
+  const key = useMemo(() => ({}), [p.plan, p.mode, p.floor, p.room, p.items, p.pins, p.states, p.colorMode, p.wallMode, p.empty, p.look, p.only, p.draft, p.selectedPin, p.selectedItem]); // eslint-disable-line react-hooks/exhaustive-deps
   const framed = useRef<string>("");
   useEffect(() => {
     const t = three.current;
@@ -760,7 +818,7 @@ export function Plan3D(p: Props) {
     t.scene.add(built.root);
     t.scene.getObjectByName("ground")!.position.y = built.groundY;
     // light and shadows sized to the model
-    const R = built.radius;
+    const R = built.outerR;
     t.sun.position.set(built.centre.x + R * 1.2, R * 2.4 + 8, built.centre.z + R * 0.9);
     t.sun.target.position.copy(built.centre);
     const sc = t.sun.shadow.camera;
@@ -769,10 +827,22 @@ export function Plan3D(p: Props) {
     // frame the camera when the place changes, not when a pin is added
     const where = `${cb.current.mode}|${cb.current.floor?.id ?? ""}|${cb.current.room?.id ?? ""}`;
     if (framed.current !== where) {
+      const prev = framed.current;
       framed.current = where;
-      frame(true);
-      t.focus = 0;
-    }
+      // between the outside and the floors the camera doesn't move at all: the same house, the storeys
+      // above lift off or come back. A room's top view, the first look and the fit button frame it afresh,
+      // keeping the way you were looking (the first look starts from the front door)
+      if (prev && !prev.split("|")[2] && !cb.current.room) frame(false);
+      else frame(true, !!prev);
+      // back outside, the storey you came from is the one that opens first
+      t.focus = cb.current.mode === "building" && prev ? Math.max(0, built.floors.findIndex((f) => f.id === prev.split("|")[1])) : 0;
+    } else frame(false);
+    // storeys going off or coming back fade from wherever they are now, so nothing pops
+    const now = performance.now();
+    const k = THREE.MathUtils.clamp((now - t.vis.t0) / 450, 0, 1);
+    const at = built.on.map((_, i) => { const a = t.vis.from[i] ?? 1, b = t.vis.to[i] ?? 1; return a + (b - a) * k; });
+    if (!t.vis.to.length) t.vis = { t0: now, from: built.on, to: built.on };
+    else if (built.on.some((v, i) => v !== t.vis.to[i])) t.vis = { t0: now, from: at, to: built.on };
     highlight();
     placeDots();
   }, [key]);  
@@ -810,30 +880,41 @@ export function Plan3D(p: Props) {
   }
   useEffect(placeDots, [markN]);
 
-  function frame(reset: boolean) {
+  function frame(reset: boolean, keepHeading = false) {
     const t = three.current;
     if (!t?.built) return;
     const { camera, controls, built } = t;
-    const R = built.radius;
+    const R = built.radius, O = built.outerR;
     const building = cb.current.mode === "building";
-    // in the building, zoom heads for the middle so it opens evenly; inside a floor, toward the cursor
-    controls.zoomToCursor = !building;
-    controls.minDistance = building ? R * 1.45 : cb.current.room ? 0.6 : 1.2;
-    controls.maxDistance = building ? R * 6 : cb.current.room ? Math.max(R, 2.6) * 5 : R * 3.4;
-    if (!reset) return;
+    // one zoom runs through the outside and the floors: the floor starts where the outside's zoom ends,
+    // and you're back outside a little further out than that, so it never flickers between the two
+    controls.zoomToCursor = true;
+    const min = building ? O * 1.45 : cb.current.room ? 0.6 : 1.2;
+    const max = building ? O * 6 : cb.current.room ? Math.max(R, 2.6) * 5 : O * 1.7;
+    t.want = { min, max };
+    if (!reset) {
+      // the camera stays put; if it's outside the new range it glides in (see the tick)
+      const d = camera.position.distanceTo(controls.target);
+      controls.minDistance = Math.min(min, d);
+      controls.maxDistance = Math.max(max, d);
+      return;
+    }
+    controls.minDistance = min;
+    controls.maxDistance = max;
     // a scroll that was still going when the level changed shouldn't carry on into the new one
     t.lockUntil = performance.now() + 800;
     // use up any glide left over from the last view before moving the camera
     controls.enableDamping = false;
     controls.update();
     controls.enableDamping = true;
+    // the side and tilt you were looking from, so zooming in or out never turns the house
+    const was = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target));
     controls.target.copy(built.centre);
-    const fv = building ? frontView(cb.current.plan) : null;
-    // look at the front of the house from a little above, or at a floor from a high corner
-    const az = building ? (fv?.side === "top" ? Math.PI : 0) + 0.55 : 0.6;
-    const pol = building ? 1.12 : cb.current.room ? 0.3 : 0.75;
+    // the entrance is the house's south: start (and fit) looking at the front door, a little from the side
+    const az = keepHeading ? was.theta : built.frontAz + 0.45;
+    const pol = keepHeading && !cb.current.room ? THREE.MathUtils.clamp(was.phi, 0.35, controls.maxPolarAngle) : building ? 1.12 : cb.current.room ? 0.3 : 0.75;
     // a room is small next to its own walls: stand back far enough to see all of it over them
-    const r = building ? R * 3.3 : cb.current.room ? Math.max(R, 2.6) * 3.4 : R * 2.3;
+    const r = building ? O * 3.3 : cb.current.room ? Math.max(R, 2.6) * 3.4 : Math.min(R * 2.3, max * 0.95);
     camera.position.set(built.centre.x + r * Math.sin(pol) * Math.sin(az), built.centre.y + r * Math.cos(pol), built.centre.z + r * Math.sin(pol) * Math.cos(az));
     controls.update();
   }
@@ -1058,12 +1139,8 @@ export function Plan3D(p: Props) {
       if (h.pick.type === "item") return P.onSelectItem(h.pick.id);
       P.onSelect(h.pick.id);
     };
-    const onContext = (e: MouseEvent) => {
-      e.preventDefault();
-      if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return; // that was a pan
-      const tg = target(e);
-      if (tg) cb.current.onPlacePin(tg, { x: e.clientX, y: e.clientY });
-    };
+    // the right button moves the view in 3D, so it never drops a pin: use the Pin button for that
+    const onContext = (e: MouseEvent) => e.preventDefault();
     // zooming past the limits steps a level in or out, like the flat views
     const onWheel = (e: WheelEvent) => {
       const t = three.current;

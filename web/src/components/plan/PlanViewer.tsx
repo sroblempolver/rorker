@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JobItem, Pin, PinInput } from "@/lib/data/types";
 import { roomSides } from "@/lib/plan/geometry";
-import { furnishPlaces, furnishedSet, stagedPlan, type BuildLook, type Furnish } from "@/lib/plan/build";
+import { furnishPlaces, furnishedSet, homesPlan, stagedPlan, type BuildLook, type Furnish } from "@/lib/plan/build";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
 import type { BuildMap } from "./BuildLayer";
 import { ExteriorView, WallView } from "./Elevations";
@@ -84,6 +84,16 @@ export function PlanViewer(p: Props) {
   const hasObjects = useMemo(() => p.plan.floors.some((f) => f.fixtures.length > 0), [p.plan]);
   const [panel, setPanel] = useState<"furnish" | null>(null);
   const floors = useMemo(() => [...plan.floors].sort((a, b) => a.level - b.level), [plan]);
+  // in 3D you pick which floors (and which homes of a row) show, any mix; all of them by default
+  const [only, setOnly] = useState<string[] | null>(null);
+  const [homes, setHomes] = useState<string[] | null>(null);
+  const units = useMemo(() => [...new Set(plan.floors.flatMap((f) => f.rooms.map((r) => r.unit)).filter(Boolean) as string[])].sort(), [plan]);
+  const plan3d = useMemo(() => homesPlan(plan, homes), [plan, homes]);
+  const toggle = (all: string[], cur: string[] | null, id: string) => {
+    const now = cur ?? all;
+    const next = now.includes(id) ? now.filter((x) => x !== id) : [...now, id];
+    return next.length === 0 || next.length === all.length ? null : all.filter((x) => next.includes(x));
+  };
   const floor = level.kind === "site" || level.kind === "exterior" ? null : floors.find((f) => f.id === level.floorId) ?? floors[0];
   const room = floor && (level.kind === "room" || level.kind === "wall") ? floor.rooms.find((r) => r.id === level.roomId) ?? null : null;
   const side = useMemo(() => (floor && room && level.kind === "wall" ? roomSides(floor, room).find((s) => s.key === level.sideKey) ?? null : null), [floor, room, level]);
@@ -142,10 +152,10 @@ export function PlanViewer(p: Props) {
     return () => clearTimeout(t);
   }, [level.kind, in3d]);
   const hint = p.pinMode ? p.placeHint ?? "Click anywhere to drop the pin · Esc to cancel" :
-    in3d && level.kind === "exterior" ? "Drag to look around · zoom in to open the building, keep zooming to step into a floor · right-click or Pin to flag the roof or a wall" :
+    in3d && level.kind === "exterior" ? "Drag to look around · zoom in to open the building, keep zooming to step into a floor · Pin to flag the roof or a wall" :
     in3d && p.readOnly ? "Drag to look around · right-drag to slide · click a flag to see the task" :
-    in3d && level.kind === "room" ? "Click an object to select it, then drag it to move · drag anywhere else to look around · Face a wall at the top · right-click to pin" :
-    in3d ? "Drag to look around · click a room to see it from above · click an object to select, drag it to move · right-click to pin" :
+    in3d && level.kind === "room" ? "Click an object to select it, then drag it to move · drag anywhere else to look around · Face a wall at the top · Pin to add a pin" :
+    in3d ? "Drag to look around · click a room to see it from above · click an object to select, drag it to move · right-drag to move the view" :
     level.kind === "site" ? "The whole job · click the building or zoom in to go inside" :
     level.kind === "exterior" ? "Click a floor to go inside · zoom out for the whole site" :
     level.kind === "floor" ? "Click a room to step in · zoom out for the outside" :
@@ -163,7 +173,7 @@ export function PlanViewer(p: Props) {
           onOpenFloor={(id) => p.setLevel({ kind: "floor", floorId: id })} onLimitOut={() => p.setLevel({ kind: "site" })} />
       )}
       {in3d && (
-        <Plan3D plan={plan} mode={level.kind === "exterior" ? "building" : "floor"} floor={floor} room={room} selected={p.selected} selectedPin={p.selectedPin} selectedItem={p.selectedItem}
+        <Plan3D plan={plan3d} only={only} mode={level.kind === "exterior" ? "building" : "floor"} floor={floor} room={room} selected={p.selected} selectedPin={p.selectedPin} selectedItem={p.selectedItem}
           states={p.states} colorMode={p.colorMode} pins={p.pins} items={p.items} pinMode={p.pinMode} draft={p.draft} wallMode={wallMode} look={look} locked={p.readOnly} controls={controls}
           onSelect={(id) => { const r = floor && id ? floor.rooms.find((x) => x.id === id) : null; if (r && floor) p.setLevel({ kind: "room", floorId: floor.id, roomId: r.id }); p.onSelect(id); }}
           onSelectPin={p.onSelectPin} onSelectItem={p.onSelectItem} onPlacePin={p.onPlacePin}
@@ -221,8 +231,32 @@ export function PlanViewer(p: Props) {
         })}
       </div>
 
-      {/* floor switcher */}
-      {floor && level.kind === "floor" && floors.length > 1 && (
+      {/* in 3D: which floors and homes show, any mix, without moving the camera */}
+      {in3d && level.kind !== "room" && (floors.length > 1 || units.length > 1) && (
+        <div className="absolute left-3 top-14 md:left-1/2 md:-translate-x-1/2 md:top-3 flex flex-col items-start md:items-center gap-1">
+          {[
+            ...(floors.length > 1 ? [{ key: "floors", all: "All floors", list: floors.map((f) => ({ id: f.id, name: f.name })), cur: only, set: setOnly }] : []),
+            ...(units.length > 1 ? [{ key: "homes", all: "All homes", list: units.map((u) => ({ id: u, name: u })), cur: homes, set: setHomes }] : []),
+          ].map((row) => (
+            <div key={row.key} className={`flex flex-wrap gap-1 p-1 rounded-[4px] ${glass}`} role="group" aria-label={row.key === "floors" ? "Floors to show" : "Homes to show"}>
+              <button onClick={() => row.set(null)} aria-pressed={!row.cur}
+                className={`h-7 px-2.5 rounded-[3px] text-[13px] font-display font-bold tracking-[0.06em] uppercase ${!row.cur ? "bg-panel-3 text-text" : "text-muted hover:text-text"}`}>{row.all}</button>
+              {row.list.map((x) => {
+                const on = !row.cur || row.cur.includes(x.id);
+                return (
+                  <button key={x.id} onClick={() => row.set(toggle(row.list.map((y) => y.id), row.cur, x.id))} aria-pressed={on}
+                    className={`h-7 px-2.5 rounded-[3px] text-[13px] font-display font-bold tracking-[0.06em] uppercase inline-flex items-center gap-1.5 ${on && row.cur ? "bg-panel-3 text-text" : on ? "text-text" : "text-muted hover:text-text"}`}>
+                    <span className={`w-2.5 h-2.5 rounded-[2px] border ${on ? "bg-accent border-accent" : "border-[#77736a]"}`} />{x.name}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* floor switcher (the flat plan shows one floor at a time) */}
+      {floor && level.kind === "floor" && !in3d && floors.length > 1 && (
         <div className={`absolute left-3 top-14 md:left-1/2 md:-translate-x-1/2 md:top-3 flex gap-1 p-1 rounded-[4px] ${glass}`}>
           {floors.map((f) => (
             <button key={f.id} onClick={() => p.setLevel({ kind: "floor", floorId: f.id })} className={`h-7 px-2.5 rounded-[3px] text-[13px] font-display font-bold tracking-[0.06em] uppercase ${f.id === floor.id ? "bg-panel-3 text-text" : "text-muted hover:text-text"}`}>{f.name}</button>
