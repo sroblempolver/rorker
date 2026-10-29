@@ -42,3 +42,17 @@ for (const [from, to] of [["favicon.svg", "favicon.svg"], ["app-icon-180.png", "
 fs.copyFileSync(path.join(root, "src/app/favicon.ico"), path.join(out, "favicon.ico"));
 if (fs.existsSync(path.join(here, "og.png"))) fs.copyFileSync(path.join(here, "og.png"), path.join(out, "og.png"));
 console.log(path.join(out, "index.html"), (html.length / 1024).toFixed(0) + " KB");
+
+// the 15-second voice reel (9:16): reel.html, rendered to MP4 by site/reel-render.mjs
+const reel = await esbuild.build({
+  entryPoints: [path.join(here, "reel.tsx")], bundle: true, minify: true, write: false, format: "iife", target: "es2020",
+  jsx: "automatic", define: { "process.env.NODE_ENV": '"production"' }, loader: { ".json": "json", ".svg": "text" },
+  alias: { "@": path.join(root, "src") },
+});
+const reelHtml = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=540"><title>Rorker voice reel</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders:wght@600;700;800;900&family=Big+Shoulders+Stencil:wght@800;900&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>${fs.readFileSync(path.join(here, "reel.css"), "utf8")}</style></head><body><div id="root"></div>
+<script>${reel.outputFiles[0].text.replace(/<\/script/gi, "<\\/script")}</script></body></html>
+`;
+fs.writeFileSync(path.join(out, "reel.html"), reelHtml);
