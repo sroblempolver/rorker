@@ -9,6 +9,10 @@ import { TRADES, checklist, tick, tradeOf, type Trade } from "@/lib/plan/trades"
 import { allSurfaces, doorways, fmtBaths, fmtGal, freeWalls, ft2, homeTotals, paintSum, withWaste, type RoomSurfaces } from "@/lib/plan/quantities";
 import { std, useStandards } from "@/lib/plan/standards";
 import { fmtLen, type Units } from "@/lib/plan/units";
+import { useEffect } from "react";
+import { openTrayAt } from "./CatalogTray";
+
+let trayFor: Trade | null = null;
 
 const n0 = (x: number) => Math.round(x).toLocaleString("en-US");
 const area = (mm2: number, u: Units) => (u === "m" ? `${(mm2 / 1e6).toFixed(1)} m²` : `${n0(ft2(mm2))} ft²`);
@@ -28,6 +32,10 @@ export function TradePanel({ sk, fi, units, open, compact, onChange, onRoom, onS
 }) {
   useStandards();
   const trade = tradeOf(sk);
+  // a kitchen or bath job opens the furniture tray at Kitchen or Bath (once, not every time this shows)
+  useEffect(() => {
+    if (trade !== trayFor) { trayFor = trade; if (trade === "kitchen" || trade === "bath") openTrayAt(trade); }
+  }, [trade]);
   const hint = TRADES.find((t) => t.id === trade)?.hint;
   return (
     <div className="space-y-2" aria-label="What's this job?">
