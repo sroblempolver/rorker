@@ -32,6 +32,7 @@ import { SAMPLE_BRAND, sampleBilling } from "@/demo/billing-sample";
 import { MoneyOverview } from "@/components/billing/MoneyOverview";
 import { sampleOtherJobs } from "@/demo/money-jobs-sample";
 import { ShoppingRun } from "@/components/materials/ShoppingRun";
+import { PlanPage } from "@/components/newjob/PlanPage";
 import { EXTRA_JOBS, sampleMaterials, sampleTasks } from "@/demo/materials-sample";
 import { pinSummary, qtyText, type MaterialLine, type MaterialsApi, type MaterialsJob } from "@/lib/materials/types";
 import { TeamContext } from "@/components/team/context";
@@ -378,7 +379,7 @@ function fromAssistant(r: NewProjectResult, team: Member[]): WorkspaceData {
   };
 }
 
-type Page = "jobs" | "job" | "team" | "shared" | "new" | "client" | "money" | "shop" | "bench";
+type Page = "jobs" | "job" | "plan" | "team" | "shared" | "new" | "client" | "money" | "shop" | "bench";
 
 /** A small job with no drawing yet (the materials sample spreads across these too). */
 function plainJob(j: (typeof EXTRA_JOBS)[number], team: Member[]): WorkspaceData {
@@ -401,11 +402,12 @@ function sampleJobs(owner?: Owner): WorkspaceData[] {
  * and a copied link all land where you were. */
 function fromHash(): { page: Page; id?: string } {
   const [a, b] = location.hash.replace(/^#\/?/, "").split("/");
+  if (a === "plan") return { page: "plan", id: b };
   if (a === "jobs" || a === "team" || a === "new" || a === "shared" || a === "money" || a === "shop" || a === "bench") return { page: a };
   return { page: "job", id: a === "job" ? b : undefined };
 }
-const hashFor = (page: Page, id: string) => (page === "job" ? `#/job/${id}` : `#/${page}`);
-const TITLES: Partial<Record<Page, string>> = { jobs: "Jobs", team: "Team", new: "New project", shared: "Shared link", money: "Money", shop: "Shopping", client: "Client view", bench: "Plan tests" };
+const hashFor = (page: Page, id: string) => (page === "job" ? `#/job/${id}` : page === "plan" && id ? `#/plan/${id}` : `#/${page}`);
+const TITLES: Partial<Record<Page, string>> = { jobs: "Jobs", plan: "Plan", team: "Team", new: "New project", shared: "Shared link", money: "Money", shop: "Shopping", client: "Client view", bench: "Plan tests" };
 
 /** Signed in: the account and the saver that writes every change to it. */
 interface CloudBoot { account: cloud.Account; saver: cloud.Saver; email: string | null; name: string }
@@ -549,6 +551,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
   const goItems = useMemo<GoItem[]>(() => [
     ...jobs.map((d) => ({ id: `job:${d.job.id}`, group: "Jobs", label: d.job.name, sub: [d.job.address, d.job.client_name].filter(Boolean).join(" · "), keywords: d.job.client_name ?? "", run: () => { setFromClient(false); go("job", d.job.id); } })),
     { id: "page:jobs", group: "Go to", label: "All jobs", run: () => setPage("jobs") },
+    { id: "page:plan", group: "Go to", label: "Plan", sub: "change a job's plan: walls, doors, furniture", run: () => go("plan") },
     { id: "page:money", group: "Go to", label: "Money", sub: "quotes, invoices, who owes what", run: () => setPage("money") },
     { id: "page:shop", group: "Go to", label: "Shopping", sub: "everything to buy, by store", run: () => setPage("shop") },
     { id: "page:team", group: "Go to", label: "Team", run: () => setPage("team") },
@@ -564,7 +567,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
     <div className="h-full flex flex-col">
       <header className="h-14 shrink-0 border-b border-line bg-panel flex items-center gap-2 sm:gap-4 px-3 sm:px-4">
         <button onClick={() => setPage("jobs")} aria-label="All jobs"><Logo size={20} /></button>
-        <nav className="hidden sm:flex items-center gap-1 sm:ml-2 min-w-0 overflow-x-auto">{tab("jobs", "Jobs")}{tab("money", "Money")}{tab("shop", "Shopping")}{tab("team", "Team")}</nav>
+        <nav className="hidden sm:flex items-center gap-1 sm:ml-2 min-w-0 overflow-x-auto">{tab("jobs", "Jobs")}{tab("plan", "Plan")}{tab("money", "Money")}{tab("shop", "Shopping")}{tab("team", "Team")}</nav>
         <GoToButton className="ml-auto" />
         <button onClick={() => setPage("new")} className={`btn btn-sm ${page === "new" ? "btn-ghost" : "btn-primary"}`}>+<span className="hidden sm:inline"> New project</span></button>
         {signedIn ? <AccountChip c={signedIn} state={saveState} /> : (
@@ -573,8 +576,8 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
       </header>
       <GoToHost />
       {/* on a phone the main places sit at the bottom, under the thumb */}
-      <nav className="mobile-nav sm:hidden fixed bottom-0 inset-x-0 z-30 h-14 pb-[env(safe-area-inset-bottom)] box-content bg-panel border-t border-line grid grid-cols-4" aria-label="Main">
-        {([["jobs", "Jobs", "M3 21V9l9-6 9 6v12M9 21v-7h6v7"], ["money", "Money", "M3 6h18v12H3zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"], ["shop", "Shopping", "M5 7h14l-1.5 12h-11zM9 7a3 3 0 0 1 6 0"], ["team", "Team", "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14a6.5 6.5 0 0 1 3.5 6"]] as const).map(([p, label, d]) => {
+      <nav className="mobile-nav sm:hidden fixed bottom-0 inset-x-0 z-30 h-14 pb-[env(safe-area-inset-bottom)] box-content bg-panel border-t border-line grid grid-cols-5" aria-label="Main">
+        {([["jobs", "Jobs", "M3 21V9l9-6 9 6v12M9 21v-7h6v7"], ["plan", "Plan", "M3 3h18v18H3zM3 12h9M12 3v13M16 12h5"], ["money", "Money", "M3 6h18v12H3zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"], ["shop", "Shopping", "M5 7h14l-1.5 12h-11zM9 7a3 3 0 0 1 6 0"], ["team", "Team", "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14a6.5 6.5 0 0 1 3.5 6"]] as const).map(([p, label, d]) => {
           const on = page === p || (p === "jobs" && page === "job");
           return (
             <button key={p} onClick={() => { setFromClient(false); setPage(p); }} aria-current={on ? "page" : undefined}
@@ -588,6 +591,18 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
       <div key={shown === "job" ? `job-${active!.job.id}` : shown} className="flex-1 min-h-0 flex flex-col fade-in pb-14 sm:pb-0">
       {shown === "new" ? (
         <NewProject onCreate={created} onCancel={() => setPage("jobs")} />
+      ) : shown === "plan" ? (
+        <PlanPage jobs={jobs.map((d) => ({ id: d.job.id, name: d.job.name, address: d.job.address, plan: d.plan?.data ?? null }))} jobId={activeId || null}
+          onPick={(id) => go("plan", id)} onOpenJob={(id) => { setVer((n) => n + 1); go("job", id); }} onNew={() => setPage("new")}
+          onSave={(id, plan) => {
+            const d = jobsRef.current.find((j) => j.job.id === id);
+            if (!d) return;
+            d.plan = d.plan ? { ...d.plan, version: d.plan.version + 1, data: plan } : { id: uid(), job_id: id, version: 1, data: plan, created_at: now() };
+            d.job = { ...d.job, current_plan_id: d.plan.id };
+            setJobs((js) => [...js]);
+            setVer((n) => n + 1);
+            poke();
+          }} />
       ) : shown === "bench" ? (
         <div className="flex-1 overflow-y-auto"><PlanBench /></div>
       ) : shown === "money" ? (
