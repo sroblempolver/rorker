@@ -193,9 +193,9 @@ export function SharedWithYou({ note }: { note?: string | null }) {
         {(list ?? []).map((x) => (
           <div key={x.id} className={`card p-3 flex items-start gap-3 ${x.live ? "" : "opacity-60"}`}>
             <a href={x.live ? `#/${x.kind}/${x.token}` : undefined} className="flex-1 min-w-0" aria-disabled={!x.live}>
-              <span className="block text-[11.5px] text-muted truncate">{x.company} · {x.kind === "c" ? "your project" : x.job ? "your tasks" : "your tasks on every job"}</span>
-              <span className="block font-semibold truncate">{x.job?.name ?? x.label}</span>
-              <span className="block text-[12px] text-muted truncate">{x.live ? x.job?.address ?? x.label : "Turned off by the contractor"}</span>
+              <span className="block text-[11.5px] text-muted truncate">{x.company} · {x.kind === "c" ? "your project" : "your tasks"}</span>
+              <span className="block font-semibold truncate">{x.job?.name ?? "Every job you're on"}</span>
+              <span className="block text-[12px] text-muted truncate">{x.live ? x.job?.address ?? `As ${x.label}` : "Turned off by the contractor"}</span>
             </a>
             <button className="text-muted hover:text-text text-[12px] shrink-0" onClick={() => void remove(x.id)} aria-label={`Take ${x.job?.name ?? x.label} off your list`}>Remove</button>
           </div>
