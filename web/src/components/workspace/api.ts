@@ -1,6 +1,8 @@
 // What the job workspace needs from the outside world. The app wires it to server actions; the
 // standalone preview wires it to memory, so the same screens run in both.
 import type { AssistantSend } from "@/components/assistant/Assistant";
+import type { ThreadApi } from "./ClientThread";
+import type { PlaceTag } from "@/lib/plan/places";
 import type { ClientStart } from "@/components/billing/MoneyPanel";
 import type { Billing, Brand } from "@/lib/billing/types";
 import type { MaterialLine, MaterialsApi, MaterialsJob } from "@/lib/materials/types";
@@ -31,6 +33,8 @@ export interface WorkspaceData {
   payoutsConnected?: boolean;
   /** open on the Money tab (coming back from the client's page) */
   startOnMoney?: boolean;
+  /** open on the Client tab (from a "new from your client" notice), showing the place they tagged */
+  startOnClient?: { place: PlaceTag | null };
   /** the materials list: lines on every job this person can see, and those jobs (to split an add) */
   materials?: { lines: MaterialLine[]; jobs: MaterialsJob[] };
 }
@@ -79,4 +83,12 @@ export interface WorkspaceApi {
   materials?: MaterialsApi;
   /** open the shopping run across every job */
   openShopping?: () => void;
+  /** the job's client: one thread with them, whether they may add notes you see, and their page; left
+   *  out (or no client on the job), the Client tab is hidden */
+  client?: {
+    thread: ThreadApi;
+    setCanAdd(on: boolean): void;
+    /** show what the client sees on their link */
+    open(): void;
+  };
 }

@@ -113,6 +113,14 @@ export const CATALOG: Record<string, ObjectSpec> = { ...BASE, ...EXTRA };
 
 export const OBJECT_KINDS = [...Object.keys(CATALOG), "other"];
 
+/** One line per kind for a model's instructions: "monitor 550x200x450 on desk/counter". */
+export function catalogBrief(): string {
+  return Object.entries(CATALOG).map(([k, s]) => {
+    const where = s.mount === "wall" ? `wall, ${s.at ?? 1200} up` : s.mount === "ceiling" ? "ceiling" : s.mount === "surface" ? `on ${(s.on ?? []).slice(0, 2).join("/") || "a surface"}` : "";
+    return `${k} ${s.w}x${s.d}x${s.h}${where ? ` ${where}` : ""}`;
+  }).join("; ");
+}
+
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 /** The catalogue kind for a word ("PC", "couch", "bar stool"), or null when it isn't one we know. */

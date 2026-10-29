@@ -46,7 +46,10 @@ export async function setElementState(jobId: string, elementId: string, status: 
   await getRepo().setElementState(jobId, session.userId, elementId, status);
 }
 
-const EDIT_NUM = ["dx", "dy", "dz", "width", "depth", "height_mm"] as const;
+const EDIT_NUM = ["dx", "dy", "dz", "width", "depth", "height_mm", "facing", "sill_mm", "slide"] as const;
+// whole objects kept as they come (an added object, a door or window added or a wall moved in Build
+// mode, a room cut in two, the furnishing), as long as they're plain data of a sensible size
+const EDIT_OBJ = ["added", "opening", "move", "split", "cut", "furnish", "stage_looks"] as const;
 const EDIT_STR = ["name", "kind", "type", "spec", "product_name", "product_url", "notes"] as const;
 
 /** Save the whole set of app-side changes for one element (null clears them). */
@@ -65,6 +68,13 @@ export async function saveElementEdit(jobId: string, elementId: string, data: El
       for (const k of EDIT_STR) {
         const v = data[k];
         if (typeof v === "string" && v.trim()) clean[k] = v.trim().slice(0, 500);
+      }
+      if (data.removed === true) clean.removed = true;
+      for (const k of EDIT_OBJ) {
+        const v = data[k];
+        if (v == null) continue;
+        if (JSON.stringify(v).length > 20000) throw new Error("That change is too big to save.");
+        (clean as Record<string, unknown>)[k] = JSON.parse(JSON.stringify(v));
       }
       if (clean.product_url && !/^https?:\/\//.test(clean.product_url)) throw new Error("Product links need to start with http:// or https://");
       if (clean.width != null && clean.width < 20 || clean.depth != null && clean.depth < 20) throw new Error("That is too small.");

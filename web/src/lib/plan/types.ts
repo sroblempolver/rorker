@@ -54,6 +54,8 @@ export interface Floor {
   bounds: BBox; rooms: Room[]; walls: Wall[]; openings: Opening[]; fixtures: Fixture[]; stairs: Stair[];
   /** openings cut in this floor for stairs coming up from the floor below */
   holes?: Pt[][];
+  /** Build mode: points where a straight wall was cut into pieces that move on their own */
+  joints?: Pt[];
 }
 export interface Question {
   id: string; text: string; element_ids: string[]; options: string[]; default: string | null;

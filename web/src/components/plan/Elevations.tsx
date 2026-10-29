@@ -5,11 +5,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { JobItem, Pin, PinInput } from "@/lib/data/types";
 import { attachedToSide, frontView, type WallSide } from "@/lib/plan/geometry";
 import type { ElementStatus, Floor, Opening, Plan, Room } from "@/lib/plan/types";
-import { openingSpan } from "@/lib/plan/rules";
+import { openingSpan, RULES } from "@/lib/plan/rules";
 import { CHALK, ROOM_MATERIAL, STATUS_COLOR, WALL_TOP } from "./style";
 import { DraftFlag, PinFlag, PlanDefs, useHoldToPin, useWorldDrag } from "./svg";
 import { FixtureElevation, fixtureBottom, fixtureTop } from "./fixtures";
-import { ItemGlyph, mmIn } from "./items";
+import { ItemGlyph } from "./items";
+import { inches, len } from "@/lib/measure";
 import { usePanZoom } from "./usePanZoom";
 import type { ColorMode } from "./FloorCanvas";
 import type { Controls, PinTarget, ScreenPoint } from "./target";
@@ -202,7 +203,7 @@ const openBottom = (o: Opening) => openingSpan(o, null)[0];
 export function WallView(p: WallProps) {
   const { floor, side, selected, states, colorMode } = p;
   const ref = useRef<SVGSVGElement>(null);
-  const H = floor.height_mm || 2700;
+  const H = floor.height_mm || RULES.ceiling;
   const L = side.length;
   const home = useMemo(() => ({ x: -400, y: -H - 500, w: L + 800, h: H + 1400 }), [L, H]);
   const cb = useRef(p);
@@ -298,7 +299,7 @@ export function WallView(p: WallProps) {
               (q, free) => ({ x: snap(q.x, free), y: mounted ? snap(Math.max(-H + (top - bot), Math.min(-300, q.y)), free) : origin.y }))}>
             <FixtureElevation f={a.f} x0={a.from} x1={a.to} lw={lw} tint={tint(a.f.id)} />
             <rect x={a.from - 30} y={-top - 30} width={a.to - a.from + 60} height={top - bot + 60} fill={sel ? CHALK : "#fff"} fillOpacity={sel ? 0.14 : hot ? 0.1 : 0} stroke={sel ? CHALK : hot ? "#fff" : "transparent"} strokeWidth={2 * lw} strokeDasharray={sel ? `${8 * lw} ${4 * lw}` : undefined} />
-            {live && <text x={(a.from + a.to) / 2} y={-top - 60} textAnchor="middle" fontSize={12 * lw} fontFamily="var(--font-mono)" fill="#55b2ff" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>{live.dx >= 0 ? "→" : "←"} {Math.abs(Math.round(live.dx))} mm{mounted && Math.round(live.dy) ? ` · ${live.dy < 0 ? "↑" : "↓"} ${Math.abs(Math.round(live.dy))} mm` : ""}</text>}
+            {live && <text x={(a.from + a.to) / 2} y={-top - 60} textAnchor="middle" fontSize={12 * lw} fontFamily="var(--font-mono)" fill="#55b2ff" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>{live.dx >= 0 ? "→" : "←"} {inches(Math.abs(live.dx))}{mounted && Math.round(live.dy) ? ` · ${live.dy < 0 ? "↑" : "↓"} ${inches(Math.abs(live.dy))}` : ""}</text>}
             <text x={(a.from + a.to) / 2} y={160 + 11 * lw + row * 16 * lw} textAnchor="middle" fontSize={10.5 * lw} fontFamily="var(--font-mono)" fill="#f0ece3" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>{a.f.kind === "other" ? a.f.id : `${a.f.name.toUpperCase()} · ${a.f.id}`}</text>
           </g>
         );
@@ -308,8 +309,8 @@ export function WallView(p: WallProps) {
         <path d={`M0 ${620}H${L}M0 ${520}V${720}M${L} ${520}V${720}`} />
         <path d={`M${-220} 0V${-H}M${-320} 0H${-120}M${-320} ${-H}H${-120}`} />
       </g>
-      <text x={L / 2} y={620 - 8 * lw} textAnchor="middle" fontSize={12 * lw} fontFamily="var(--font-mono)" fill="#cfc8ba" pointerEvents="none">{(L / 1000).toFixed(2)} m</text>
-      <text x={-240 - 4 * lw} y={-H / 2} textAnchor="end" fontSize={12 * lw} fontFamily="var(--font-mono)" fill="#cfc8ba" pointerEvents="none">{(H / 1000).toFixed(1)} m</text>
+      <text x={L / 2} y={620 - 8 * lw} textAnchor="middle" fontSize={12 * lw} fontFamily="var(--font-mono)" fill="#cfc8ba" pointerEvents="none">{len(L)}</text>
+      <text x={-240 - 4 * lw} y={-H / 2} textAnchor="end" fontSize={12 * lw} fontFamily="var(--font-mono)" fill="#cfc8ba" pointerEvents="none">{len(H)}</text>
       {/* wall items: drag them anywhere on the wall; the guides give the distance from the left end and the height off the floor */}
       {p.items.filter((it) => it.side === side.key).map((it) => {
         const live = drag?.id === `i:${it.id}` ? drag : null;
@@ -320,8 +321,8 @@ export function WallView(p: WallProps) {
             {(sel || live) && (
               <g pointerEvents="none" fontFamily="var(--font-mono)" fontSize={11 * lw} fill="#55b2ff" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>
                 <path d={`M0 ${y}H${x}M${x} ${y}V0`} stroke="#55b2ff" strokeWidth={1.4 * lw} strokeDasharray={`${6 * lw} ${4 * lw}`} fill="none" />
-                <text x={x / 2} y={y - 6 * lw} textAnchor="middle">{mmIn(x)} from left</text>
-                <text x={x + 8 * lw} y={y / 2}>{mmIn(-y)} up</text>
+                <text x={x / 2} y={y - 6 * lw} textAnchor="middle">{inches(x)} from left</text>
+                <text x={x + 8 * lw} y={y / 2}>{inches(-y)} up</text>
               </g>
             )}
             <g transform={`translate(${x} ${y})`} className={live ? "cursor-grabbing" : sel && !p.locked ? "cursor-grab" : "cursor-pointer"}

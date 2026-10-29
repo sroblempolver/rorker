@@ -50,6 +50,8 @@ How to work:
   one short sentence a busy contractor can answer by tapping an option or saying a few words, names the
   element IDs it is about, and offers 2-4 options with the first being your best guess (which the plan uses
   until answered). Merge related doubts into one question.
+- Write every size the contractor reads (questions, options, notes) in feet and inches (13' 6", a 36" door)
+  and areas in square feet. The numbers you return in the JSON stay in millimetres.
 - Keep your own names short and plain (Kitchen, Master bedroom, Base cabinet, Toilet)."""
 
 

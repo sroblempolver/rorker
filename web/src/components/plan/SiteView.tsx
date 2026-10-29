@@ -62,7 +62,7 @@ export function SiteView(p: Props) {
   const inside = p.pins.filter((x) => x.status !== "done" && x.anchor?.view !== "site" && x.anchor?.view !== "point").length;
   const draft = p.draft?.anchor?.view === "site" ? p.draft.anchor : null;
   const fs = 13 * lw;
-  const lotW = (lot[2] - lot[0]) / 1000, lotD = (lot[3] - lot[1]) / 1000;
+  const lotW = (lot[2] - lot[0]) / 304.8, lotD = (lot[3] - lot[1]) / 304.8; // feet
   const name = p.jobName.toUpperCase();
   const tagW = name.length * 8.4 * lw + 120 * lw;
   const tagY = site.front === "bottom" ? bb[1] - 26 * lw : bb[3] + 26 * lw;
@@ -94,7 +94,7 @@ export function SiteView(p: Props) {
       {/* lot line, staked at the corners */}
       <rect x={lot[0]} y={lot[1]} width={lot[2] - lot[0]} height={lot[3] - lot[1]} fill="none" stroke="#f0ece3" strokeOpacity={0.55} strokeWidth={1.5 * lw} strokeDasharray={`${12 * lw} ${6 * lw}`} pointerEvents="none" />
       {[[lot[0], lot[1]], [lot[2], lot[1]], [lot[2], lot[3]], [lot[0], lot[3]]].map(([x, y], i) => <rect key={i} x={x - 5 * lw} y={y - 5 * lw} width={10 * lw} height={10 * lw} fill="#ff6a1f" stroke="#1c0c03" strokeWidth={lw} pointerEvents="none" />)}
-      <text x={lot[0] + 10 * lw} y={lot[1] + 18 * lw} fontSize={fs * 0.8} fontFamily="var(--font-mono)" fill="#8a857a" pointerEvents="none">LOT, ESTIMATED · {lotW.toFixed(0)} × {lotD.toFixed(0)} M · STREET SIDE {site.front === "bottom" ? "↓" : "↑"}</text>
+      <text x={lot[0] + 10 * lw} y={lot[1] + 18 * lw} fontSize={fs * 0.8} fontFamily="var(--font-mono)" fill="#8a857a" pointerEvents="none">LOT, ESTIMATED · {lotW.toFixed(0)} × {lotD.toFixed(0)} FT · STREET SIDE {site.front === "bottom" ? "↓" : "↑"}</text>
 
       {/* the building: ground floor in its materials, with a shadow; click or zoom in to go inside */}
       <g transform="translate(400 600)" opacity={0.7} filter="url(#site-soft)" pointerEvents="none">

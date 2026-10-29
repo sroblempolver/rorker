@@ -2,6 +2,7 @@
 // the plan as read, so every view draws the job as it is now.
 import type { AddedObject, ElementEdit } from "@/lib/data/types";
 import { arrange, linkSupports } from "./arrange";
+import { applyHouseEdits } from "./house";
 import type { Fixture, Plan, Pt } from "./types";
 
 /** An object added in the app, as a plan fixture: width across its front, depth front to back. */
@@ -80,7 +81,8 @@ function editFixture(f0: Fixture, e: ElementEdit): Fixture {
 }
 
 export function applyEdits(drawn: Plan, edits: Record<string, ElementEdit>): Plan {
-  const plan = linkSupports(drawn);
+  // the house first (walls moved, rooms cut, doors and windows), then what's in it
+  const plan = linkSupports(applyHouseEdits(drawn, edits));
   if (!Object.keys(edits).length) return arrange(plan);
   return arrange({
     ...plan,
