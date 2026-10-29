@@ -3,17 +3,15 @@
 // edits on top of the plan as read, so "Reset" always gets back to what the drawing said.
 import { useState } from "react";
 import type { ElementEdit, ItemInput, ItemKind, JobItem } from "@/lib/data/types";
+import { OBJECT_KINDS, specOf } from "@/lib/plan/catalog";
 import { fixtureSize, turnedFacing } from "@/lib/plan/edits";
 import type { Fixture, Room, RoomType } from "@/lib/plan/types";
 import { fixtureBottom, fixtureHeight } from "@/components/plan/fixtures";
 import { ITEM_KINDS, ITEM_LABEL } from "@/components/plan/items";
 import { inches, parseInches } from "@/lib/measure";
 
-const FIXTURE_KINDS = [
-  "base_cabinet", "wall_cabinet", "tall_cabinet", "filler", "kitchen_sink", "dishwasher", "range", "cooktop", "oven", "range_hood", "fridge", "island",
-  "toilet", "washbasin", "vanity", "bathtub", "shower", "towel_radiator", "washing_machine", "dryer", "water_heater",
-  "bed", "nightstand", "wardrobe", "sofa", "armchair", "chair", "table", "dining_table", "desk", "bookshelf", "sideboard", "tv", "lamp", "plant", "fireplace", "car", "other",
-];
+// every object in the catalogue, plus a cabinet filler strip
+const FIXTURE_KINDS = [...OBJECT_KINDS.filter((k) => k !== "other"), "filler", "other"];
 const ROOM_TYPES: RoomType[] = ["kitchen", "bathroom", "wc", "bedroom", "living", "dining", "family", "study", "office", "hallway", "foyer", "stair_hall", "laundry", "utility", "closet", "garage", "storage", "balcony", "porch", "terrace", "other"];
 const nice = (k: string) => k.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 
@@ -121,7 +119,7 @@ export function FixtureCard({ f, edit, room, onSave, focus }: { f: Fixture; edit
         <>
           <div className="grid grid-cols-2 gap-2">
             <Field label="Name"><input className="input" value={v.name} onChange={set("name")} /></Field>
-            <Field label="Kind"><select className="input" value={v.kind} onChange={set("kind")}>{[...new Set([f.kind, ...FIXTURE_KINDS])].map((k) => <option key={k} value={k}>{nice(k)}</option>)}</select></Field>
+            <Field label="Kind"><select className="input" value={v.kind} onChange={set("kind")}>{[...new Set([f.kind, ...FIXTURE_KINDS])].map((k) => <option key={k} value={k}>{specOf(k)?.label ?? nice(k)}</option>)}</select></Field>
           </div>
           <div className="grid grid-cols-3 gap-2">
             <Field label="Width, in"><input className="input" value={v.width} onChange={set("width")} /></Field>

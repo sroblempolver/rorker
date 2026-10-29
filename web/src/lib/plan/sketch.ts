@@ -5,6 +5,8 @@
 import type { BBox, Fixture, Floor, Opening, OpeningKind, Plan, Pt, Question, Room, RoomType, Wall } from "./types";
 import { bboxOf, polyArea } from "./geometry";
 import { RULES } from "./rules";
+import { kindFor, specOf, topOf } from "./catalog";
+import { supportOf } from "./arrange";
 
 export type Side = "north" | "south" | "east" | "west";
 export interface SketchRoom { name: string; type?: string; polygon: Pt[]; unit?: string }
@@ -217,7 +219,10 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
 
   // objects at their real size, facing into the room
   const fixtures: Fixture[] = (sf.fixtures ?? []).filter((f) => Array.isArray(f.center) && f.kind).map((f, i) => {
-    const w = Math.max(200, f.width_mm ?? 600), d = Math.max(200, f.depth_mm ?? 600);
+    // "other" with a name the catalogue knows ("PC", "couch") becomes that kind
+    const kind = f.kind === "other" || !specOf(f.kind) ? kindFor(f.name) ?? f.kind : f.kind, spec = specOf(kind);
+    const min = spec?.mount === "surface" ? 50 : 200;
+    const w = Math.max(min, f.width_mm ?? spec?.w ?? 600), d = Math.max(min, f.depth_mm ?? spec?.d ?? 600);
     const facing = f.facing && f.facing in ANGLE ? ANGLE[f.facing] : null;
     const across = facing === 0 || facing === 180;
     const [hx, hy] = across ? [d / 2, w / 2] : [w / 2, d / 2];
@@ -233,11 +238,18 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
     }
     const bbox: BBox = [c[0] - hx, c[1] - hy, c[0] + hx, c[1] + hy];
     return {
-      id: `${code}-F${String(i + 1).padStart(2, "0")}`, kind: f.kind, name: f.name || f.kind.replace(/_/g, " "), room_id: room?.id ?? null, center: c, bbox, rotation: 0,
+      id: `${code}-F${String(i + 1).padStart(2, "0")}`, kind, name: f.name || spec?.label || kind.replace(/_/g, " "), room_id: room?.id ?? null, center: c, bbox, rotation: 0,
       outline: [[[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]], [bbox[0], bbox[1]]]], source: "ai", source_ref: null, confidence: 0.6, facing,
       ...(f.height_mm ? { height_mm: f.height_mm } : {}), ...(f.elevation_mm ? { elevation_mm: f.elevation_mm } : {}),
     } as Fixture;
   });
+  // things that sit on something (a TV on its unit, a computer on the desk) stand on what's under them
+  for (const f of fixtures) {
+    const spec = specOf(f.kind);
+    if (spec?.mount !== "surface") continue;
+    const sup = supportOf(fixtures, f);
+    if (sup) { f.elevation_mm = topOf(sup); f.on = sup.id; f.on_at = sup.center; } else if (spec.at) f.elevation_mm = spec.at;
+  }
 
   const bounds = bboxOf([...rooms.flatMap((r) => r.polygon), ...walls.flatMap((w) => w.polygon)]);
   return {
