@@ -55,9 +55,9 @@ export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoo
   const states = useMemo(() => new Map(), []);
   const ctl = useRef<{ zoomBy: (f: number) => void; home: () => void } | null>(null);
   const controls = useCallback((api: { zoomBy: (f: number) => void; home: () => void }) => { ctl.current = api; }, []);
-  // frame the house once there is one; after that the camera is yours
-  const had = useRef(false);
-  useEffect(() => { const any = !!shown?.floors.length; if (any && !had.current) ctl.current?.home(); had.current = any; }, [shown]);
+  // the whole house stays in view as it grows, until you move the camera; then it stays where you put it
+  const touched = useRef(false);
+  useEffect(() => { if (shown?.floors.length && !touched.current) ctl.current?.home(); }, [shown]);
 
   // the picked room or thing, by its id in the plan
   const selected = useMemo(() => {
@@ -101,7 +101,8 @@ export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoo
   const cur = sketch.floors[fi];
   const k = byLevel.indexOf(fi);
   return (
-    <div className="relative h-full min-h-[300px] bg-ink border-t xl:border-t-0 xl:border-l border-line" aria-label="The house in 3D">
+    <div className="relative h-full min-h-[300px] bg-ink border-t xl:border-t-0 xl:border-l border-line" aria-label="The house in 3D"
+      onPointerDownCapture={(e) => { if (!(e.target as Element).closest("button")) touched.current = true; }} onWheelCapture={() => { touched.current = true; }}>
       {gl && shown ? (
         <Plan3D plan={shown} mode="building" floor={null} room={null} selected={selected} selectedPin={null} selectedItem={null} states={states} colorMode="type"
           pins={NO_PINS} items={NO_PINS} pinMode={false} draft={null} wallMode={walls === "down" ? "low" : "full"} locked live={live} controls={controls}
@@ -120,7 +121,7 @@ export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoo
         </div>
         <button onClick={onRoof} aria-pressed={roofOn} title="Roof shape, pitch, overhang and foundation"
           className={`pointer-events-auto h-8 px-2.5 rounded-[4px] text-[12px] font-display font-bold tracking-[0.08em] uppercase ${glass} hover:bg-panel-3 ${roofOn ? "!text-accent !border-accent" : ""}`}>Roof</button>
-        <button onClick={() => ctl.current?.home()} title="See the whole house" className={`pointer-events-auto h-8 px-2.5 rounded-[4px] text-[12px] font-display font-bold tracking-[0.08em] uppercase ml-auto ${glass} hover:bg-panel-3`}>Fit</button>
+        <button onClick={() => { touched.current = false; ctl.current?.home(); }} title="See the whole house" className={`pointer-events-auto h-8 px-2.5 rounded-[4px] text-[12px] font-display font-bold tracking-[0.08em] uppercase ml-auto ${glass} hover:bg-panel-3`}>Fit</button>
       </div>
       {above && <p className="absolute left-2 bottom-2 text-[12px] text-muted pointer-events-none">Floors above lifted off</p>}
     </div>

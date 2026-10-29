@@ -835,9 +835,9 @@ export function Plan3D(p: Props) {
     const fv = building ? frontView(cb.current.plan) : null;
     // look at the front of the house from a little above, or at a floor from a high corner
     const az = building ? (fv?.side === "top" ? Math.PI : 0) + 0.55 : 0.6;
-    const pol = building ? 1.12 : cb.current.room ? 0.3 : 0.75;
+    const pol = building ? (cb.current.live ? 0.95 : 1.12) : cb.current.room ? 0.3 : 0.75;
     // a room is small next to its own walls: stand back far enough to see all of it over them
-    const r = building ? R * 3.3 : cb.current.room ? Math.max(R, 2.6) * 3.4 : R * 2.3;
+    const r = building ? R * (cb.current.live ? 4.8 : 3.3) : cb.current.room ? Math.max(R, 2.6) * 3.4 : R * 2.3;
     camera.position.set(built.centre.x + r * Math.sin(pol) * Math.sin(az), built.centre.y + r * Math.cos(pol), built.centre.z + r * Math.sin(pol) * Math.cos(az));
     controls.update();
   }
