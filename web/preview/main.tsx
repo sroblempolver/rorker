@@ -104,7 +104,7 @@ function seed(owner: Owner = { name: "Company owner", email: "owner@demobuilders
     body: "Three samples are on the counter. Tell us which one by Friday so we can order it.", status: "open", priority: 1, due_date: null, tagged: [client], close_requirement: "confirm",
     stage_id: null, links: [], created_by: null, created_at: now(), closed_at: null, comment_count: 0 });
   if (materials.lines[0]) materials.lines.push({ ...materials.lines[0], id: "mlc", job_id: jobId, name: "Cabinet pulls (your pick)", qty: 22, unit: "ea", unit_cost: null, store: null, link: null, sku: null,
-    status: "to_buy", buyer: client, installer: null, task_id: null, pin_id: null, note: "128 mm centers", receipts: [], created_at: now() });
+    status: "to_buy", buyer: client, installer: null, task_id: null, pin_id: null, note: "5\" centers", receipts: [], created_at: now() });
   messages.set(jobId, [
     { id: "msg1", job_id: jobId, from: "contractor", author_name: owner.name, body: "Framing passed inspection today. Drywall starts Monday.", photos: [], created_at: new Date(Date.now() - 3_600_000).toISOString() },
     { id: "msg2", job_id: jobId, from: "client", author_name: "Sam and Priya Okafor", body: "@Bedroom 1 › Bed needs to be replaced, the frame is cracked. Can you take it out with the old carpet?", photos: [], created_at: now(),
@@ -694,9 +694,9 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
   // the app's own places in the Go to box (Ctrl+K): every job and every screen
   const goItems = useMemo<GoItem[]>(() => [
     ...jobs.map((d) => ({ id: `job:${d.job.id}`, group: "Jobs", label: d.job.name, sub: [d.job.address, d.job.client_name].filter(Boolean).join(" · "), keywords: d.job.client_name ?? "", run: () => { go("job", d.job.id); } })),
+    ...jobs.map((d) => ({ id: `plan:${d.job.id}`, group: "Plans", label: `${d.job.name}: edit plan`, sub: "walls, doors and windows, furniture, cabinets", keywords: `plan ${d.job.client_name ?? ""}`, run: () => go("plan", d.job.id) })),
     ...jobs.filter((d) => d.billing).map((d) => ({ id: `money:${d.job.id}`, group: "Money", label: `${d.job.name}: money`, sub: "quotes, invoices, payments", keywords: d.job.client_name ?? "", run: () => go("jobmoney", d.job.id) })),
     { id: "page:jobs", group: "Go to", label: "All jobs", run: () => setPage("jobs") },
-    { id: "page:plan", group: "Go to", label: "Plan", sub: "change a job's plan: walls, doors, furniture", run: () => go("plan") },
     { id: "page:photos", group: "Go to", label: "Photos", sub: "every photo on every job, by room", run: () => setPage("photos") },
     { id: "page:money", group: "Go to", label: "Money", sub: "quotes, invoices, who owes what", run: () => setPage("money") },
     { id: "page:shop", group: "Go to", label: "Shopping", sub: "everything to buy, by store", run: () => setPage("shop") },
@@ -706,14 +706,14 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
   ], [jobs]); // eslint-disable-line react-hooks/exhaustive-deps
   useGoTo("app", goItems);
   const tab = (p: Page, label: string) => (
-    <button onClick={() => { setPage(p); }} className={`shrink-0 px-1.5 sm:px-3 h-9 rounded-[3px] font-display text-[13px] sm:text-[15px] font-bold tracking-[0.06em] sm:tracking-[0.1em] uppercase ${page === p || (p === "money" && page === "jobmoney") ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</button>
+    <button onClick={() => { setPage(p); }} className={`shrink-0 px-1.5 sm:px-3 h-9 rounded-[3px] font-display text-[13px] sm:text-[15px] font-bold tracking-[0.06em] sm:tracking-[0.1em] uppercase ${page === p || (p === "money" && page === "jobmoney") || (p === "jobs" && page === "plan") ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</button>
   );
   const shown: Page = page === "job" && !active ? "jobs" : page;
   return (
     <div className="h-full flex flex-col">
       <header className="h-14 shrink-0 border-b border-line bg-panel flex items-center gap-2 sm:gap-4 px-3 sm:px-4">
         <button onClick={() => setPage("jobs")} aria-label="All jobs"><Logo size={20} /></button>
-        <nav className="hidden sm:flex items-center gap-1 sm:ml-2 min-w-0 overflow-x-auto">{tab("jobs", "Jobs")}{tab("plan", "Plan")}{tab("money", "Money")}{tab("shop", "Shopping")}{tab("photos", "Photos")}{tab("team", "Team")}</nav>
+        <nav className="hidden sm:flex items-center gap-1 sm:ml-2 min-w-0 overflow-x-auto">{tab("jobs", "Jobs")}{tab("money", "Money")}{tab("shop", "Shopping")}{tab("photos", "Photos")}{tab("team", "Team")}</nav>
         <GoToButton className="ml-auto" />
         <button onClick={() => setPage("new")} className={`btn btn-sm ${page === "new" ? "btn-ghost" : "btn-primary"}`}>+<span className="hidden sm:inline"> New project</span></button>
         {signedIn ? <AccountChip c={signedIn} state={saveState} /> : (
@@ -722,9 +722,9 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
       </header>
       <GoToHost />
       {/* on a phone the main places sit at the bottom, under the thumb */}
-      <nav className="mobile-nav sm:hidden fixed bottom-0 inset-x-0 z-30 h-14 pb-[env(safe-area-inset-bottom)] box-content bg-panel border-t border-line grid grid-cols-6" aria-label="Main">
-        {([["jobs", "Jobs", "M3 21V9l9-6 9 6v12M9 21v-7h6v7"], ["plan", "Plan", "M3 3h18v18H3zM3 12h9M12 3v13M16 12h5"], ["money", "Money", "M3 6h18v12H3zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"], ["shop", "Shopping", "M5 7h14l-1.5 12h-11zM9 7a3 3 0 0 1 6 0"], ["photos", "Photos", "M4 8h3l2-3h6l2 3h3v11H4zM12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"], ["team", "Team", "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14a6.5 6.5 0 0 1 3.5 6"]] as const).map(([p, label, d]) => {
-          const on = page === p || (p === "jobs" && page === "job") || (p === "money" && page === "jobmoney");
+      <nav className="mobile-nav sm:hidden fixed bottom-0 inset-x-0 z-30 h-14 pb-[env(safe-area-inset-bottom)] box-content bg-panel border-t border-line grid grid-cols-5" aria-label="Main">
+        {([["jobs", "Jobs", "M3 21V9l9-6 9 6v12M9 21v-7h6v7"], ["money", "Money", "M3 6h18v12H3zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"], ["shop", "Shopping", "M5 7h14l-1.5 12h-11zM9 7a3 3 0 0 1 6 0"], ["photos", "Photos", "M4 8h3l2-3h6l2 3h3v11H4zM12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"], ["team", "Team", "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14a6.5 6.5 0 0 1 3.5 6"]] as const).map(([p, label, d]) => {
+          const on = page === p || (p === "jobs" && (page === "job" || page === "plan")) || (p === "money" && page === "jobmoney");
           return (
             <button key={p} onClick={() => { setPage(p); }} aria-current={on ? "page" : undefined}
               className={`flex flex-col items-center justify-center gap-0.5 font-display text-[11.5px] font-bold tracking-[0.08em] uppercase ${on ? "text-accent" : "text-muted"}`}>
@@ -833,7 +833,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
           {jobs.length ? (
             <>
               <div className="px-4 sm:px-6"><AllJobsMap jobs={jobs.map(summary)} {...liveCity(jobs)} /></div>
-              <div className="px-4 sm:px-6 py-6"><JobCards jobs={jobs.map((d) => ({ ...summary(d), ...jobGlance(d.pins, materials.lines.filter((l) => l.job_id === d.job.id), today()) }))} /></div>
+              <div className="px-4 sm:px-6 py-6"><JobCards jobs={jobs.map((d) => ({ ...summary(d), ...jobGlance(d.pins, materials.lines.filter((l) => l.job_id === d.job.id), today()) }))} onEditPlan={(id) => go("plan", id)} /></div>
             </>
           ) : (
             <div className="px-4 sm:px-6 py-6">
@@ -847,7 +847,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
         </div>
       ) : (
         <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">
-          <JobWorkspace key={active!.job.id} data={current!} api={api!} onAllJobs={() => setPage("jobs")} />
+          <JobWorkspace key={active!.job.id} data={current!} api={api!} onAllJobs={() => setPage("jobs")} onEditPlan={() => go("plan", active!.job.id)} />
         </div>
       )}
       </div>

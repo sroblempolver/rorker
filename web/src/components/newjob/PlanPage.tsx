@@ -82,7 +82,7 @@ export function PlanPage({ jobs, jobId, onPick, onSave, onBuild, onOpenJob, onNe
               {jobs.map((j) => <option key={j.id} value={j.id}>{j.name}{j.plan ? "" : " (no plan yet)"}</option>)}
             </select>
           </label>
-          <button className="btn btn-sm" onClick={() => onOpenJob(job.id)}>Open the job</button>
+          <button className="btn btn-sm" onClick={() => onOpenJob(job.id)}>Back to the job</button>
         </div>
         <SketchEditor key={`${job.id}-${round}`} initial={initial} pictures={[]} doneLabel="Save plan"
           build={onBuild ? build : undefined} onBuild={onBuild ? answer : undefined}

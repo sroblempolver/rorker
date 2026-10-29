@@ -31,7 +31,7 @@ defineStandards([
   { key: "cab.filler.width", group: "Countertops and trim", label: "Filler width", value: inch(3), unit: "len", help: "Stock fillers are 3\" and 6\", cut to fit." },
   { key: "cab.filler.end", group: "Countertops and trim", label: "Filler at a wall, at least", value: inch(1.5), unit: "len", help: "So doors and drawers open past the wall and its trim." },
   { key: "cab.panel.thick", group: "Countertops and trim", label: "End panel thickness", value: inch(0.75), unit: "len" },
-  { key: "cab.counter.thick", group: "Countertops and trim", label: "Countertop thickness", value: inch(1.25), unit: "len", help: "3 cm stone is about 1¼\"; laminate with a built-up edge 1½\"." },
+  { key: "cab.counter.thick", group: "Countertops and trim", label: "Countertop thickness", value: inch(1.25), unit: "len", help: "Stone slabs are about 1¼\"; laminate with a built-up edge 1½\"." },
   { key: "cab.counter.overhang", group: "Countertops and trim", label: "Countertop overhang at the front", value: inch(1.5), unit: "len", help: "A 24\" base with 1½\" overhang is a 25½\" deep top." },
   { key: "cab.crown", group: "Countertops and trim", label: "Crown molding height", value: inch(3), unit: "len" },
   { key: "cab.lightrail", group: "Countertops and trim", label: "Light rail height", value: inch(1.5), unit: "len" },
@@ -359,6 +359,8 @@ export function cabinetParts(c: CabSpec, w: number, d: number, h: number): Part[
 
 /** Everything the plan needs for a sketch cabinet: the parts for 3D, the viewer's front word, its name,
  *  and the full height with the countertop. */
+/** The box height of a cabinet from its height with the countertop and crown. */
+export function cabBoxHeight(c: CabSpec, overall: number) { return overall - (c.counter ? std("cab.counter.thick") : 0) - (c.crown ? std("cab.crown") : 0); }
 export function cabinetFixture(c: CabSpec, w: number, d: number, h: number) {
   const top = c.counter ? std("cab.counter.thick") : 0;
   return { parts: cabinetParts(c, w, d, h), front: viewerFront(c), height_mm: Math.round(h + top + (c.crown ? std("cab.crown") : 0)), spec: cabCode(c, w, d, h) };

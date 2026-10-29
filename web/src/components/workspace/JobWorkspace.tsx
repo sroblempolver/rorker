@@ -66,7 +66,7 @@ const sameLevel = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringi
 type Tab = "feed" | "details" | "pins" | "buy" | "stages" | "client";
 /** the wall picked with Move wall: its saved move (key), the room side it is, where it was drawn and how far it moved */
 interface SideSel { key: string; roomId: string; heading: "north" | "east" | "south" | "west"; at: [number, number]; by: number; t: number }
-export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; api: WorkspaceApi; onAllJobs: () => void }) {
+export function JobWorkspace({ data, api, onAllJobs, onEditPlan }: { data: WorkspaceData; api: WorkspaceApi; onAllJobs: () => void; /** open this job's plan in the drawing tool */ onEditPlan?: () => void }) {
   const [plan, setPlan] = useState(data.plan);
   const [runs, setRuns] = useState(data.runs);
   const [stages, setStages] = useState(data.stages);
@@ -981,6 +981,12 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
           <h1 className="font-stencil text-[22px] font-extrabold uppercase leading-none truncate">{job.name}</h1>
           <p className="text-[12.5px] text-muted truncate">{[job.address, job.client_name].filter(Boolean).join(" · ") || "No address yet"}</p>
         </div>
+        {onEditPlan && (
+          <button onClick={onEditPlan} className="btn btn-sm btn-primary shrink-0" title="Change the walls, doors and windows, stairs, furniture and cabinets">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3zM3 12h9M12 3v13M16 12h5" /></svg>
+            {plan ? "Edit plan" : "Draw the plan"}
+          </button>
+        )}
         <div className="flex-1 min-w-[180px] max-w-[420px]">
           <div className="flex items-baseline gap-2 text-[12.5px] mb-1">
             <span className="eyebrow !text-[11.5px]">Stage</span>

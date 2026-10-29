@@ -1,6 +1,7 @@
 // Mirror of agent/rorker_agent/schema.py. Millimetres, x right, y down, one frame for all floors.
 import type { Part } from "./catalog";
 import type { Sketch } from "./sketch";
+import type { CabSpec } from "./cabinets";
 export type Pt = [number, number];
 export type BBox = [number, number, number, number];
 
@@ -44,6 +45,10 @@ export interface Fixture {
   parts?: Part[] | null;
   /** the object it sits on (a computer on its desk), and where that one stood when this was put on it */
   on?: string | null; on_at?: Pt | null;
+  /** its number in its room (#1, #2 ...: lib/plan/numbers.ts) */
+  no?: number;
+  /** a kitchen or bath cabinet: how it's made, so it's rebuilt at a new size */
+  cab?: CabSpec;
 }
 export interface Stair {
   id: string; polygon: Pt[]; room_id: string | null; outline: Pt[][];

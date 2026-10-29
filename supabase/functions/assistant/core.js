@@ -1489,6 +1489,82 @@ defineStandards([
   { key: "roof.flatOverhang", group: "Roof", label: "Flat roof overhang", value: RULES.flatOverhang, unit: "len" }
 ]);
 
+// src/lib/plan/units.ts
+var INCH = 25.4;
+
+// src/lib/plan/cabinets.ts
+var inch2 = (n) => Math.round(n * INCH * 10) / 10;
+var step = (a2, b2, by = 3) => Array.from({ length: Math.floor((b2 - a2) / by) + 1 }, (_2, i) => a2 + i * by);
+defineStandards([
+  { key: "cab.base.height", group: "Kitchen cabinets", label: "Base cabinet height", value: inch2(34.5), unit: "len", help: 'The box without the countertop. With a 1\xBD" top the counter is at 36".' },
+  { key: "cab.base.depth", group: "Kitchen cabinets", label: "Base cabinet depth", value: inch2(24), unit: "len" },
+  { key: "cab.toekick", group: "Kitchen cabinets", label: "Toe kick height", value: inch2(4.5), unit: "len" },
+  { key: "cab.toekick.depth", group: "Kitchen cabinets", label: "Toe kick depth", value: inch2(3), unit: "len" },
+  { key: "cab.wall.height", group: "Kitchen cabinets", label: "Wall cabinet height", value: inch2(30), unit: "len", help: `30" under an 8' ceiling with a soffit or crown; 36" or 42" to go higher.` },
+  { key: "cab.wall.depth", group: "Kitchen cabinets", label: "Wall cabinet depth", value: inch2(12), unit: "len" },
+  { key: "cab.wall.bottom", group: "Kitchen cabinets", label: "Wall cabinets, bottom above the floor", value: inch2(54), unit: "len", help: '36" counter plus an 18" backsplash.' },
+  { key: "cab.tall.height", group: "Kitchen cabinets", label: "Tall cabinet height", value: inch2(84), unit: "len", help: 'Lines up with the top of 30" wall cabinets. 90" and 96" are also stock.' },
+  { key: "cab.tall.depth", group: "Kitchen cabinets", label: "Tall cabinet depth", value: inch2(24), unit: "len" },
+  { key: "cab.fridgewall.height", group: "Kitchen cabinets", label: "Cabinet over the fridge, height", value: inch2(15), unit: "len" },
+  { key: "cab.fridgewall.depth", group: "Kitchen cabinets", label: "Cabinet over the fridge, depth", value: inch2(24), unit: "len", help: '24" deep so it lines up with the fridge front.' },
+  { key: "cab.fill.max", group: "Kitchen cabinets", label: "Widest cabinet when filling a wall", value: inch2(36), unit: "len" },
+  { key: "cab.width.step", group: "Kitchen cabinets", label: "Stock widths go up by", value: inch2(3), unit: "len" },
+  { key: "cab.snap", group: "Kitchen cabinets", label: "A typed width this close to a stock width snaps to it", value: inch2(0.5), unit: "len" },
+  { key: "cab.sink.width", group: "Kitchen cabinets", label: "Sink base width", value: inch2(36), unit: "len" },
+  { key: "cab.filler.width", group: "Countertops and trim", label: "Filler width", value: inch2(3), unit: "len", help: 'Stock fillers are 3" and 6", cut to fit.' },
+  { key: "cab.filler.end", group: "Countertops and trim", label: "Filler at a wall, at least", value: inch2(1.5), unit: "len", help: "So doors and drawers open past the wall and its trim." },
+  { key: "cab.panel.thick", group: "Countertops and trim", label: "End panel thickness", value: inch2(0.75), unit: "len" },
+  { key: "cab.counter.thick", group: "Countertops and trim", label: "Countertop thickness", value: inch2(1.25), unit: "len", help: 'Stone slabs are about 1\xBC"; laminate with a built-up edge 1\xBD".' },
+  { key: "cab.counter.overhang", group: "Countertops and trim", label: "Countertop overhang at the front", value: inch2(1.5), unit: "len", help: 'A 24" base with 1\xBD" overhang is a 25\xBD" deep top.' },
+  { key: "cab.crown", group: "Countertops and trim", label: "Crown molding height", value: inch2(3), unit: "len" },
+  { key: "cab.lightrail", group: "Countertops and trim", label: "Light rail height", value: inch2(1.5), unit: "len" },
+  { key: "cab.range.width", group: "Appliance spaces", label: "Range opening", value: inch2(30), unit: "len" },
+  { key: "cab.dw.width", group: "Appliance spaces", label: "Dishwasher opening", value: inch2(24), unit: "len" },
+  { key: "cab.fridge.width", group: "Appliance spaces", label: "Fridge opening, width", value: inch2(36), unit: "len" },
+  { key: "cab.fridge.depth", group: "Appliance spaces", label: "Fridge depth", value: inch2(30), unit: "len" },
+  { key: "cab.fridge.height", group: "Appliance spaces", label: "Fridge opening, height", value: inch2(70), unit: "len", help: "Clear height under the cabinet over the fridge." },
+  { key: "cab.hood.bottom", group: "Appliance spaces", label: "Range hood, bottom above the floor", value: inch2(66), unit: "len", help: 'About 30" over the cooking surface.' },
+  { key: "cab.vanity.height", group: "Bath", label: "Vanity height", value: inch2(34.5), unit: "len", help: `Comfort height. Older and kids' vanities are 30\xBD".` },
+  { key: "cab.vanity.depth", group: "Bath", label: "Vanity depth", value: inch2(21), unit: "len" },
+  { key: "cab.linen.height", group: "Bath", label: "Linen cabinet height", value: inch2(84), unit: "len" },
+  { key: "cab.linen.depth", group: "Bath", label: "Linen cabinet depth", value: inch2(21), unit: "len" },
+  { key: "cab.medicine.height", group: "Bath", label: "Medicine cabinet height", value: inch2(30), unit: "len" },
+  { key: "cab.medicine.depth", group: "Bath", label: "Medicine cabinet depth", value: inch2(5), unit: "len" },
+  { key: "cab.medicine.bottom", group: "Bath", label: "Medicine cabinet, bottom above the floor", value: inch2(46), unit: "len" },
+  { key: "bath.toilet.width", group: "Bath", label: "Toilet width", value: inch2(20), unit: "len" },
+  { key: "bath.toilet.depth", group: "Bath", label: "Toilet depth", value: inch2(28), unit: "len" },
+  { key: "bath.tub.length", group: "Bath", label: "Bathtub length", value: inch2(60), unit: "len" },
+  { key: "bath.tub.width", group: "Bath", label: "Bathtub width", value: inch2(30), unit: "len" },
+  { key: "bath.tub.height", group: "Bath", label: "Bathtub height", value: inch2(20), unit: "len" },
+  { key: "bath.shower.width", group: "Bath", label: "Shower width", value: inch2(36), unit: "len" },
+  { key: "bath.shower.depth", group: "Bath", label: "Shower depth", value: inch2(36), unit: "len" }
+]);
+var WALL_H = [12, 15, 18, 24, 30, 36, 42];
+var FAMILIES = [
+  { id: "base", label: "Base", zone: "base", group: "Base", prefix: "B", widths: step(9, 48), configs: ["1d1dr", "2d1dr", "2d2dr", "1d", "2d"], kind: "base_cabinet", code: "w" },
+  { id: "drawer", label: "Drawer base", zone: "base", group: "Base", prefix: "DB", widths: step(12, 36), configs: ["3dr", "4dr", "2dr"], kind: "base_cabinet", code: "w" },
+  { id: "sink", label: "Sink base", zone: "base", group: "Base", prefix: "SB", widths: step(24, 42), configs: ["sink2", "sink1"], kind: "kitchen_sink", code: "w" },
+  { id: "blind", label: "Blind corner base", zone: "base", group: "Corners", prefix: "BBC", widths: step(36, 48), configs: ["blind"], kind: "base_cabinet", code: "w", blind: 24 },
+  { id: "susan", label: "Lazy susan", zone: "base", group: "Corners", prefix: "LS", widths: [33, 36], configs: ["susan"], kind: "base_cabinet", code: "w" },
+  { id: "wall", label: "Wall", zone: "wall", group: "Wall", prefix: "W", widths: step(9, 48), heights: WALL_H, configs: ["1d", "2d", "glass1", "glass2", "open"], kind: "wall_cabinet", code: "wh" },
+  { id: "fridge_wall", label: "Over the fridge", zone: "wall", group: "Wall", prefix: "W", widths: [30, 33, 36], heights: [12, 15, 18, 24], configs: ["2d", "1d"], kind: "wall_cabinet", code: "whd" },
+  { id: "wall_end", label: "Open end shelf", zone: "wall", group: "Wall", prefix: "WES", widths: [9, 12], heights: [30, 36, 42], configs: ["open"], kind: "wall_cabinet", code: "wh" },
+  { id: "wall_corner", label: "Wall diagonal corner", zone: "wall", group: "Corners", prefix: "WDC", widths: [24, 27], heights: [30, 36, 42], configs: ["1d", "glass1"], kind: "wall_cabinet", code: "wh" },
+  { id: "wall_blind", label: "Wall blind corner", zone: "wall", group: "Corners", prefix: "WBC", widths: step(24, 36), heights: [30, 36, 42], configs: ["blind"], kind: "wall_cabinet", code: "wh", blind: 12 },
+  { id: "tall", label: "Pantry", zone: "tall", group: "Tall", prefix: "U", widths: [18, 24, 30, 36], heights: [84, 90, 96], configs: ["pantry2", "pantry1"], kind: "tall_cabinet", code: "whd" },
+  { id: "oven", label: "Oven cabinet", zone: "tall", group: "Tall", prefix: "OC", widths: [27, 30, 33], heights: [84, 90, 96], configs: ["oven", "oven2"], kind: "tall_cabinet", code: "wh" },
+  { id: "filler_base", label: "Base filler", zone: "base", group: "Fillers and panels", prefix: "BF", widths: [3, 6], configs: ["plain"], kind: "filler", code: "w" },
+  { id: "filler_wall", label: "Wall filler", zone: "wall", group: "Fillers and panels", prefix: "WF", widths: [3, 6], heights: WALL_H, configs: ["plain"], kind: "filler", code: "wh" },
+  { id: "filler_tall", label: "Tall filler", zone: "tall", group: "Fillers and panels", prefix: "TF", widths: [3, 6], heights: [84, 90, 96], configs: ["plain"], kind: "filler", code: "wh" },
+  { id: "panel_base", label: "Dishwasher / end panel", zone: "base", group: "Fillers and panels", prefix: "DWP", widths: [0.75], configs: ["plain"], kind: "filler", code: "w" },
+  { id: "panel_tall", label: "Fridge end panel", zone: "tall", group: "Fillers and panels", prefix: "REP", widths: [0.75], heights: [84, 90, 96], configs: ["plain"], kind: "filler", code: "wh" },
+  { id: "valance", label: "Valance (over a window)", zone: "wall", group: "Fillers and panels", prefix: "VAL", widths: [30, 36, 48, 60], configs: ["plain"], kind: "filler", code: "w" },
+  { id: "vanity", label: "Vanity", zone: "base", group: "Bath", prefix: "V", widths: [18, 24, 30, 36, 42, 48, 60, 72], configs: ["vsink2", "vsink1", "vsides", "1d1dr"], kind: "vanity", code: "w" },
+  { id: "vanity_drawer", label: "Vanity drawers", zone: "base", group: "Bath", prefix: "VDB", widths: [12, 15, 18, 21, 24], configs: ["3dr", "4dr"], kind: "vanity", code: "w" },
+  { id: "linen", label: "Linen cabinet", zone: "tall", group: "Bath", prefix: "LC", widths: [18, 24], heights: [84, 90, 96], configs: ["linen_dr", "linen_d"], kind: "tall_cabinet", code: "wh" },
+  { id: "medicine", label: "Medicine cabinet", zone: "wall", group: "Bath", prefix: "MC", widths: [16, 20, 24, 30, 36], heights: [26, 30], configs: ["mirror"], kind: "medicine_cabinet", code: "wh" }
+];
+
 // src/lib/plan/catalog-extra.ts
 var b = (x2, y2, z2, w2, d2, h, color) => ({ shape: "box", x: x2, y: y2, z: z2, w: w2, d: d2, h, color });
 var c = (x2, y2, z2, w2, d2, h, color) => ({ shape: "cylinder", x: x2, y: y2, z: z2, w: w2, d: d2, h, color });
@@ -2819,82 +2895,6 @@ var BASE = {
 };
 var CATALOG = { ...BASE, ...EXTRA };
 var OBJECT_KINDS = [...Object.keys(CATALOG), "other"];
-
-// src/lib/plan/units.ts
-var INCH = 25.4;
-
-// src/lib/plan/cabinets.ts
-var inch2 = (n) => Math.round(n * INCH * 10) / 10;
-var step = (a2, b2, by = 3) => Array.from({ length: Math.floor((b2 - a2) / by) + 1 }, (_2, i) => a2 + i * by);
-defineStandards([
-  { key: "cab.base.height", group: "Kitchen cabinets", label: "Base cabinet height", value: inch2(34.5), unit: "len", help: 'The box without the countertop. With a 1\xBD" top the counter is at 36".' },
-  { key: "cab.base.depth", group: "Kitchen cabinets", label: "Base cabinet depth", value: inch2(24), unit: "len" },
-  { key: "cab.toekick", group: "Kitchen cabinets", label: "Toe kick height", value: inch2(4.5), unit: "len" },
-  { key: "cab.toekick.depth", group: "Kitchen cabinets", label: "Toe kick depth", value: inch2(3), unit: "len" },
-  { key: "cab.wall.height", group: "Kitchen cabinets", label: "Wall cabinet height", value: inch2(30), unit: "len", help: `30" under an 8' ceiling with a soffit or crown; 36" or 42" to go higher.` },
-  { key: "cab.wall.depth", group: "Kitchen cabinets", label: "Wall cabinet depth", value: inch2(12), unit: "len" },
-  { key: "cab.wall.bottom", group: "Kitchen cabinets", label: "Wall cabinets, bottom above the floor", value: inch2(54), unit: "len", help: '36" counter plus an 18" backsplash.' },
-  { key: "cab.tall.height", group: "Kitchen cabinets", label: "Tall cabinet height", value: inch2(84), unit: "len", help: 'Lines up with the top of 30" wall cabinets. 90" and 96" are also stock.' },
-  { key: "cab.tall.depth", group: "Kitchen cabinets", label: "Tall cabinet depth", value: inch2(24), unit: "len" },
-  { key: "cab.fridgewall.height", group: "Kitchen cabinets", label: "Cabinet over the fridge, height", value: inch2(15), unit: "len" },
-  { key: "cab.fridgewall.depth", group: "Kitchen cabinets", label: "Cabinet over the fridge, depth", value: inch2(24), unit: "len", help: '24" deep so it lines up with the fridge front.' },
-  { key: "cab.fill.max", group: "Kitchen cabinets", label: "Widest cabinet when filling a wall", value: inch2(36), unit: "len" },
-  { key: "cab.width.step", group: "Kitchen cabinets", label: "Stock widths go up by", value: inch2(3), unit: "len" },
-  { key: "cab.snap", group: "Kitchen cabinets", label: "A typed width this close to a stock width snaps to it", value: inch2(0.5), unit: "len" },
-  { key: "cab.sink.width", group: "Kitchen cabinets", label: "Sink base width", value: inch2(36), unit: "len" },
-  { key: "cab.filler.width", group: "Countertops and trim", label: "Filler width", value: inch2(3), unit: "len", help: 'Stock fillers are 3" and 6", cut to fit.' },
-  { key: "cab.filler.end", group: "Countertops and trim", label: "Filler at a wall, at least", value: inch2(1.5), unit: "len", help: "So doors and drawers open past the wall and its trim." },
-  { key: "cab.panel.thick", group: "Countertops and trim", label: "End panel thickness", value: inch2(0.75), unit: "len" },
-  { key: "cab.counter.thick", group: "Countertops and trim", label: "Countertop thickness", value: inch2(1.25), unit: "len", help: '3 cm stone is about 1\xBC"; laminate with a built-up edge 1\xBD".' },
-  { key: "cab.counter.overhang", group: "Countertops and trim", label: "Countertop overhang at the front", value: inch2(1.5), unit: "len", help: 'A 24" base with 1\xBD" overhang is a 25\xBD" deep top.' },
-  { key: "cab.crown", group: "Countertops and trim", label: "Crown molding height", value: inch2(3), unit: "len" },
-  { key: "cab.lightrail", group: "Countertops and trim", label: "Light rail height", value: inch2(1.5), unit: "len" },
-  { key: "cab.range.width", group: "Appliance spaces", label: "Range opening", value: inch2(30), unit: "len" },
-  { key: "cab.dw.width", group: "Appliance spaces", label: "Dishwasher opening", value: inch2(24), unit: "len" },
-  { key: "cab.fridge.width", group: "Appliance spaces", label: "Fridge opening, width", value: inch2(36), unit: "len" },
-  { key: "cab.fridge.depth", group: "Appliance spaces", label: "Fridge depth", value: inch2(30), unit: "len" },
-  { key: "cab.fridge.height", group: "Appliance spaces", label: "Fridge opening, height", value: inch2(70), unit: "len", help: "Clear height under the cabinet over the fridge." },
-  { key: "cab.hood.bottom", group: "Appliance spaces", label: "Range hood, bottom above the floor", value: inch2(66), unit: "len", help: 'About 30" over the cooking surface.' },
-  { key: "cab.vanity.height", group: "Bath", label: "Vanity height", value: inch2(34.5), unit: "len", help: `Comfort height. Older and kids' vanities are 30\xBD".` },
-  { key: "cab.vanity.depth", group: "Bath", label: "Vanity depth", value: inch2(21), unit: "len" },
-  { key: "cab.linen.height", group: "Bath", label: "Linen cabinet height", value: inch2(84), unit: "len" },
-  { key: "cab.linen.depth", group: "Bath", label: "Linen cabinet depth", value: inch2(21), unit: "len" },
-  { key: "cab.medicine.height", group: "Bath", label: "Medicine cabinet height", value: inch2(30), unit: "len" },
-  { key: "cab.medicine.depth", group: "Bath", label: "Medicine cabinet depth", value: inch2(5), unit: "len" },
-  { key: "cab.medicine.bottom", group: "Bath", label: "Medicine cabinet, bottom above the floor", value: inch2(46), unit: "len" },
-  { key: "bath.toilet.width", group: "Bath", label: "Toilet width", value: inch2(20), unit: "len" },
-  { key: "bath.toilet.depth", group: "Bath", label: "Toilet depth", value: inch2(28), unit: "len" },
-  { key: "bath.tub.length", group: "Bath", label: "Bathtub length", value: inch2(60), unit: "len" },
-  { key: "bath.tub.width", group: "Bath", label: "Bathtub width", value: inch2(30), unit: "len" },
-  { key: "bath.tub.height", group: "Bath", label: "Bathtub height", value: inch2(20), unit: "len" },
-  { key: "bath.shower.width", group: "Bath", label: "Shower width", value: inch2(36), unit: "len" },
-  { key: "bath.shower.depth", group: "Bath", label: "Shower depth", value: inch2(36), unit: "len" }
-]);
-var WALL_H = [12, 15, 18, 24, 30, 36, 42];
-var FAMILIES = [
-  { id: "base", label: "Base", zone: "base", group: "Base", prefix: "B", widths: step(9, 48), configs: ["1d1dr", "2d1dr", "2d2dr", "1d", "2d"], kind: "base_cabinet", code: "w" },
-  { id: "drawer", label: "Drawer base", zone: "base", group: "Base", prefix: "DB", widths: step(12, 36), configs: ["3dr", "4dr", "2dr"], kind: "base_cabinet", code: "w" },
-  { id: "sink", label: "Sink base", zone: "base", group: "Base", prefix: "SB", widths: step(24, 42), configs: ["sink2", "sink1"], kind: "kitchen_sink", code: "w" },
-  { id: "blind", label: "Blind corner base", zone: "base", group: "Corners", prefix: "BBC", widths: step(36, 48), configs: ["blind"], kind: "base_cabinet", code: "w", blind: 24 },
-  { id: "susan", label: "Lazy susan", zone: "base", group: "Corners", prefix: "LS", widths: [33, 36], configs: ["susan"], kind: "base_cabinet", code: "w" },
-  { id: "wall", label: "Wall", zone: "wall", group: "Wall", prefix: "W", widths: step(9, 48), heights: WALL_H, configs: ["1d", "2d", "glass1", "glass2", "open"], kind: "wall_cabinet", code: "wh" },
-  { id: "fridge_wall", label: "Over the fridge", zone: "wall", group: "Wall", prefix: "W", widths: [30, 33, 36], heights: [12, 15, 18, 24], configs: ["2d", "1d"], kind: "wall_cabinet", code: "whd" },
-  { id: "wall_end", label: "Open end shelf", zone: "wall", group: "Wall", prefix: "WES", widths: [9, 12], heights: [30, 36, 42], configs: ["open"], kind: "wall_cabinet", code: "wh" },
-  { id: "wall_corner", label: "Wall diagonal corner", zone: "wall", group: "Corners", prefix: "WDC", widths: [24, 27], heights: [30, 36, 42], configs: ["1d", "glass1"], kind: "wall_cabinet", code: "wh" },
-  { id: "wall_blind", label: "Wall blind corner", zone: "wall", group: "Corners", prefix: "WBC", widths: step(24, 36), heights: [30, 36, 42], configs: ["blind"], kind: "wall_cabinet", code: "wh", blind: 12 },
-  { id: "tall", label: "Pantry", zone: "tall", group: "Tall", prefix: "U", widths: [18, 24, 30, 36], heights: [84, 90, 96], configs: ["pantry2", "pantry1"], kind: "tall_cabinet", code: "whd" },
-  { id: "oven", label: "Oven cabinet", zone: "tall", group: "Tall", prefix: "OC", widths: [27, 30, 33], heights: [84, 90, 96], configs: ["oven", "oven2"], kind: "tall_cabinet", code: "wh" },
-  { id: "filler_base", label: "Base filler", zone: "base", group: "Fillers and panels", prefix: "BF", widths: [3, 6], configs: ["plain"], kind: "filler", code: "w" },
-  { id: "filler_wall", label: "Wall filler", zone: "wall", group: "Fillers and panels", prefix: "WF", widths: [3, 6], heights: WALL_H, configs: ["plain"], kind: "filler", code: "wh" },
-  { id: "filler_tall", label: "Tall filler", zone: "tall", group: "Fillers and panels", prefix: "TF", widths: [3, 6], heights: [84, 90, 96], configs: ["plain"], kind: "filler", code: "wh" },
-  { id: "panel_base", label: "Dishwasher / end panel", zone: "base", group: "Fillers and panels", prefix: "DWP", widths: [0.75], configs: ["plain"], kind: "filler", code: "w" },
-  { id: "panel_tall", label: "Fridge end panel", zone: "tall", group: "Fillers and panels", prefix: "REP", widths: [0.75], heights: [84, 90, 96], configs: ["plain"], kind: "filler", code: "wh" },
-  { id: "valance", label: "Valance (over a window)", zone: "wall", group: "Fillers and panels", prefix: "VAL", widths: [30, 36, 48, 60], configs: ["plain"], kind: "filler", code: "w" },
-  { id: "vanity", label: "Vanity", zone: "base", group: "Bath", prefix: "V", widths: [18, 24, 30, 36, 42, 48, 60, 72], configs: ["vsink2", "vsink1", "vsides", "1d1dr"], kind: "vanity", code: "w" },
-  { id: "vanity_drawer", label: "Vanity drawers", zone: "base", group: "Bath", prefix: "VDB", widths: [12, 15, 18, 21, 24], configs: ["3dr", "4dr"], kind: "vanity", code: "w" },
-  { id: "linen", label: "Linen cabinet", zone: "tall", group: "Bath", prefix: "LC", widths: [18, 24], heights: [84, 90, 96], configs: ["linen_dr", "linen_d"], kind: "tall_cabinet", code: "wh" },
-  { id: "medicine", label: "Medicine cabinet", zone: "wall", group: "Bath", prefix: "MC", widths: [16, 20, 24, 30, 36], heights: [26, 30], configs: ["mirror"], kind: "medicine_cabinet", code: "wh" }
-];
 
 // src/lib/plan/stairs.ts
 var IN = 25.4;
@@ -4793,7 +4793,7 @@ var PART = { type: "object", properties: {
 var TOOLS = [
   { name: "list_jobs", description: "List the jobs this person can see: id, name, address, status, open pins and current stage.", input_schema: { type: "object", properties: {} } },
   { name: "job_overview", description: "One job at a glance: stages, floors and rooms (with ids), open pins (number, kind, title, status, due date, who is tagged, where).", input_schema: { type: "object", properties: { job: JOB } } },
-  { name: "find_in_plan", description: `Find rooms, walls, doors, windows and objects in a job's plan by name, kind, room or id ("kitchen sink", "master bedroom", "G-F46"). Returns ids to use with other tools.`, input_schema: { type: "object", properties: { job: JOB, query: { type: "string" } }, required: ["query"] } },
+  { name: "find_in_plan", description: `Find rooms, walls, doors, windows and objects in a job's plan by name, kind, room, number or id ("kitchen sink", "master bedroom", "kitchen #3", "G-F46"). Every cabinet and item has a number in its room, shown on the plan. Returns ids to use with other tools.`, input_schema: { type: "object", properties: { job: JOB, query: { type: "string" } }, required: ["query"] } },
   {
     name: "add_pin",
     description: "Add a pin (task, issue, note or material) to a job, on a room or object when given its id. Due date defaults to today. Tag people by name.",
@@ -4864,10 +4864,11 @@ var TOOLS = [
   },
   {
     name: "change_object",
-    description: "Move, turn, resize, rename or re-seat one object. Move by mm east/south (negative for west/north), or to a new centre; turn it to face a side or another object; put it on something (`on`), or set its height above the floor.",
+    description: 'Move, turn, resize, rename or re-seat one object. Name it by id, or by its number in its room (every cabinet and item has one, shown on the plan: element_id "3" with room "kitchen"). Move by mm east/south (negative for west/north), or to a new centre; turn it to face a side or another object; put it on something (`on`), or set its height above the floor. Width, depth and height can be changed on anything; a cabinet\'s height is its box height (without the countertop). A cabinet that would run into its neighbour or past the wall isn\'t changed: you get the room there is and the choices (the size that fits exactly, made to order, or a stock size with a filler); ask the person which, then call again with that width.',
     input_schema: { type: "object", properties: {
       job: JOB,
-      element_id: { type: "string" },
+      element_id: { type: "string", description: 'Its id, or its number in the room ("3", "#3")' },
+      room: { type: "string", description: "The room, when naming it by number" },
       move_east_mm: { type: "number" },
       move_south_mm: { type: "number" },
       to_x: { type: "number" },
@@ -4904,6 +4905,7 @@ function instructions(me, ctx) {
     "Never give out information beyond what the tools return for this person. Don't reveal anything about other companies, and don't repeat personal contact details unless this person is an admin and asked for them.",
     "Never say which AI model or company powers you; you are the Rorker assistant.",
     `Where things are: left and right of an object always mean as seen standing in front of it, facing it (the way you'd use a stove, a sink or a cabinet), not as seen on the plan. "The cabinet right of the stove" is the one at your right hand when you face the stove. Use whats_around to find it. Above and below mean height on the wall. North, south, east and west follow the plan (north is up). If two things still fit, ask one short question naming them by where they are.`,
+    `Numbers: every cabinet and item has a number in its room, shown on the plan in a small round tag (orange for things on the floor, dark for wall cabinets). When the person says "cabinet 3" or "number 3", it's that number in the room they mean (the one they're looking at, or the kitchen for cabinets); call it by its number back to them ("Cabinet #3 is now 34" wide.").`,
     "Changing the plan: you can add, move, turn, resize and remove furniture, appliances and fixtures, and rename rooms (room_layout first, then add_objects, change_object, remove_objects, rename_room). Walls, rooms' shapes, doors and windows can't be changed here yet: say so in one sentence and offer to add a task pin for it.",
     "Real things, real sizes: every object has a real width, depth, height, weight and mounting height, and drawings never show furniture heights, so add_objects fills in the usual ones for each kind. Pick the kind that is the actual thing (a computer is kind computer, never a box or other). A computer, monitor, laptop, printer, table lamp, microwave, coffee machine or TV sits on a desk, counter or sideboard, never on the floor: put it `on` that piece (add the desk first if the room has none, or ask). Chairs go at their desk or table facing it, bar stools at the counter or island facing it, sofas and armchairs face the TV, fireplace or coffee table, beds, cabinets, wardrobes and desks stand with their backs to a wall facing into the room, wall cabinets, mirrors, pictures and shelves hang on a wall at their usual height. Leave facing out and it is worked out that way; give it only when the person asks for something else.",
     "Something not in the kind list (a rowing machine, a pool table, a kayak rack): don't settle for a box. Work out from what you know (or look it up with web search when you can) what it really looks like, its real size and weight, then add it as kind other with its name and parts: simple boxes, cylinders and spheres at real sizes and colours that together look like the real thing. Only when you truly can't tell what it is, ask what it looks like.",

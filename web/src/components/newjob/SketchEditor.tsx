@@ -39,6 +39,8 @@ import { isClosedStroke, tidyLine } from "@/lib/plan/pen";
 import type { SketchWall } from "@/lib/plan/sketch";
 import { WallPanel } from "./WallPanel";
 import { WallPieces } from "./WallPieces";
+import { ItemBadge, badgeSpot } from "@/components/plan/ItemBadge";
+import { isNumbered, itemNumbers, stampNumbers } from "@/lib/plan/numbers";
 import { MarkLayer, useSuggest, type ViewAs } from "./SuggestPanel";
 import { LibraryPanel, usePlacing } from "./LibraryPanel";
 import { HomesPanel } from "./HomesPanel";
@@ -69,6 +71,11 @@ const DOOR_KINDS = [["door", "Door"], ["double_door", "Double door"], ["sliding_
 const SIDES: Side[] = ["north", "east", "south", "west"];
 const OPP: Record<Side, Side> = { north: "south", south: "north", east: "west", west: "east" };
 
+const ANGLE_OF: Record<Side, number> = { east: 0, south: 90, west: 180, north: -90 };
+/** The room a thing is in, by name: the one it names, else the one its centre is in. */
+function roomOfThing(f: SketchFloor, x: { room?: string; center: Pt }) {
+  return (x.room ?? f.rooms.find((r) => pointInPoly(x.center, r.polygon))?.name ?? "").toLowerCase() || null;
+}
 type Tool = "select" | "room" | "pen" | "corners" | "split" | "door" | "window" | "balcony" | "thing" | "cabinet" | "eyedrop" | "remove" | "scale" | "match" | "picture" | "stairs";
 const TOOLS: { id: Tool; label: string; key: string; help: string; menu?: boolean; picture?: boolean; more?: boolean }[] = [
   { id: "select", label: "Select", key: "v", help: "Click a room, wall, door, window or piece of furniture to change it. Drag a room to move it with everything in it, a corner to reshape it, or an arrow on a wall to push or pull that wall (the room next door and the furniture against it follow). Right-click a room's wall to separate its walls into pieces. Q turns the picked room or thing a quarter turn (Shift+Q the other way). Click a wall of the picked room to see it from the side. Arrow keys nudge. Drag empty space to look around, scroll to zoom." },
@@ -267,7 +274,10 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   } });
   useEffect(() => { setSel(null); setWall(null); }, [sg.as, sg.locked]);
   const commit = (next: Sketch) => { past.current.push(sk); if (past.current.length > 80) past.current.shift(); future.current = []; setSk(next); };
-  const setFloor = (f: SketchFloor, keepHistory = true) => {
+  const nums = useMemo(() => itemNumbers(floor.fixtures ?? [], (x) => roomOfThing(floor, x)), [floor]);
+  const setFloor = (f0: SketchFloor, keepHistory = true) => {
+    // every item keeps its number in its room once it has one (lib/plan/numbers.ts)
+    const f = f0.fixtures?.some((x) => !x.no && isNumbered(x.kind)) ? { ...f0, fixtures: stampNumbers(f0.fixtures, (x) => roomOfThing(f0, x)) } : f0;
     const next = { ...sk, floors: sk.floors.map((x, i) => (i === fi ? f : x)) };
     if (keepHistory) commit(next); else setSk(next);
   };
@@ -1070,6 +1080,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
               return (
                 <g key={i}>
                   <rect x={cx - w / 2} y={cy - d / 2} width={w} height={d} fill="#f4efe6" fillOpacity={f.cab && f.elevation_mm ? 0.25 : 0.85} stroke={on ? "#ff6a1f" : "#17181b"} strokeWidth={(on ? 3 : 1.5) * px} strokeDasharray={f.cab && f.elevation_mm ? `${5 * px} ${3 * px}` : undefined} />
+                  {nums.has(f) && Math.min(w, d) / px > 14 && <ItemBadge n={nums.get(f)!} r={fontMm * 0.5} hung={!!(f.cab && f.elevation_mm)} at={badgeSpot(f.center, [w / 2, d / 2], f.facing ? ANGLE_OF[f.facing] : null, !!(f.cab && f.elevation_mm))} />}
                   {f.facing && (!f.cab || on) && <line x1={cx} y1={cy} x2={tip[0]} y2={tip[1]} stroke="#ff6a1f" strokeWidth={2 * px} />}
                   {Math.min(w, d) / px > 26 && <text x={f.cab && !f.elevation_mm ? (cx + tip[0]) / 2 : cx} y={f.cab && !f.elevation_mm ? (cy + tip[1]) / 2 : cy} fontSize={fontMm * 0.7} fillOpacity={f.cab && f.elevation_mm ? 0.7 : 1} textAnchor="middle" dominantBaseline="middle" fill="#17181b" style={{ pointerEvents: "none" }}>{f.cab ? cabCode(f.cab, f.width_mm ?? 600, f.depth_mm ?? 600, f.height_mm ?? defaults(f.cab.fam).h) : (CATALOG[f.kind]?.label ?? f.kind).split(" ")[0]}</text>}
                 </g>
@@ -1193,7 +1204,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         )}
         </div>
         {tool === "thing" && <CatalogTray armed={thing} units={lu} startRoom={tabForRoom((sel?.t === "room" ? floor.rooms[sel.i] : hover ? floor.rooms[roomAt(hover)] : undefined)?.type)} onPick={(it) => { setThing(it); setNote(null); }} />}
-        {seen && <WallView key={`${seen.room}-${seen.edge}`} floor={floor} room={seen.room} edge={seen.edge} height={floor.height_mm ?? std("house.ceiling")} units={lu} addOnOpen={wallAdd} onAdded={() => setWallAdd(null)} onChange={(f, h) => setFloor(f, h ?? true)} onClose={() => setWall(null)} onEdge={(edge) => setWall({ room: seen.room, edge })}
+        {seen && <WallView key={`${seen.room}-${seen.edge}`} nums={nums} floor={floor} room={seen.room} edge={seen.edge} height={floor.height_mm ?? std("house.ceiling")} units={lu} addOnOpen={wallAdd} onAdded={() => setWallAdd(null)} onChange={(f, h) => setFloor(f, h ?? true)} onClose={() => setWall(null)} onEdge={(edge) => setWall({ room: seen.room, edge })}
           armed={tool === "thing" ? itemLabel(thing) : null} onPlace={placeOnWall} />}
         </div>
 
@@ -1235,7 +1246,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           {tool === "scale" && clicks.length === 2 && (
             <div className="space-y-2">
               <label className="label" htmlFor="len">How long is that?</label>
-              <input id="len" autoFocus className="input !h-9" value={lengthText} onChange={(e) => setLengthText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") applyScale(floor.rooms.length > 0); }} placeholder={"e.g. 12' 6\", 150 in or 3.6 m"} />
+              <input id="len" autoFocus className="input !h-9" value={lengthText} onChange={(e) => setLengthText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") applyScale(floor.rooms.length > 0); }} placeholder={"e.g. 12' 6\" or 150 in"} />
               <div className="flex gap-2">
                 <button className="btn btn-sm btn-primary flex-1" onClick={() => applyScale(floor.rooms.length > 0)}>{floor.rooms.length ? "Scale everything" : "Set the scale"}</button>
                 {floor.rooms.length > 0 && bg && <button className="btn btn-sm btn-ghost" onClick={() => applyScale(false)}>Picture only</button>}
@@ -1325,10 +1336,11 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
               onJoin={(() => { const w = floor.walls![sel.i], ri = floor.rooms.findIndex((r) => r.loose && onOutline(w, r.polygon)); return ri >= 0 ? () => { setFloor(joinRoom(floor, ri)); setSel({ t: "room", i: ri }); } : null; })()}
               onCopy={() => { const w = floor.walls![sel.i], L = dist(w.a, w.b) || 1, o = 24 * INCH, n: Pt = [-(w.b[1] - w.a[1]) / L * o, (w.b[0] - w.a[0]) / L * o]; const c = { ...w, room: undefined, a: [w.a[0] + n[0], w.a[1] + n[1]] as Pt, b: [w.b[0] + n[0], w.b[1] + n[1]] as Pt }; setWalls([...floor.walls!, c]); setSel({ t: "wall", i: floor.walls!.length }); }} />
           )}
+          {fix && sel && fix.cab && nums.has(fix) && <p className="text-[12px] text-muted -mb-1">Cabinet #{nums.get(fix)} in this room</p>}
           {fix && sel && fix.cab && <CabinetEdit fx={fix} units={lu} onDelete={deleteSel} onChange={(nx) => { const h = addHood({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? nx : f)) }, sel.i); setFloor(h.floor); if (h.added) setNote("A hood went in over it: the code wants one over a range or cooktop."); }} />}
           {fix && sel && !fix.cab && (
             <div className="space-y-2">
-              <p className="eyebrow">{CATALOG[fix.kind]?.label ?? fix.kind}</p>
+              <p className="eyebrow">{nums.has(fix) ? `#${nums.get(fix)} · ` : ""}{CATALOG[fix.kind]?.label ?? fix.kind}</p>
               <select className="input !h-9" value={fix.kind} aria-label="What it is" onChange={(e) => { const s = CATALOG[e.target.value]; setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? { ...f, kind: e.target.value, name: s?.label, width_mm: s?.w ?? f.width_mm, depth_mm: s?.d ?? f.depth_mm } : f)) }); }}>
                 {ALL_KINDS.map((k) => <option key={k} value={k}>{CATALOG[k].label}</option>)}
                 {!CATALOG[fix.kind] && <option value={fix.kind}>{fix.kind}</option>}
