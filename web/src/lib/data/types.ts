@@ -2,6 +2,7 @@ import type { PlaceTag } from "@/lib/plan/tags";
 import type { Part } from "@/lib/plan/catalog";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
 import type { BuildLook, Furnish } from "@/lib/plan/build";
+import type { BuildSpec } from "@/lib/plan/buildSpec";
 
 export interface Company {
   id: string; name: string; logo_url: string | null; brand_color: string; phone: string | null;
@@ -51,7 +52,7 @@ export interface ElementEdit {
   /** an object added in the app, not in the drawing: the edit's key is its new id */
   added?: AddedObject;
   /** job-wide, under the "@job" key: which floors are furnished, and the build stages the contractor added */
-  furnish?: Furnish; stage_looks?: Record<string, BuildLook>;
+  furnish?: Furnish; stage_looks?: Record<string, BuildLook>; build?: BuildSpec;
   /** Build mode. A door or window: its bottom above the floor, and how far it slid along its wall (mm) */
   sill_mm?: number; slide?: number;
   /** a wall moved straight across: the side of a room it is (which way it faces, a point on it as

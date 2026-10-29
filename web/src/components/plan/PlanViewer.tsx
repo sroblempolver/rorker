@@ -10,7 +10,7 @@ import type { ElementStatus, Plan } from "@/lib/plan/types";
 import type { BuildMap } from "./BuildLayer";
 import { ExteriorView, WallView } from "./Elevations";
 import { FloorCanvas, type ColorMode } from "./FloorCanvas";
-import { Plan3D, webglAvailable, type WallMode } from "./Plan3D";
+import { Plan3D, webglAvailable, type Plan3DProps, type WallMode } from "./Plan3D";
 import { SiteView } from "./SiteView";
 import { AwayChip } from "./AwayButtons";
 import { showMarks, useMarks, type Mark } from "@/lib/plan/marks";
@@ -66,6 +66,8 @@ interface Props {
   onFurnish?: (f: Furnish) => void;
   /** how far the house is built: set by the stage picked in Stages, finished when none is */
   look?: BuildLook;
+  /** the 3D outside as the job is built (siding, roofing, the wall layer at the stage picked) */
+  outside?: Plan3DProps["outside"];
   /** Build mode (change the house): the button that turns it on and off; left out, no button */
   build?: { on: boolean; toggle: () => void; map?: BuildMap; place?: boolean };
   /** what a click does while the map is waiting for one (a build tool), instead of dropping a pin */
@@ -200,7 +202,7 @@ export function PlanViewer(p: Props) {
       )}
       {in3d && (
         <Plan3D plan={plan3d} only={only} mode={level.kind === "exterior" ? "building" : "floor"} floor={floor} room={room} selected={p.selected} selectedPin={p.selectedPin} selectedItem={p.selectedItem}
-          states={p.states} colorMode={p.colorMode} pins={p.pins} items={p.items} pinMode={p.pinMode} draft={p.draft} wallMode={wallMode} look={look} locked={p.readOnly} controls={controls}
+          states={p.states} colorMode={p.colorMode} pins={p.pins} items={p.items} pinMode={p.pinMode} draft={p.draft} wallMode={wallMode} look={look} outside={p.outside} locked={p.readOnly} controls={controls}
           onSelect={(id) => { const r = floor && id ? floor.rooms.find((x) => x.id === id) : null; if (r && floor) p.setLevel({ kind: "room", floorId: floor.id, roomId: r.id }); p.onSelect(id); }}
           onSelectPin={p.onSelectPin} onSelectItem={p.onSelectItem} onPlacePin={p.onPlacePin}
           onMoveFixture={(id, dx, dy) => p.onMoveFixture(id, dx, dy, 0)} onMoveItem={p.onMoveItem} onMovePin={p.onMovePin}

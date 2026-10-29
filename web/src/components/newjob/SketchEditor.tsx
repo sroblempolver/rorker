@@ -4,6 +4,7 @@
 // reshape), a room can be cut in two, doors go on the wall between two rooms (or an outside wall),
 // windows on outside walls, and things (a sink, a bed) are dropped where they are. Scale comes from one
 // length you know. The result is the same sketch the reader makes, so the plan is built the same way.
+import type { BuildSpec } from "@/lib/plan/buildSpec";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import type { Pt } from "@/lib/plan/types";
 import type { Side, Sketch, SketchDoor, SketchFloor } from "@/lib/plan/sketch";
@@ -114,11 +115,13 @@ const dist = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const blankFloor = (level: number): SketchFloor => ({ name: level === 0 ? "Ground floor" : `Level ${level}`, level, rooms: [], doors: [], windows: [], fixtures: [] });
 
 
-export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCancel, doneLabel = "Use this plan", viewAs = "contractor" }: {
+export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCancel, doneLabel = "Use this plan", viewAs = "contractor", build }: {
   initial: Sketch | null; pictures: Picture[]; initialBackdrops?: Record<number, Backdrop>;
   onDone: (sketch: Sketch, backdrops: Record<number, Backdrop>) => void; onCancel: () => void; doneLabel?: string;
   /** who is drawing: the contractor, or their client (whose changes are suggestions) */
   viewAs?: ViewAs;
+  /** how the house is built, when the build questions were answered: "Build it" follows its stages */
+  build?: BuildSpec;
 }) {
   const [sk, setSk] = useState<Sketch>(() => (initial?.floors?.length ? flatten(initial) : { floors: [blankFloor(0)] }));
   const past = useRef<Sketch[]>([]);
@@ -1110,7 +1113,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           <div className="h-[44vh] xl:h-auto">
             <Live3D sketch={sk} fi={fi} sel={sel?.t === "room" || sel?.t === "thing" ? { t: sel.t, i: sel.i } : null} walls={walls3d} onWalls={setWalls3d}
               onPick={(f, s) => { if (f !== fi) { setFi(f); setClicks([]); setWall(null); } setSel(s); }}
-              onFloor={(i) => { setFi(i); setSel(null); setClicks([]); setWall(null); }} roofOn={showRoof} onRoof={() => { setShowRoof((x) => !x); setShowStd(false); }} marks={sg.locked ? sg.marks : null} />
+              onFloor={(i) => { setFi(i); setSel(null); setClicks([]); setWall(null); }} roofOn={showRoof} onRoof={() => { setShowRoof((x) => !x); setShowStd(false); }} marks={sg.locked ? sg.marks : null} build={build} />
           </div>
         )}
         </div>

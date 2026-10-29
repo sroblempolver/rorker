@@ -16,6 +16,8 @@ import { MicButton, speak, stopSpeaking, useDictation } from "@/components/voice
 import { useFeedback } from "@/components/ui/feedback";
 import { useEscape } from "@/components/ui/hotkeys";
 import { SketchEditor, picturesFrom, type Backdrop } from "./SketchEditor";
+import { BuildQuestions, SpecStageList, useStagePlay } from "./BuildQuestions";
+import { nextQuestion, outsideAt, specSummary, stagesFromSpec, type BuildSpec } from "@/lib/plan/buildSpec";
 
 export interface NewProjectResult {
   job: { name: string; address: string | null; job_type: string; start_date: string | null; client_name: string | null; client_email: string | null; client_phone: string | null };
@@ -23,6 +25,10 @@ export interface NewProjectResult {
   summary: string;
   /** which floors to furnish; left unset, the job asks when the plan first opens */
   furnish?: Furnish;
+  /** how the house is built (the build questions), and the stages worked out from it; without
+   *  them the job takes its stages from the company template */
+  build?: BuildSpec;
+  stages?: { name: string; description: string }[];
 }
 
 const READING = ["Reading your files…", "Finding the rooms…", "Measuring walls…", "Placing doors and windows…", "Working out the kitchen and baths…", "Almost there…"];
@@ -56,6 +62,9 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
   const [talking, setTalking] = useState(false);
   // a read plan starts empty: the review asks whether to furnish all of it or pick floors
   const [furnish, setFurnish] = useState<Furnish | undefined>(undefined);
+  // after "This is my plan": how the house is built, kept while the plan is drawn again
+  const [phase, setPhase] = useState<"check" | "build">("check");
+  const [spec, setSpec] = useState<BuildSpec>({});
   const built = useMemo(() => {
     if (!project?.sketch?.floors?.length) return null;
     try { return planFromSketch(project.sketch, prep?.source?.filename ? prep.source : { kind: "notes", filename: "notes" }); } catch { return null; }
@@ -120,6 +129,8 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
   };
   const drawn = (sketch: NonNullable<IntakeProject["sketch"]>, b: Record<number, Backdrop>) => {
     setBackdrops(b);
+    // "Use this plan" means the plan is done: the build questions come up right away
+    setPhase("build");
     if (drawFrom === "review" && project) {
       setProject({ ...project, sketch });
       chat.current?.handDrawn(sketch);
@@ -230,11 +241,11 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
 
         {stage === "draw" && (
           <SketchEditor initial={drawFrom === "review" ? project?.sketch ?? null : null} pictures={pictures} initialBackdrops={drawFrom === "review" ? backdrops : undefined}
-            onDone={drawn} onCancel={() => setStage(drawFrom === "review" && project ? "review" : "start")} />
+            build={phase === "build" ? spec : undefined} onDone={drawn} onCancel={() => setStage(drawFrom === "review" && project ? "review" : "start")} />
         )}
 
         {stage === "review" && project && (
-          <Review project={project} onDraw={() => { setDrawFrom("review"); setStage("draw"); }} built={built} furnish={furnish} setFurnish={setFurnish} onCreate={onCreate} onRestart={() => { setStage("start"); setStep(null); setProject(null); setTalk([]); setTalkQs(null); setErr(null); setFurnish(undefined); }}
+          <Review project={project} phase={phase} setPhase={setPhase} spec={spec} setSpec={setSpec} onDraw={() => { setDrawFrom("review"); setStage("draw"); }} built={built} furnish={furnish} setFurnish={setFurnish} onCreate={onCreate} onRestart={() => { setStage("start"); setStep(null); setProject(null); setTalk([]); setTalkQs(null); setErr(null); setFurnish(undefined); setPhase("check"); setSpec({}); }}
             check={chat.current && <Check onFurnish={(room) => { if (built) setFurnish((f) => furnishWhere(built.plan, f, room)); }} lines={talk} busy={talking} questions={talkQs} plan={project.sketch?.questions ?? []} rooms={(project.sketch?.floors ?? []).flatMap((f) => f.rooms.map((r) => r.name))} err={err} onSend={discuss} onStop={() => ctl.current?.abort()} />} />
         )}
       </div>
@@ -263,8 +274,10 @@ function Questions({ step, answers, setAnswers, onSend, onSkip, err }: { step: E
   );
 }
 
-function Review({ project, built, furnish, setFurnish, onCreate, onRestart, check, onDraw }: {
-  project: IntakeProject; onDraw: () => void; built: { plan: Plan } | null; furnish: Furnish | undefined; setFurnish: (f: Furnish) => void;
+function Review({ project, built, furnish, setFurnish, onCreate, onRestart, check, onDraw, phase, setPhase, spec, setSpec }: {
+  project: IntakeProject; onDraw: () => void;
+  /** "This is my plan" pressed: the build questions show; the answers so far */
+  phase: "check" | "build"; setPhase: (p: "check" | "build") => void; spec: BuildSpec; setSpec: (s: BuildSpec) => void; built: { plan: Plan } | null; furnish: Furnish | undefined; setFurnish: (f: Furnish) => void;
   onCreate: (r: NewProjectResult) => void; onRestart: () => void; check: ReactNode;
 }) {
   const [job, setJob] = useState({
@@ -282,6 +295,16 @@ function Review({ project, built, furnish, setFurnish, onCreate, onRestart, chec
 
   const [view3d, setView3d] = useState(false);
   const states = useMemo(() => new Map(), []);
+  // "This is my plan": then the build questions, on this same page, and the stages they make
+  const specStages = useMemo(() => stagesFromSpec(spec), [spec]);
+  const names = useMemo(() => specStages.map((s) => s.name), [specStages]);
+  const play = useStagePlay(names.length);
+  const shownStage = phase === "build" && play.i >= 0 ? specStages[play.i] : null;
+  const outside = useMemo(() => (phase === "build" ? outsideAt(spec, names, play.i) : undefined), [phase, spec, names, play.i]);
+  const qsDone = !nextQuestion(spec);
+  const top = useRef<HTMLDivElement>(null);
+  // a stage picked shows the whole house in 3D
+  useEffect(() => { if (play.i >= 0) { setView3d(true); setLevel({ kind: "exterior" }); } }, [play.i]);
   const field = (k: keyof typeof job, label: string, type = "text") => (
     <div><label className="label" htmlFor={`np-${k}`}>{label}</label><input id={`np-${k}`} type={type} className="input" value={job[k]} onChange={(e) => setJob({ ...job, [k]: e.target.value })} /></div>
   );
@@ -306,11 +329,18 @@ function Review({ project, built, furnish, setFurnish, onCreate, onRestart, chec
               <PlanViewer plan={plan} level={level} setLevel={setLevel} selected={null} onSelect={nothing} selectedPin={null} onSelectPin={nothing}
                 states={states} pins={[]} colorMode={colorMode} setColorMode={setColorMode} pinMode={false} setPinMode={nothing} onPlacePin={nothing} draft={null}
                 flyTo={null} onAllJobs={nothing} jobName={job.name} items={[]} selectedItem={null} onSelectItem={nothing} onMoveItem={nothing}
-                onMovePin={nothing} onMoveFixture={nothing} view3d={view3d} setView3d={setView3d} can3d readOnly furnish={furnish} onFurnish={setFurnish} />
+                onMovePin={nothing} onMoveFixture={nothing} view3d={view3d} setView3d={setView3d} can3d readOnly furnish={furnish} onFurnish={setFurnish}
+                look={shownStage?.look} outside={outside} />
+              {shownStage && <p className="absolute left-2 bottom-2 px-2.5 py-1.5 rounded-[4px] bg-[#17181b]/90 border border-line text-[13px] font-display font-bold tracking-[0.06em] uppercase pointer-events-none" aria-live="polite">{play.i + 1}. {shownStage.name}</p>}
             </div>
           </section>
         ) : <section className="card p-5 text-[14px] text-muted">No plan yet: there wasn&apos;t a drawing to read. You can add one to the job later, or tell me about the rooms here.</section>}
-        {check}
+        {phase === "check" ? check : (
+          <div ref={top} className="space-y-3 xl:sticky xl:top-4">
+            <BuildQuestions spec={spec} onSpec={setSpec} />
+            {qsDone && <SpecStageList names={names} hints={specStages.map((s) => s.description)} play={play} />}
+          </div>
+        )}
       </div>
       <section className="card p-5 space-y-3">
         <p className="eyebrow">Job</p>
@@ -327,11 +357,19 @@ function Review({ project, built, furnish, setFurnish, onCreate, onRestart, chec
         {field("client_name", "Name")}
         <div className="grid sm:grid-cols-2 gap-3">{field("client_phone", "Phone", "tel")}{field("client_email", "Email", "email")}</div>
       </section>
+      {phase === "build" && Object.keys(spec).length > 0 && <p className="text-[13px] text-muted">Built with: {specSummary(spec)}</p>}
       <div className="flex gap-2">
-        <button className="btn btn-primary flex-1" onClick={() => onCreate({
-          job: { name: job.name.trim() || "New job", address: job.address.trim() || null, job_type: job.job_type, start_date: job.start_date || null, client_name: job.client_name.trim() || null, client_email: job.client_email.trim() || null, client_phone: job.client_phone.trim() || null },
-          plan, summary: project.summary, furnish,
-        })}>Create the project</button>
+        {phase === "check" ? (
+          <button className="btn btn-primary flex-1" onClick={() => { setPhase("build"); requestAnimationFrame(() => top.current?.scrollIntoView({ behavior: "smooth", block: "start" })); }}
+            title="Done with the plan: next, a few quick questions about how the house is built">This is my plan</button>
+        ) : (
+          <button className="btn btn-primary flex-1" onClick={() => onCreate({
+            job: { name: job.name.trim() || "New job", address: job.address.trim() || null, job_type: job.job_type, start_date: job.start_date || null, client_name: job.client_name.trim() || null, client_email: job.client_email.trim() || null, client_phone: job.client_phone.trim() || null },
+            plan, summary: project.summary, furnish,
+            ...(Object.keys(spec).length ? { build: spec, stages: specStages.map((s) => ({ name: s.name, description: s.description })) } : {}),
+          })}>{qsDone ? "Create the project" : "Create the project now"}</button>
+        )}
+        {phase === "build" && <button className="btn" onClick={() => { play.stop(); setPhase("check"); }}>Back to the plan</button>}
         <button className="btn btn-ghost" onClick={onRestart}>Start over</button>
       </div>
     </>

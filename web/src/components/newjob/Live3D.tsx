@@ -12,6 +12,7 @@ import type { ElementStatus, Plan } from "@/lib/plan/types";
 import { editable } from "@/components/ui/hotkeys";
 import { BuildPlayBar, useBuildPlay } from "./BuildPlay";
 import type { StageId } from "@/lib/plan/buildPlay";
+import type { BuildSpec } from "@/lib/plan/buildSpec";
 
 export type Walls = "up" | "cut" | "down";
 const WALLS: Walls[] = ["up", "cut", "down"];
@@ -33,7 +34,7 @@ const roomsOf = (sk: Sketch, i: number) => sk.floors[i].rooms.map((r, k) => (Arr
 const thingsOf = (sk: Sketch, i: number) => (sk.floors[i].fixtures ?? []).map((f, k) => (Array.isArray(f.center) && f.kind ? k : -1)).filter((k) => k >= 0);
 const num = (n: number) => String(n + 1).padStart(2, "0");
 
-export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoof, roofOn, marks, crewDays }: {
+export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoof, roofOn, marks, crewDays, build }: {
   sketch: Sketch; fi: number; sel: LiveSel; walls: Walls; onWalls: (w: Walls) => void;
   /** a click in 3D: the floor and what's on it (null for empty space) */
   onPick: (fi: number, sel: LiveSel) => void;
@@ -42,6 +43,8 @@ export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoo
   marks?: { rooms: number[]; things: number[] } | null;
   /** crew days by build stage, when the job has a schedule: "Build it" then shows the day of each step */
   crewDays?: Partial<Record<StageId, number>>;
+  /** how the house is built, once asked: "Build it" then goes stage by stage, each wall layer in turn */
+  build?: BuildSpec;
 }) {
   const [gl, setGl] = useState(true);
   useEffect(() => setGl(webglAvailable()), []);
@@ -63,7 +66,7 @@ export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoo
   const states = useMemo(() => new Map(), []);
   const ctl = useRef<{ zoomBy: (f: number) => void; home: () => void } | null>(null);
   // "Build it": the whole house going up, step by step (BuildPlay.tsx)
-  const play = useBuildPlay(built?.plan ?? null, crewDays);
+  const play = useBuildPlay(built?.plan ?? null, crewDays, build);
   const pl = play.shown;
   const controls = useCallback((api: { zoomBy: (f: number) => void; home: () => void }) => { ctl.current = api; }, []);
   // the whole house stays in view as it grows, until you move the camera; then it stays where you put it
@@ -129,7 +132,7 @@ export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoo
       onPointerDownCapture={(e) => { if (!(e.target as Element).closest("button")) touched.current = true; }} onWheelCapture={() => { touched.current = true; }}>
       {gl && shown ? (
         pl ? (
-          <Plan3D plan={pl.plan} mode="building" floor={null} room={null} selected={null} selectedPin={null} selectedItem={null} states={states} colorMode="type" look={pl.step.look}
+          <Plan3D plan={pl.plan} mode="building" floor={null} room={null} selected={null} selectedPin={null} selectedItem={null} states={states} colorMode="type" look={pl.step.look} outside={pl.step.outside}
             pins={NO_PINS} items={NO_PINS} pinMode={false} draft={null} wallMode={pl.step.walls ? "full" : "none"} locked live={pl.step.objects !== "none" ? PLAY_INSIDE : pl.step.roof ? PLAY_ROOF : PLAY_OPEN} controls={controls}
             onSelect={noop} onSelectPin={noop} onSelectItem={noop} onPlacePin={noop} onMoveFixture={noop} onMoveItem={noop} onMovePin={noop} onOpenFloor={noop} onLimitOut={noop} />
         ) :

@@ -15,6 +15,7 @@ import { today } from "@/lib/dates";
 import { PlanChat } from "./PlanChat";
 import { applyEdits, turnedFacing } from "@/lib/plan/edits";
 import { JOB_KEY, furnishWhere, jobSettings, stageLook } from "@/lib/plan/build";
+import { outsideAt, stagesFromSpec, type BuildSpec } from "@/lib/plan/buildSpec";
 import { elementLabel, findElement, pointInPoly, roomOf } from "@/lib/plan/geometry";
 import { cutAt, cutKeyAt, endDrag, moveFor, newOpening, sideAt, sideMid, sideNear, splitGuess, type BuildSide } from "@/lib/plan/house";
 import { splitPoly } from "@/lib/plan/sketchEdit";
@@ -215,6 +216,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const settings = useMemo(() => jobSettings(edits), [edits]);
   const layerStage = layer && layer !== HOUSE_LAYER ? stages.find((s) => s.id === layer) ?? null : null;
   const look = layerStage ? stageLook(layerStage, settings) : "finished";
+  // how it's built (the build questions): the siding and roof, and the wall layer at the stage picked
+  const outside = useMemo(() => outsideAt(settings.build, stages.map((s) => s.name), layerStage ? stages.indexOf(layerStage) : -1), [settings.build, stages, layerStage]);
   const inLayer = useCallback((p: { stage_id: string | null }) => !layer || (layer === HOUSE_LAYER ? !p.stage_id || !stages.some((s) => s.id === p.stage_id) : p.stage_id === layer), [layer, stages]);
   const layerPins = useMemo(() => (layer ? pins.filter(inLayer) : pins), [pins, layer, inLayer]);
   // on a layer, the progress colours show just what's on it: each thing, and its room, amber while
@@ -238,7 +241,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     for (const p of pins) if (p.status !== "done") { const k = p.stage_id && known.has(p.stage_id) ? p.stage_id : HOUSE_LAYER; c.set(k, (c.get(k) ?? 0) + 1); }
     return c;
   }, [pins, stages]);
-  const pickLayer = useCallback((id: string | null) => { setLayer(id); if (id) setColorMode("progress"); }, []);
+  // a stage shows its progress colours, unless the job says how it's built: then the walls show the layer
+  const pickLayer = useCallback((id: string | null) => { setLayer(id); if (id) setColorMode(settings.build ? "type" : "progress"); }, [settings.build]);
 
   const setLevel = useCallback((l: Level) => {
     setLevelRaw(l);
@@ -785,6 +789,14 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     if (next) setStages(next);
   }, [guard]);
 
+  // new answers to the build questions: kept on the job, and its stages made again from them
+  const rebuildStages = useCallback(async (spec: BuildSpec) => {
+    await saveEdit(JOB_KEY, { build: spec });
+    for (const s of stages) await stageOp(() => api.deleteStage(s.id));
+    for (const s of stagesFromSpec(spec)) await stageOp(() => api.addStage(s.name));
+    setLayer(null);
+  }, [saveEdit, stages, stageOp, api]);
+
   const pin = selectedPin ? pins.find((p) => p.id === selectedPin) ?? null : null;
   // what the Back bar over the details goes back to
   const backTo = (() => {
@@ -882,7 +894,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         onAdd={(n) => stageOp(() => api.addStage(n))}
         onRename={(id, n) => stageOp(() => api.renameStage(id, n))}
         onDelete={(id) => stageOp(() => api.deleteStage(id))}
-        onMove={(id, d) => stageOp(() => api.moveStage(id, d))} />
+        onMove={(id, d) => stageOp(() => api.moveStage(id, d))}
+        build={settings.build} onBuild={rebuildStages} />
     );
     if (tab === "money" && billing && data.brand && api.money) {
       const money = api.money;
@@ -916,7 +929,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind}
       buy={api.materials ? { lines: mlines.filter((l) => l.job_id === job.id && l.status !== "returned"), onQuick: quickBuy, onAll: quickBuyAll, onMore: (t) => openBuy(t), onOpen: openLine, onTick: (id) => { const l = mlines.find((x) => x.id === id); if (l) void updateMaterial(id, { status: NEXT_STATUS[l.status] }); } } : undefined} />;
   }, [build, buildFloor, tool, setTool, doorKind, side, removeOpening, setSideBy, splitAt, joinBack, joinWall, toggleBuild, planSection, tab, feedPerson, buyDraft, buyFocus, mlines, mjobs, lastBuyer, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, level, selected, states, api, data.canShare, say, showPin, updatePin, deletePin, undoable, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
-    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, billing, payouts, moneyKey, data.brand, job, guard, places, showPlace, seenKey, layer, layerPins, layerStage, inLayer, stageCounts, pickLayer, settings]);
+    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, billing, payouts, moneyKey, data.brand, job, guard, places, showPlace, seenKey, layer, layerPins, layerStage, inLayer, stageCounts, pickLayer, settings, rebuildStages]);
 
   // where the quick card sits inside the map, kept on screen
   const quick = (() => {
@@ -985,7 +998,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
               items={items} selectedItem={selectedItem} onSelectItem={selectItem} onMoveItem={(id, x, y) => updateItem(id, { x, y })} onMovePin={movePin} onMoveFixture={moveFixture}
               view3d={view3d} setView3d={setView3d} can3d={data.can3d !== false}
               furnish={settings.furnish} onFurnish={(furnish) => void saveEdit(JOB_KEY, { furnish })}
-              look={look}
+              look={look} outside={outside}
               build={{ on: build, toggle: toggleBuild, map: buildMap, place: tool === "door" || tool === "window" || tool === "split" }} placeHint={build && tool !== "pick" ? `${BUILD_TOOLS.find((t) => t.id === tool)!.help} · Esc to put the tool down` : undefined}
               hud={<div className="w-[300px] bg-[#17181b]/92 backdrop-blur-sm border border-line border-l-[3px] border-l-accent rounded-[4px] p-3"><ProjectSummary compact plan={view} pins={pins} states={states} stages={stages} setLevel={setLevel} onPinKind={showPinKind} /></div>} />
           ) : (

@@ -7,6 +7,7 @@ import { pointInPoly } from "@/lib/plan/geometry";
 import { outward, type Exterior, type RoofPart, type Side, type Zone } from "@/lib/plan/exterior";
 import { FINISH, RULES } from "@/lib/plan/rules";
 import type { BBox, Floor, Opening, Pt } from "@/lib/plan/types";
+import type { Surface } from "@/lib/plan/buildSpec";
 
 const S = 0.001;
 
@@ -92,6 +93,73 @@ export function sidingMaterial(color: string = FINISH.siding, from = 0) {
 }
 export const trimMaterial = () => std(FINISH.trim, { rough: 0.6 });
 
+// the wall layers and finishes picked in the build questions (lib/plan/buildSpec.ts)
+const seeded = (n: number) => { let s = n; return () => ((s = (s * 9301 + 49297) % 233280) / 233280); };
+// running-bond brick: 2⅝" courses, joints in mortar grey
+const brickTex = () => texture("brick", 128, 64, (g, W, H) => {
+  g.fillStyle = "#cfcac2"; g.fillRect(0, 0, W, H);
+  const rnd = seeded(5), rows = 4, rh = H / rows;
+  for (let r = 0; r < rows; r++) for (let k = -1; k < 3; k++) {
+    const v = 215 + Math.round(rnd() * 40);
+    g.fillStyle = `rgb(${v},${v},${v})`;
+    g.fillRect((k + (r % 2) * 0.5) * (W / 2) + 2, r * rh + 2, W / 2 - 4, rh - 4);
+  }
+}, 0.4, 0.27);
+// concrete block: 16" x 8" with a grey joint
+const blockTex = () => texture("block", 128, 64, (g, W, H) => {
+  g.fillStyle = "#bdbdbd"; g.fillRect(0, 0, W, H);
+  g.fillStyle = "#f2f2f2";
+  for (let r = 0; r < 2; r++) for (let k = -1; k < 2; k++) g.fillRect((k + (r % 2) * 0.5) * W + 2, r * (H / 2) + 2, W - 4, H / 2 - 4);
+}, 0.8, 0.4);
+// stucco, spray foam, stone: a fine speckle
+const speckTex = () => texture("speck", 128, 128, (g, W, H) => {
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H);
+  const rnd = seeded(11);
+  for (let i = 0; i < 1400; i++) { const v = 215 + Math.round(rnd() * 40); g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(rnd() * W, rnd() * H, 2, 2); }
+}, 1, 1);
+// OSB: flakes of wood every which way, a panel seam every 4'
+const osbTex = () => texture("osb", 256, 256, (g, W, H) => {
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H);
+  const rnd = seeded(17);
+  for (let i = 0; i < 500; i++) {
+    const v = 200 + Math.round(rnd() * 55);
+    g.save(); g.translate(rnd() * W, rnd() * H); g.rotate(rnd() * Math.PI);
+    g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(-9, -2, 18, 4); g.restore();
+  }
+  g.fillStyle = "#8f8f8f"; g.fillRect(0, 0, 2, H); g.fillRect(0, 0, W, 2);
+}, 1.22, 2.44);
+// house wrap: white with a grey band of printing every so often
+const wrapTex = () => texture("wrap", 256, 128, (g, W, H) => {
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H);
+  g.fillStyle = "#c3ccd3";
+  for (let x = 8; x < W; x += 64) g.fillRect(x, H / 2 - 3, 40, 6);
+  g.fillStyle = "#e3e7ea"; g.fillRect(0, 0, W, 2);
+}, 2.7, 1.4);
+// batts: soft vertical bands between the studs, 16" apart
+const battTex = () => texture("batt", 64, 64, (g, W, H) => {
+  const grd = g.createLinearGradient(0, 0, W, 0);
+  grd.addColorStop(0, "#bdbdbd"); grd.addColorStop(0.08, "#ffffff"); grd.addColorStop(0.92, "#f2f2f2"); grd.addColorStop(1, "#bdbdbd");
+  g.fillStyle = grd; g.fillRect(0, 0, W, H);
+  const rnd = seeded(23);
+  for (let i = 0; i < 160; i++) { g.fillStyle = "rgba(0,0,0,0.05)"; g.fillRect(rnd() * W, rnd() * H, 3, 1); }
+}, 0.406, 0.6);
+// standing seam metal: a rib every 16"
+const seamTex = () => texture("seam", 64, 16, (g, W, H) => {
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H);
+  g.fillStyle = "#9a9a9a"; g.fillRect(0, 0, 3, H);
+}, 0.406, 1);
+
+const PATTERN: Partial<Record<Surface["pattern"], () => THREE.Texture>> = { lap: sidingTex, brick: brickTex, block: blockTex, stucco: speckTex, osb: osbTex, wrap: wrapTex, batt: battTex, shingle: shingleTex, metal: seamTex };
+/** A chosen surface on a wall or roof, lined up with the floor like the siding. */
+export function surfaceMaterial(s: Surface, from = 0) {
+  const map = PATTERN[s.pattern]?.() ?? undefined;
+  const m = std(s.color, { map, rough: s.pattern === "metal" ? 0.45 : 0.9, metal: s.pattern === "metal" ? 0.35 : 0, opacity: s.opacity });
+  if (map && s.pattern === "lap") map.offset.y = -((from * S) / 0.18);
+  return m;
+}
+/** The outside as chosen: siding and roofing over the usual ones. */
+export interface OutsideFinish { siding?: Surface | null; roof?: Surface | null }
+
 // --------------------------------------------------------------------------- small builders
 
 /** A box between two points, `w` across and `h` up (an upright board along a slope stays upright). */
@@ -147,13 +215,14 @@ const V = (x: number, y: number, z: number) => new THREE.Vector3(x * S, y * S, z
 interface RoofOut { group: THREE.Group; mats: THREE.Material[]; main: THREE.Object3D | null }
 
 /** One roof: the shingled planes plus fascia, soffit, gutters, downspouts and siding in the gable ends. */
-function roofPart(r: RoofPart, ex: Exterior, below: Pt[][]): RoofOut {
+function roofPart(r: RoofPart, ex: Exterior, below: Pt[][], fin: OutsideFinish): RoofOut {
   const g = new THREE.Group();
-  const roofM = std(FINISH.roof, { map: shingleTex(), rough: 0.95, side: THREE.DoubleSide });
+  const roofM = fin.roof ? surfaceMaterial(fin.roof) : std(FINISH.roof, { map: shingleTex(), rough: 0.95 });
+  roofM.side = THREE.DoubleSide;
   const trimM = std(FINISH.fascia, { rough: 0.6 });
   const soffitM = std(FINISH.soffit, { rough: 0.9, side: THREE.DoubleSide });
   const gutterM = std(FINISH.gutter, { rough: 0.5, metal: 0.1 });
-  const sideM = sidingMaterial(FINISH.siding, r.eaveY - ex.base(r.floorIndex));
+  const sideM = fin.siding ? surfaceMaterial(fin.siding, r.eaveY - ex.base(r.floorIndex)) : sidingMaterial(FINISH.siding, r.eaveY - ex.base(r.floorIndex));
   sideM.side = THREE.DoubleSide;
   const mats = [roofM, trimM, soffitM, gutterM, sideM];
   const [x0, y0, x1, y1] = r.rect;
@@ -270,10 +339,10 @@ function roofPart(r: RoofPart, ex: Exterior, below: Pt[][]): RoofOut {
 }
 
 /** All the roofs, each fading on its own as the cutaway opens the house. */
-export function buildRoofs(ex: Exterior, add: (o: THREE.Object3D, mats: THREE.Material[], centre: THREE.Vector3, floorIndex: number, main: THREE.Object3D | null) => void) {
+export function buildRoofs(ex: Exterior, add: (o: THREE.Object3D, mats: THREE.Material[], centre: THREE.Vector3, floorIndex: number, main: THREE.Object3D | null) => void, fin: OutsideFinish = {}) {
   for (const r of ex.roofs) {
     const below = ex.rings.slice(0, r.floorIndex + 1).flat();
-    const out = roofPart(r, ex, below);
+    const out = roofPart(r, ex, below, fin);
     const c = new THREE.Vector3(((r.rect[0] + r.rect[2]) / 2) * S, r.eaveY * S, ((r.rect[1] + r.rect[3]) / 2) * S);
     add(out.group, out.mats, c, r.floorIndex + 1, r.main ? out.main : null);
   }
