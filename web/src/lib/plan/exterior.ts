@@ -125,9 +125,11 @@ export function planExterior(plan: Plan): Exterior {
       const sib = sides.map((s) => [s, touch(s, (i, j) => placed.includes(owner[i][j]))] as const).sort((a, b) => b[1] - a[1])[0];
       const top = fi === floors.length - 1;
       const eaveY = base(fi) + height(fi);
-      let kind: RoofPart["kind"] = rules.roof, high: Side | null = null, pitch = top && !roofs.length ? rules.pitch : RULES.lowPitch;
+      let kind: RoofPart["kind"] = rules.roof, high: Side | null = null, pitch = top && !roofs.length ? rules.pitch : rules.lowPitch;
       if (rules.roof === "flat") kind = "flat";
       else if (tall[1] > 600) { kind = "shed"; high = tall[0]; }
+      // a shed roof on its own rises toward the back (north), across the short way
+      else if (kind === "shed") high = w >= d ? "y0" : "x0";
       // a bump-out on the same floor gets its own small roof at the main roof's pitch, tucked into it
       else if (sib[1] > 600) pitch = roofs.find((q) => q.floorIndex === fi)?.pitch ?? pitch;
       // a lean-to against the floor above stays under that floor's windows

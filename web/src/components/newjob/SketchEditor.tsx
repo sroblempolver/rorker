@@ -10,7 +10,6 @@ import type { Side, Sketch, SketchDoor, SketchFloor } from "@/lib/plan/sketch";
 import { OUTSIDE, doorSpot, hugWall, trimOverlap, outsidePieces, edgesOf, flatten, moveCorner, nearSeg, pointInPoly, roomArea, sideOf, snapTo, splitPoly, wallAt, windowSpots, type Seg } from "@/lib/plan/sketchEdit";
 import { bboxOf, centroid } from "@/lib/plan/geometry";
 import { CATALOG } from "@/lib/plan/catalog";
-import { RULES } from "@/lib/plan/rules";
 import { MATERIAL_BASE, ROOM_MATERIAL } from "@/components/plan/style";
 import { useEscape, editable } from "@/components/ui/hotkeys";
 import { DOOR_W, WallView } from "./WallView";
@@ -18,9 +17,11 @@ import { tidyStroke } from "@/lib/plan/pen";
 import { INCH, fmtArea, fmtLen, parseLength, roundLen, type Units } from "@/lib/plan/units";
 import type { IntakePart } from "@/lib/intake/files";
 import { StandardsPanel } from "./StandardsPanel";
+import { Live3D, type Walls } from "./Live3D";
+import { RoofPanel } from "./RoofPanel";
+import { std, useStandards } from "@/lib/plan/standards";
 import { halfSize, moveRoom, outward, pushWall, turnRoom, turnSide } from "@/lib/plan/roomEdit";
 import { cleanOutline, cornerAt, nextCorner } from "@/lib/plan/corners";
-import { std } from "@/lib/plan/standards";
 import { tabForRoom, type TrayItem } from "@/lib/plan/tray";
 import { CatalogTray } from "./CatalogTray";
 
@@ -118,6 +119,11 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   const [addingFloor, setAddingFloor] = useState(false);
   // the company's standards, open in the side panel
   const [showStd, setShowStd] = useState(false);
+  // the live 3D beside the plan, its walls, and the roof panel
+  const [show3d, setShow3d] = useState(false);
+  const [walls3d, setWalls3d] = useState<Walls>("up");
+  const [showRoof, setShowRoof] = useState(false);
+  useStandards();
   // lengths are shown and typed in feet and inches
   const lu: Units = "ft";
   const svg = useRef<SVGSVGElement>(null);
@@ -697,7 +703,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(0.75)} aria-label="Zoom in">+</button>
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(1.33)} aria-label="Zoom out">−</button>
         <button className="btn btn-sm btn-ghost" onClick={() => setView(fitView())}>Fit</button>
-        <button className={`btn btn-sm ml-auto ${showStd ? "btn-primary" : "btn-ghost"}`} onClick={() => setShowStd((x) => !x)} title="Your default sizes and the limits the checks use">Standards</button>
+        <button className={`btn btn-sm ml-auto ${show3d ? "btn-primary" : "btn-ghost"}`} onClick={() => setShow3d((x) => !x)} title="See the house in 3D as you draw">3D</button>
+        <button className={`btn btn-sm ${showStd ? "btn-primary" : "btn-ghost"}`} onClick={() => setShowStd((x) => !x)} title="Your default sizes and the limits the checks use">Standards</button>
       </div>
       <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 border-b border-line text-[13px]">
         {sk.floors.map((f, i) => (
@@ -719,6 +726,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       </div>
       <div className="grid lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0">
+        <div className={show3d ? "grid xl:grid-cols-2" : ""}>
         <div className={`relative ${seen ? "h-[42vh] min-h-[300px]" : tool === "thing" ? "h-[48vh] min-h-[340px]" : "h-[62vh] min-h-[420px]"} bg-ink`}>
           <svg ref={svg} className="absolute inset-0 w-full h-full touch-none select-none" viewBox={`${v.x} ${v.y} ${v.w} ${vh}`}
             style={{ cursor: drag?.k === "pan" ? "grabbing" : tool === "select" ? "default" : tool === "picture" ? "move" : "crosshair" }}
@@ -840,12 +848,21 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             <p className="absolute inset-x-0 top-1/3 text-center text-muted text-[14px] pointer-events-none px-6">Pick Walls and draw around the first room. Rooms that touch share a wall.</p>
           )}
         </div>
+        {show3d && (
+          <div className="h-[44vh] xl:h-auto">
+            <Live3D sketch={sk} fi={fi} sel={sel?.t === "room" || sel?.t === "thing" ? { t: sel.t, i: sel.i } : null} walls={walls3d} onWalls={setWalls3d}
+              onPick={(f, s) => { if (f !== fi) { setFi(f); setClicks([]); setWall(null); } setSel(s); }}
+              onFloor={(i) => { setFi(i); setSel(null); setClicks([]); setWall(null); }} roofOn={showRoof} onRoof={() => { setShowRoof((x) => !x); setShowStd(false); }} />
+          </div>
+        )}
+        </div>
         {tool === "thing" && <CatalogTray armed={thing} units={lu} startRoom={tabForRoom((sel?.t === "room" ? floor.rooms[sel.i] : hover ? floor.rooms[roomAt(hover)] : undefined)?.type)} onPick={(it) => { setThing(it); setNote(null); }} />}
-        {seen && <WallView key={`${seen.room}-${seen.edge}`} floor={floor} room={seen.room} edge={seen.edge} height={RULES.ceiling} units={lu} addOnOpen={wallAdd} onAdded={() => setWallAdd(null)} onChange={(f, h) => setFloor(f, h ?? true)} onClose={() => setWall(null)} onEdge={(edge) => setWall({ room: seen.room, edge })} />}
+        {seen && <WallView key={`${seen.room}-${seen.edge}`} floor={floor} room={seen.room} edge={seen.edge} height={floor.height_mm ?? std("house.ceiling")} units={lu} addOnOpen={wallAdd} onAdded={() => setWallAdd(null)} onChange={(f, h) => setFloor(f, h ?? true)} onClose={() => setWall(null)} onEdge={(edge) => setWall({ room: seen.room, edge })} />}
         </div>
 
         <aside className="border-t lg:border-t-0 lg:border-l border-line p-3 space-y-3 text-[13.5px] max-h-[62vh] overflow-y-auto scroll-thin">
-          {showStd ? <StandardsPanel units={lu} onClose={() => setShowStd(false)} /> : <>
+          {showStd ? <StandardsPanel units={lu} onClose={() => setShowStd(false)} />
+            : showRoof ? <RoofPanel sketch={sk} units={lu} onChange={(s, h) => (h === false ? setSk(s) : commit(s))} onClose={() => setShowRoof(false)} /> : <>
           <p className="text-muted leading-snug">{TOOLS.find((t) => t.id === tool)?.help}</p>
           {note && <p className="text-amber">{note}</p>}
 
@@ -965,6 +982,23 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
                 <input type="number" className="input !h-9 !w-20" value={floor.level} onChange={(e) => setFloor({ ...floor, level: Math.round(+e.target.value) })} aria-label="Level (0 is the ground floor)" />
                 {sk.floors.length > 1 && <button className="btn btn-sm btn-ghost text-red ml-auto" onClick={() => { commit({ ...sk, floors: sk.floors.filter((_, i) => i !== fi) }); setFi(0); }}>Delete floor</button>}
               </div>
+              {(() => {
+                const h = floor.height_mm ?? std("house.ceiling");
+                return (
+                  <div className="flex items-center gap-2">
+                    <label className="text-muted" htmlFor="ceiling">Ceiling height</label>
+                    <input id="ceiling" key={`ceiling-${fi}-${h}`} className={`input !h-9 !w-24 font-mono ${floor.height_mm ? "!border-accent" : ""}`} defaultValue={fmtLen(h, lu)}
+                      onBlur={(e) => { const v = parseLength(e.target.value, lu); if (v && v >= 1800 && v <= 6000) setFloor({ ...floor, height_mm: roundLen(v, lu) }); else e.target.value = fmtLen(h, lu); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+                    {floor.height_mm != null && <button className="text-[12px] text-muted underline" onClick={() => setFloor({ ...floor, height_mm: undefined })}>Use my standard</button>}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+          {!sel && (
+            <div className="pt-3 border-t border-line">
+              <RoofPanel sketch={sk} units={lu} onChange={(s, h) => (h === false ? setSk(s) : commit(s))} />
             </div>
           )}
           {bg && !sel && (
