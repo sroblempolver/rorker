@@ -935,8 +935,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(0.75)} aria-label="Zoom in">+</button>
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(1.33)} aria-label="Zoom out">−</button>
         <button className="btn btn-sm btn-ghost" onClick={() => setView(fitView())}>Fit</button>
-        <span className="ml-auto">{sg.toggle}</span>
-        <button className={`btn btn-sm ${show3d ? "btn-primary" : "btn-ghost"}`} onClick={() => setShow3d((x) => !x)} title="See the house in 3D as you draw">3D</button>
+        <button className={`btn btn-sm ml-auto ${show3d ? "btn-primary" : "btn-ghost"}`} onClick={() => setShow3d((x) => !x)} title="See the house in 3D as you draw">3D</button>
         <button className={`btn btn-sm ${showChecks && !showStd ? "btn-primary" : "btn-ghost"}`} onClick={() => { setShowChecks(!(showChecks && !showStd)); setShowStd(false); }} title="Building code and good practice, checked as you draw">
           {checks.open.length ? <><span className="inline-block h-2 w-2 rounded-full mr-1.5" style={{ background: NUDGE_COLOR[checks.open.some((n) => n.severity === "warn") ? "warn" : "info"] }} />{checks.open.length} to look at</> : "Checks"}
         </button>
@@ -959,6 +958,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             onClick={() => setFloor({ ...floor, guide: below ? undefined : Math.max(...sk.floors.filter((f) => f.level < floor.level).map((f) => f.level)) })}>Floor below</button>
         )}
         <span className="ml-auto text-muted">{allRooms} rooms</span>
+        {sg.toggle}
       </div>
       <div className="grid lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0">
