@@ -193,7 +193,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     if (!m) return;
     setSelected(t.id);
     setSelectedPin(null);
-    showMarks([m]);
+    showMarks([m], null, true);
   }, [view]);
   const firstPlace = useRef(data.startOnClient?.place ?? null);
   useEffect(() => { const t = firstPlace.current; if (t && view) { firstPlace.current = null; setTimeout(() => showPlace(t), 300); } }, [view, showPlace]);
@@ -268,7 +268,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const showElements = useCallback((ids: string[], q?: Question) => {
     if (q?.point) {
       const pt = q.point;
-      return showMarks([{ floor_id: pt.floor_id, x: pt.x, y: pt.y, z: pt.z, outside: pt.outside, label: "?", color: MARK_COLORS[5][1], id: null }]);
+      return showMarks([{ floor_id: pt.floor_id, x: pt.x, y: pt.y, z: pt.z, outside: pt.outside, label: "?", color: MARK_COLORS[5][1], id: null }], null, true);
     }
     if (!plan || !ids.length) return;
     const e = findElement(plan.data, ids[0]);

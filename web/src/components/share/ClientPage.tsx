@@ -56,7 +56,7 @@ export function ClientPage({ view: v, api, start, pin: firstPin, error, onBack, 
     const m = plan ? markFor(plan, t.id, t.label, MARK_COLORS[0][1]) : null;
     if (!m) return;
     setTab("job");
-    setTimeout(() => showMarks([m]), 50);
+    setTimeout(() => showMarks([m], null, true), 50);
   };
   const done = v.stages.filter((s) => s.status === "done").length;
   const now = v.stages.find((s) => s.status === "active");
