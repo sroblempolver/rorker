@@ -34,7 +34,7 @@ import { StairHole, StairPanel, StairSymbol, onStair } from "./StairPlan";
 import { ChecksPanel, NUDGE_COLOR } from "./ChecksPanel";
 import { floorBelow, floorRise, newStair, stairGeom } from "@/lib/plan/stairs";
 import { runChecks, type Nudge } from "@/lib/plan/checks";
-import { chain, dropLooseRoom, isJoined, isOutside, joinRoom, moveEnd, onOutline, onWall, refit, separateRoom, shiftWall, snapEnd, wallThickness } from "@/lib/plan/walls";
+import { chain, dropLooseRoom, followWall, isJoined, isOutside, joinRoom, moveEnd, onOutline, onWall, refit, separateRoom, shiftWall, snapEnd, wallThickness } from "@/lib/plan/walls";
 import { isClosedStroke, tidyLine } from "@/lib/plan/pen";
 import type { SketchWall } from "@/lib/plan/sketch";
 import { WallPanel } from "./WallPanel";
@@ -75,8 +75,8 @@ const TOOLS: { id: Tool; label: string; key: string; help: string; menu?: boolea
   { id: "pen", label: "Walls", key: "e", help: "Draw walls with the mouse or your finger. Every line is a wall; draw all the way round and it's a room. Wobbly lines come out straight and nearly square corners come out square; a wall drawn on a slant keeps its slant. Wall ends snap onto other walls, and walls that close a loop make a room. Then type the exact sizes." },
   { id: "stairs", label: "Stairs", key: "t", help: "Click where the stairs start and drag the way they go up. The steps come from the floor height and your standards; pick the stairs to make them an L or a U, wider, or turn them. The floor above gets the opening." },
   { id: "split", label: "Split room", key: "s", more: true, help: "Drag a line across a room to cut it in two (for two rooms read as one)." },
-  { id: "door", label: "Door", key: "d", menu: true, help: "Click a wall between two rooms to put a door in it, or an outside wall for an outside door." },
-  { id: "window", label: "Window", key: "w", menu: true, help: "Click an outside wall of a room to add a window there. Click again for another." },
+  { id: "door", label: "Door", key: "d", menu: true, help: "Click a wall between two rooms to put a door in it, or an outside wall for an outside door. A wall standing on its own takes one too." },
+  { id: "window", label: "Window", key: "w", menu: true, help: "Click an outside wall of a room to add a window there, or a wall standing on its own. Click again for another." },
   { id: "balcony", label: "Balcony", key: "b", menu: true, help: "Click an outside wall of a room. Upstairs that adds a balcony with a patio door onto it; on the ground floor, a patio door out to the garden." },
   { id: "thing", label: "Furniture", key: "f", help: "Cabinets, sinks, toilets, beds, appliances. Pick one in the tray under the plan, then click where it goes. Near a wall it backs onto the wall and faces the room. Shift-click to keep placing the same thing." },
   { id: "cabinet", label: "Cabinets", key: "j", help: "Fill a kitchen wall with stock cabinets in one click, and the cabinet list. Single cabinets are in Furniture, Kitchen and Bath." },
@@ -370,6 +370,18 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       : r.made.length && !r.opened.length ? `The walls close a room (${r.made.join(", ")}). Undo takes it back.` : null;
     return { floor: r.floor, say };
   };
+  // a door or window in a wall standing on its own (not a room's edge): kept on the piece itself
+  const inPiece = (p: Pt, what: "door" | "window") => {
+    const i = pieceAt(p);
+    if (i < 0) return false;
+    const w = floor.walls![i], { t } = onWall(p, w.a, w.b), at = Math.round(t * 100) / 100;
+    const nw = what === "door" ? { ...w, doors: [...(w.doors ?? []), { at, kind: doorKind, ...(doorKind !== "door" ? { width_mm: DOOR_W[doorKind] } : {}) }] }
+      : { ...w, windows: [...(w.windows ?? []), { at }] };
+    setFloor({ ...floor, walls: floor.walls!.map((x, k) => (k === i ? nw : x)) });
+    setSel({ t: "wall", i });
+    setNote(`Added a ${what} to that wall. Pick the wall to move or take it out.`);
+    return true;
+  };
   const setWalls = (walls: SketchWall[], keepHistory = true, base = floor) => { const r = withWalls(base, walls); setFloor(r.floor, keepHistory); if (r.say) setNote(r.say); };
   // a room that follows its walls brings them along when it moves
   const moveAny = (of: SketchFloor, i: number, d: Pt): SketchFloor => {
@@ -557,7 +569,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         e.preventDefault();
         const st = e.shiftKey ? INCH / 2 : 6 * INCH, [dx, dy] = [dir[e.key][0] * st, dir[e.key][1] * st];
         if (sel.t === "room") setFloor(moveAny(floor, sel.i, [dx, dy]));
-        else if (sel.t === "wall") setWalls(shiftWall(floor.walls ?? [], sel.i, [dx, dy]));
+        else if (sel.t === "wall") setWalls(shiftWall(floor.walls ?? [], sel.i, [dx, dy]), true, followWall(floor, sel.i, [dx, dy]));
         else setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? { ...f, center: [f.center[0] + dx, f.center[1] + dy] as Pt } : f)) });
         return;
       }
@@ -677,7 +689,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         const own = (v: number, ax: 0 | 1) => Math.abs(v - w.a[ax]) > 1 && Math.abs(v - w.b[ax]) > 1;
         if (Math.abs(w.a[1] - w.b[1]) < 1) d[1] = snapTo(w.a[1] + d[1], ys.filter((y) => own(y, 1)), 12 * px, g) - w.a[1];
         else if (Math.abs(w.a[0] - w.b[0]) < 1) d[0] = snapTo(w.a[0] + d[0], xs.filter((x) => own(x, 0)), 12 * px, g) - w.a[0];
-        setWalls(shiftWall(all, drag.i, d), false, drag.of);
+        setWalls(shiftWall(all, drag.i, d), false, followWall(drag.of, drag.i, d));
       }
     } else if (drag.k === "corner") {
       const to = snapPt(p, drag.i);
@@ -824,6 +836,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     // single clicks
     if (tool === "door") {
       const w = wallAt(floor, p, 12 * px);
+      if (!w && inPiece(p, "door")) return;
       if (!w) { setNote("Click right on a wall."); return; }
       const [a, b] = w.rooms;
       const door: SketchDoor = b == null ? { rooms: [floor.rooms[a].name, "outside"], side: w.side, at: Math.round(w.t * 100) / 100, kind: doorKind }
@@ -844,6 +857,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       setTool("select");
     } else if (tool === "window") {
       const w = wallAt(floor, p, 12 * px);
+      if (!w && inPiece(p, "window")) return;
       if (!w) { setNote("Click right on an outside wall."); return; }
       if (w.rooms[1] != null) { setNote("Windows go on outside walls. That wall is between two rooms."); return; }
       const room = floor.rooms[w.rooms[0]].name;
