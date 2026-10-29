@@ -979,11 +979,10 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             )}
             {floor.rooms.map((r, i) => {
               const c = centroid(r.polygon);
-              const on = sel?.t === "room" && sel.i === i;
               const color = MATERIAL_BASE[ROOM_MATERIAL[(r.type ?? "other") as keyof typeof ROOM_MATERIAL] ?? "concrete"];
               return (
                 <g key={i}>
-                  <polygon points={r.polygon.map((q) => q.join(",")).join(" ")} fill={color} fillOpacity={bg ? 0.35 : 0.75} stroke={on ? "#ff6a1f" : r.loose ? "none" : "#efe8da"} strokeWidth={(on ? 3 : 2) * px} strokeDasharray={on && r.loose ? `${6 * px} ${4 * px}` : undefined} />
+                  <polygon points={r.polygon.map((q) => q.join(",")).join(" ")} fill={color} fillOpacity={bg ? 0.35 : 0.75} stroke="none" />
                   <text x={c[0]} y={c[1]} fontSize={fontMm} textAnchor="middle" dominantBaseline="middle" fill="#fff" stroke="#000" strokeWidth={fontMm * 0.18} paintOrder="stroke" style={{ pointerEvents: "none" }}>{r.name}</text>
                   <text x={c[0]} y={c[1] + fontMm * 1.2} fontSize={fontMm * 0.8} textAnchor="middle" dominantBaseline="middle" fill="#ddd" stroke="#000" strokeWidth={fontMm * 0.14} paintOrder="stroke" style={{ pointerEvents: "none" }}>{fmtArea(roomArea(r), lu)}</text>
                 </g>
@@ -991,6 +990,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             })}
             <WallPieces floor={floor} on={sel?.t === "wall" ? sel.i : null} px={px} fontMm={fontMm} units={lu}
               hot={hover && (tool === "remove" || tool === "eyedrop") && hitAt(hover)?.t === "wall" ? { i: hitAt(hover)!.i, col: tool === "remove" ? "#ff4d3d" : "#55b2ff" } : null} />
+            {sel?.t === "room" && floor.rooms[sel.i] && <polygon points={floor.rooms[sel.i].polygon.map((q) => q.join(",")).join(" ")} fill="none" stroke="#ff6a1f" strokeWidth={3 * px} strokeDasharray={floor.rooms[sel.i].loose ? `${6 * px} ${4 * px}` : undefined} style={{ pointerEvents: "none" }} />}
             {(floor.fixtures ?? []).map((f, i) => {
               const across = f.facing === "east" || f.facing === "west";
               const w = (across ? f.depth_mm : f.width_mm) ?? 600, d = (across ? f.width_mm : f.depth_mm) ?? 600;

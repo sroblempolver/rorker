@@ -34,11 +34,26 @@ export function wallThickness(w: SketchWall, outside = false) { return w.thickne
 /** A wall's height: its own, a half wall's standard height, or up to the ceiling. */
 export function wallHeight(w: SketchWall, ceiling: number) { return w.height_mm ?? (w.half ? std("wall.halfHeight") : ceiling); }
 
-/** Whether a wall piece has a room on one side only (or none): an outside wall. */
-export function isOutside(rooms: SketchRoom[], w: SketchWall) {
+/** Whether a wall has a room on one side only, or none (a lone wall, most often the start of the outside
+ *  of a house): an outside wall. The plan (freeWallsToPlan) asks the same, so 2D and 3D agree. */
+export function isOutside(rooms: { polygon: Pt[] }[], w: { a: Pt; b: Pt }) {
   const L = wallLen(w) || 1, n: Pt = [-(w.b[1] - w.a[1]) / L, (w.b[0] - w.a[0]) / L], m: Pt = [(w.a[0] + w.b[0]) / 2, (w.a[1] + w.b[1]) / 2];
   const side = (k: number) => rooms.some((r) => pointInPoly([m[0] + n[0] * 60 * k, m[1] + n[1] * 60 * k], r.polygon));
   return !(side(1) && side(-1));
+}
+
+/** The walls a room drawn as a shape makes, each edge once at the thickness the plan gives it, so a box
+ *  room shows the same walls on the drawing as one drawn wall by wall. */
+export function roomWalls(rooms: SketchRoom[]): { a: Pt; b: Pt; t: number }[] {
+  const out: { a: Pt; b: Pt; t: number }[] = [];
+  for (const r of rooms) {
+    if (r.loose) continue;
+    for (const [a, b] of edges(r.polygon)) {
+      if (dist(a, b) < 5 || out.some((o) => (dist(o.a, a) < E && dist(o.b, b) < E) || (dist(o.a, b) < E && dist(o.b, a) < E))) continue;
+      out.push({ a, b, t: std(isOutside(rooms, { a, b }) ? "wall.exterior" : "wall.interior") });
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------- loops
@@ -278,7 +293,7 @@ export function snapEnd(p: Pt, f: SketchFloor, tol: number, skip = -1): { p: Pt;
  * The free wall pieces as plan walls. Where a piece lies on a wall the rooms already make, that wall takes
  * the piece's own thickness and height (one wall, not two); the rest of it is a wall of its own.
  */
-export function freeWallsToPlan(free: SketchWall[], built: Wall[], lines: Map<string, { a: Pt; b: Pt; rooms: string[] }>, code: string, band: (a: Pt, b: Pt, t: number, ext: number) => Pt[], ceiling: number): Wall[] {
+export function freeWallsToPlan(free: SketchWall[], built: Wall[], lines: Map<string, { a: Pt; b: Pt; rooms: string[] }>, code: string, band: (a: Pt, b: Pt, t: number, ext: number) => Pt[], ceiling: number, rooms: { polygon: Pt[] }[] = []): Wall[] {
   const out: Wall[] = [];
   let n = built.length;
   for (const w of free) {
@@ -304,9 +319,10 @@ export function freeWallsToPlan(free: SketchWall[], built: Wall[], lines: Map<st
     let at = 0;
     for (const [lo, hi] of covered) { if (lo - at > 100) gaps.push([at, lo]); at = Math.max(at, hi); }
     if (L - at > 100) gaps.push([at, L]);
-    const t = w.thickness_mm ?? std("wall.interior"), h = wallHeight(w, ceiling);
+    const h = wallHeight(w, ceiling);
     for (const [lo, hi] of gaps) {
       const a: Pt = [w.a[0] + u[0] * lo, w.a[1] + u[1] * lo], b: Pt = [w.a[0] + u[0] * hi, w.a[1] + u[1] * hi];
+      const t = wallThickness(w, isOutside(rooms, { a, b }));
       const id = `${code}-W${String(++n).padStart(2, "0")}`;
       out.push({ id, polygon: band(a, b, t, t / 2), length_mm: Math.round(hi - lo), thickness_mm: t, exterior: false, room_ids: [], free: true, ...(h < ceiling ? { height_mm: h } : {}) });
       lines.set(id, { a, b, rooms: [] });

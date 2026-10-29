@@ -185,7 +185,7 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
   wallLines.delete("");
   // the wall pieces, on the same lines the rooms were pulled onto
   const onLine = (p: Pt): Pt => [xs.get(p[0]) ?? r10(p[0]), ys.get(p[1]) ?? r10(p[1])];
-  walls.push(...freeWallsToPlan((sf.walls ?? []).map((w) => ({ ...w, a: onLine(w.a), b: onLine(w.b) })), walls, wallLines, code, band, at?.height ?? sf.height_mm ?? storey));
+  walls.push(...freeWallsToPlan((sf.walls ?? []).map((w) => ({ ...w, a: onLine(w.a), b: onLine(w.b) })), walls, wallLines, code, band, at?.height ?? sf.height_mm ?? storey, rooms));
 
   // which way an outside wall of a room faces
   const faces = (w: Wall, r: Room, want: Side) => {
