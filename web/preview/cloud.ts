@@ -3,7 +3,7 @@
 // (one row per thing, see supabase/build/) a moment later. Crew and client links go through the `build`
 // edge function, which shows them only what their link may see.
 import { createClient, type Session } from "@supabase/supabase-js";
-import type { JobMessage, PinComment, TeamMessage } from "@/lib/data/types";
+import type { JobMessage, JobPhoto, JobPhotoInput, PhotoBy, PinComment, TeamMessage } from "@/lib/data/types";
 import type { PlaceTag } from "@/lib/plan/places";
 import { fromRecords, POSTED, recKey, toRecords, type PageSaved, type Rec, type SavedAccount } from "@/lib/cloud/records";
 
@@ -243,4 +243,49 @@ export async function addTeamMessage(accountId: string, author: string, to: stri
   const m: TeamMessage = { id: shortId(), from: "office", author_name: author, member_id: null, to, body: body || null, photos, created_at: new Date().toISOString() };
   const { error } = await sb.from("records").insert({ account_id: accountId, kind: "team", id: m.id, job_id: null, data: m });
   if (error) throw new Error("Couldn't send that. Check your connection and try again.");
+}
+
+/** A job's Photos, fresh from the database (crew and the client add photos from their links): photos
+ *  added there, the job's pin threads and its client thread, all with addresses to show. */
+export async function listPhotos(accountId: string, jobId: string): Promise<{ uploads: JobPhoto[]; comments: PinComment[]; messages: JobMessage[] }> {
+  const { data, error } = await sb.from("records").select("kind, data").eq("account_id", accountId).eq("job_id", jobId).in("kind", ["photo", "comment"]);
+  if (error) throw new Error("Couldn't load the photos.");
+  const rows = data ?? [];
+  const uploads = rows.filter((r) => r.kind === "photo").map((r) => r.data as JobPhoto);
+  const comments = rows.filter((r) => r.kind === "comment").map((r) => r.data as PinComment).filter((c) => c.photos.length);
+  const messages = await listMessages(accountId, jobId);
+  const urls = await fileUrls([...uploads.map((p) => p.src), ...comments.flatMap((c) => c.photos)]);
+  return {
+    uploads: uploads.map((p) => ({ ...p, src: urls.get(p.src) ?? p.src })),
+    comments: comments.map((c) => ({ ...c, photos: c.photos.map((x) => urls.get(x) ?? x) })),
+    messages,
+  };
+}
+
+/** A photo straight into a job's Photos. Returned with an address to show. */
+export async function addPhoto(accountId: string, jobId: string, by: PhotoBy, input: JobPhotoInput, f: File): Promise<JobPhoto> {
+  const src = await upload(accountId, jobId, "photos", f);
+  const p: JobPhoto = { id: shortId(), job_id: jobId, src, by, created_at: new Date().toISOString(), ...input };
+  const { error } = await sb.from("records").insert({ account_id: accountId, kind: "photo", id: p.id, job_id: jobId, data: p });
+  if (error) throw new Error("Couldn't add that photo. Check your connection and try again.");
+  return { ...p, src: (await fileUrls([src])).get(src) ?? src };
+}
+
+/** Retag a photo (room, stage, note, whether the client sees it). */
+export async function updatePhoto(accountId: string, id: string, patch: Partial<JobPhotoInput>): Promise<JobPhoto> {
+  const { data, error } = await sb.from("records").select("data").eq("account_id", accountId).eq("kind", "photo").eq("id", id).single();
+  if (error || !data) throw new Error("That photo isn't there any more.");
+  const p = { ...(data.data as JobPhoto), ...patch };
+  const { error: e2 } = await sb.from("records").update({ data: p, updated_at: new Date().toISOString() }).eq("account_id", accountId).eq("kind", "photo").eq("id", id);
+  if (e2) throw new Error("That didn't save. Check your connection and try again.");
+  return { ...p, src: (await fileUrls([p.src])).get(p.src) ?? p.src };
+}
+
+/** Take a photo off the job, and its file with it. */
+export async function removePhoto(accountId: string, id: string) {
+  const { data } = await sb.from("records").select("data").eq("account_id", accountId).eq("kind", "photo").eq("id", id).maybeSingle();
+  const { error } = await sb.from("records").delete().eq("account_id", accountId).eq("kind", "photo").eq("id", id);
+  if (error) throw new Error("Couldn't remove it. Check your connection and try again.");
+  const src = (data?.data as JobPhoto | undefined)?.src;
+  if (src && !/^(https?:|blob:|data:)/.test(src)) await sb.storage.from(BUCKET).remove([src]);
 }

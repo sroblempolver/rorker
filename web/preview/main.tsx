@@ -12,10 +12,12 @@ import { JobWorkspace } from "@/components/workspace/JobWorkspace";
 import { TeamManager, type TeamApi } from "@/components/team/TeamManager";
 import { TeamBoard, type TeamBoardApi, type TeamInboxApi } from "@/components/team/TeamBoard";
 import { teamFor } from "@/lib/cloud/team";
-import type { WorkspaceApi, WorkspaceData } from "@/components/workspace/api";
+import type { PhotosApi, WorkspaceApi, WorkspaceData } from "@/components/workspace/api";
+import { PhotosPage, type PhotoJob } from "@/components/workspace/PhotosPage";
+import type { PhotoItem } from "@/lib/photos";
 import { useFeedback } from "@/components/ui/feedback";
 import { DEFAULT_TEMPLATES } from "@/lib/data/templates";
-import { clientMemberId, type Company, type JobItem, type JobMessage, type JobStage, type JobSummary, type Member, type MemberInput, type Pin, type PinComment, type PlanRow, type ShareAccess, type ShareLink, type TeamMessage } from "@/lib/data/types";
+import { clientMemberId, type Company, type JobItem, type JobMessage, type JobPhoto, type JobPhotoInput, type JobStage, type JobSummary, type Member, type MemberInput, type Pin, type PinComment, type PlanRow, type ShareAccess, type ShareLink, type TeamMessage } from "@/lib/data/types";
 import { JOB_KEY } from "@/lib/plan/build";
 import type { Plan } from "@/lib/plan/types";
 import { previewAsk } from "./assistant";
@@ -25,7 +27,7 @@ import { NewProject, type NewProjectResult } from "@/components/newjob/NewProjec
 import { PlanBench } from "@/components/bench/PlanBench";
 import { ClientMoneyView } from "@/components/billing/ClientMoneyView";
 import { ClientPage, type ClientApi } from "@/components/share/ClientPage";
-import { clientNote, clientView } from "@/lib/cloud/links";
+import { clientNote, clientPhotos, clientView, linkPhoto } from "@/lib/cloud/links";
 import type { PlaceTag } from "@/lib/plan/places";
 import { unread } from "@/lib/seen";
 import type { SavedAccount } from "@/lib/cloud/records";
@@ -162,6 +164,11 @@ function sharedWork(jobs: WorkspaceData[], token: string, photos: Map<string, st
 /** photos posted on pins in the preview, by pin id, so a shared link can show them */
 const pinPhotos = new Map<string, string[]>();
 
+/** photos added straight to a job's Photos in the preview (from the app or a link) */
+let jobPhotos: JobPhoto[] = [];
+/** the owner's name, for photos and comments posted from the app */
+const ownerName = () => team.members.find((m) => m.is_owner)?.full_name ?? "You";
+
 /** pin threads in the preview, by pin id */
 const comments = new Map<string, PinComment[]>();
 /** each job's thread with its client, by job id */
@@ -233,14 +240,14 @@ function clientLink(d: WorkspaceData): ShareLink {
 function savedAccount(jobs: WorkspaceData[]): SavedAccount {
   return {
     jobs: jobs.map((d) => ({ job: d.job, plan: d.plan, stages: d.stages, pins: d.pins, items: d.items, edits: d.edits, states: d.states, runs: d.runs, billing: d.billing })),
-    members: team.members, materials: materials.lines, shares, settings: { brand: BRAND, phone: COMPANY.phone }, comments: [], messages: [...messages.values()].flat(), notes: clientNotes, team: teamBoard, access: [],
+    members: team.members, materials: materials.lines, shares, settings: { brand: BRAND, phone: COMPANY.phone }, comments: [...comments.values()].flat(), messages: [...messages.values()].flat(), notes: clientNotes, team: teamBoard, access: [], photos: jobPhotos,
   };
 }
 /** what the client's link shows and does, on the preview's own data */
 function demoClient(jobs: () => WorkspaceData[], d: WorkspaceData): { view: ReturnType<typeof clientView>; api: ClientApi } {
   const l = clientLink(d);
   return {
-    view: clientView(l, COMPANY, savedAccount(jobs()), Object.fromEntries(d.pins.map((p) => [p.id, pinPhotos.get(p.id) ?? []])), messages.get(d.job.id) ?? []),
+    view: clientView(l, COMPANY, savedAccount(jobs()), Object.fromEntries(d.pins.map((p) => [p.id, pinPhotos.get(p.id) ?? []])), messages.get(d.job.id) ?? [], clientPhotos(l, savedAccount(jobs()))),
     api: {
       thread: { list: async () => messages.get(d.job.id) ?? [], send: async (body, f, places) => post(d, "client", body, f, places) },
       billing: (b) => { d.billing = b; },
@@ -252,6 +259,12 @@ function demoClient(jobs: () => WorkspaceData[], d: WorkspaceData): { view: Retu
       },
       async removeNote(id) { clientNotes = clientNotes.filter((n) => n.id !== id); d.pins = d.pins.filter((p) => p.id !== id || p.created_by !== "client"); },
       async got(id, undo) { materials.lines = materials.lines.map((m) => (m.id === id ? { ...m, status: undo ? "to_buy" : "got" } : m)); },
+      async addPhoto(f, input) {
+        const p = linkPhoto(l, savedAccount(jobs()), d.job.id, input, uid(), URL.createObjectURL(f), now());
+        if (!p) throw new Error("Couldn't add the photo.");
+        jobPhotos = [...jobPhotos, p];
+        return clientPhotos(l, savedAccount(jobs()));
+      },
     },
   };
 }
@@ -261,6 +274,14 @@ async function sendSharedPhoto(label: string, pinId: string, file: File) {
   comments.set(pinId, list);
   pinPhotos.set(pinId, list.flatMap((c) => c.photos));
   return pinPhotos.get(pinId)!;
+}
+
+/** a photo sent from a crew link into one of their jobs' Photos */
+function sendSharedJobPhoto(jobs: WorkspaceData[], token: string, jobId: string, f: File, input: Partial<JobPhotoInput>) {
+  const l = shares.find((x) => x.token === token);
+  const p = l && linkPhoto(l, savedAccount(jobs), jobId, input, uid(), URL.createObjectURL(f), now());
+  if (!p) throw new Error("Couldn't add the photo to this job.");
+  jobPhotos = [...jobPhotos, p];
 }
 
 function memoryApi(d: WorkspaceData): WorkspaceApi {
@@ -286,7 +307,7 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
     async deletePin(id) { d.pins = d.pins.filter((p) => p.id !== id); },
     async listComments(id) { return comments.get(id) ?? []; },
     async addComment(id, body, photos) {
-      const list = [...(comments.get(id) ?? []), { id: uid(), pin_id: id, author_id: null, author_name: "You", body: body || null, photos: photos.map((f) => URL.createObjectURL(f)), created_at: now() }];
+      const list = [...(comments.get(id) ?? []), { id: uid(), pin_id: id, author_id: "m0", author_name: ownerName(), body: body || null, photos: photos.map((f) => URL.createObjectURL(f)), created_at: now() }];
       pinPhotos.set(id, list.flatMap((c) => c.photos));
       comments.set(id, list);
       return list;
@@ -345,6 +366,26 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
       save(b) { d.billing = b; },
       async connectPayouts() { await new Promise((r) => setTimeout(r, 600)); d.payoutsConnected = true; },
     },
+  };
+}
+
+/** one job's Photos in the preview: kept in this page */
+function memoryPhotos(d: WorkspaceData): PhotosApi {
+  return {
+    async list() {
+      const ids = new Set(d.pins.map((p) => p.id));
+      return { uploads: jobPhotos.filter((p) => p.job_id === d.job.id), comments: [...comments.values()].flat().filter((c) => ids.has(c.pin_id)), messages: messages.get(d.job.id) ?? [] };
+    },
+    async add(f, input) {
+      const p: JobPhoto = { id: uid(), job_id: d.job.id, src: URL.createObjectURL(f), by: { kind: "team", name: ownerName(), member_id: "m0" }, created_at: now(), ...input };
+      jobPhotos = [...jobPhotos, p];
+      return p;
+    },
+    async update(id, patch) {
+      jobPhotos = jobPhotos.map((p) => (p.id === id ? { ...p, ...patch } : p));
+      return jobPhotos.find((p) => p.id === id)!;
+    },
+    async remove(id) { jobPhotos = jobPhotos.filter((p) => p.id !== id); },
   };
 }
 
@@ -425,7 +466,7 @@ function liveCity(jobs: WorkspaceData[]): { live: Record<string, JobLive>; event
   return { live, events: events.sort((a, b) => rank[a.tone] - rank[b.tone]) };
 }
 
-type Page = "jobs" | "job" | "plan" | "team" | "shared" | "new" | "client" | "money" | "jobmoney" | "shop" | "bench";
+type Page = "jobs" | "job" | "plan" | "photos" | "team" | "shared" | "new" | "client" | "money" | "jobmoney" | "shop" | "bench";
 
 /** A small job with no drawing yet (the materials sample spreads across these too). */
 function plainJob(j: (typeof EXTRA_JOBS)[number], team: Member[]): WorkspaceData {
@@ -446,15 +487,17 @@ function sampleJobs(owner?: Owner): WorkspaceData[] {
 
 /** Each screen has its own address (#/jobs, #/job/hadley ...) so the browser's back button, a refresh
  * and a copied link all land where you were. */
-function fromHash(): { page: Page; id?: string } {
+function fromHash(): { page: Page; id?: string; photoJob?: string } {
   const [a, b] = location.hash.replace(/^#\/?/, "").split("/");
   if (a === "plan") return { page: "plan", id: b };
   if (a === "money" && b) return { page: "jobmoney", id: b };
+  // Photos, on every job or one (#/photos/hadley)
+  if (a === "photos") return { page: "photos", photoJob: b };
   if (a === "jobs" || a === "team" || a === "new" || a === "shared" || a === "money" || a === "shop" || a === "bench") return { page: a };
   return { page: "job", id: a === "job" ? b : undefined };
 }
-const hashFor = (page: Page, id: string) => (page === "job" ? `#/job/${id}` : page === "plan" && id ? `#/plan/${id}` : page === "jobmoney" ? `#/money/${id}` : `#/${page}`);
-const TITLES: Partial<Record<Page, string>> = { jobs: "Jobs", plan: "Plan", team: "Team", new: "New project", shared: "Shared link", money: "Money", jobmoney: "Money", shop: "Shopping", client: "Client view", bench: "Plan tests" };
+const hashFor = (page: Page, id: string, photoJob?: string | null) => (page === "job" ? `#/job/${id}` : page === "plan" && id ? `#/plan/${id}` : page === "jobmoney" ? `#/money/${id}` : page === "photos" && photoJob ? `#/photos/${photoJob}` : `#/${page}`);
+const TITLES: Partial<Record<Page, string>> = { jobs: "Jobs", plan: "Plan", photos: "Photos", team: "Team", new: "New project", shared: "Shared link", money: "Money", jobmoney: "Money", shop: "Shopping", client: "Client view", bench: "Plan tests" };
 
 /** Signed in: the account and the saver that writes every change to it. */
 interface CloudBoot { account: cloud.Account; saver: cloud.Saver; email: string | null; name: string }
@@ -494,6 +537,12 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
   const [clientPin, setClientPin] = useState<string | null>(null);
   /** open the job on its Client tab, at the place the client tagged (from a "new from your client" notice) */
   const [clientStart, setClientStart] = useState<{ place: PlaceTag | null } | null>(null);
+  /** open the job at a photo's spot (from Photos) */
+  const [photoStart, setPhotoStart] = useState<PhotoItem | null>(null);
+  /** the job Photos is showing, or every job */
+  const [photoJob, setPhotoJobRaw] = useState<string | null>(() => fromHash().photoJob ?? null);
+  const photoJobRef = useRef(photoJob);
+  photoJobRef.current = photoJob;
   const [tier, setTier] = useState<Brand["tier"]>("standard");
   const [jobs, setJobs] = useState<WorkspaceData[]>(initial);
   const jobsRef = useRef(jobs);
@@ -514,8 +563,8 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
   const [activeId, setActiveIdRaw] = useState(() => fromHash().id ?? initial[0]?.job.id ?? "");
   /** go somewhere: a new history entry first, so the screen that opens builds on it */
   const go = (p: Page, id = activeId) => {
-    if (p !== "job") setClientStart(null);
-    const h = hashFor(p, id);
+    if (p !== "job") { setClientStart(null); setPhotoStart(null); }
+    const h = hashFor(p, id, photoJobRef.current);
     if (location.hash !== h) history.pushState(null, "", h);
     setPageRaw(p);
     setActiveIdRaw(id);
@@ -524,8 +573,8 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
   const goRef = useRef(go);
   goRef.current = go;
   useEffect(() => {
-    if (!location.hash || (page === "job" && !jobs.some((j) => j.job.id === activeId))) history.replaceState(history.state, "", hashFor(page, activeId));
-    const pop = () => { const r = fromHash(); setPageRaw(r.page); if (r.id) setActiveIdRaw(r.id); };
+    if (!location.hash || (page === "job" && !jobs.some((j) => j.job.id === activeId))) history.replaceState(history.state, "", hashFor(page, activeId, photoJob));
+    const pop = () => { const r = fromHash(); setPageRaw(r.page); if (r.id) setActiveIdRaw(r.id); if (r.page === "photos") setPhotoJobRaw(r.photoJob ?? null); };
     window.addEventListener("popstate", pop);
     return () => window.removeEventListener("popstate", pop);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -533,7 +582,22 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
   const active: WorkspaceData | undefined = jobs.find((j) => j.job.id === activeId) ?? jobs[0];
   // the assistant changes the job behind the screen's back: hand the workspace a fresh copy after
   const [ver, setVer] = useState(0);
-  const current = useMemo(() => active && ({ ...active, startOnClient: clientStart ?? undefined, materials: { lines: materials.lines, jobs: mjobs } }), [active, ver, clientStart, jobs.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const current = useMemo(() => active && ({ ...active, startOnClient: clientStart ?? undefined, startOnPhoto: photoStart ?? undefined, materials: { lines: materials.lines, jobs: mjobs } }), [active, ver, clientStart, photoStart, jobs.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Photos across every job: in this page, or in the account
+  const photoJobs = useMemo<PhotoJob[]>(() => jobs.map((d) => {
+    let api = memoryPhotos(d);
+    if (signedIn) {
+      const acct = signedIn.account.id;
+      api = {
+        list: () => cloud.listPhotos(acct, d.job.id),
+        add: (f: File, input: JobPhotoInput) => cloud.addPhoto(acct, d.job.id, { kind: "team", name: signedIn.name, member_id: signedIn.account.memberId }, input, f),
+        update: (id: string, patch: Partial<JobPhotoInput>) => cloud.updatePhoto(acct, id, patch),
+        remove: (id: string) => cloud.removePhoto(acct, id),
+      };
+    }
+    return { job: d.job, plan: d.plan?.data ?? null, pins: d.pins, stages: d.stages, api };
+  }), [jobs, ver, signedIn]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pickPhotoJob = (id: string | null) => { setPhotoJobRaw(id); history.replaceState(history.state, "", hashFor("photos", "", id)); };
   const api = useMemo(() => {
     if (!active) return null;
     const a = memoryApi(active);
@@ -614,6 +678,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
     ...jobs.filter((d) => d.billing).map((d) => ({ id: `money:${d.job.id}`, group: "Money", label: `${d.job.name}: money`, sub: "quotes, invoices, payments", keywords: d.job.client_name ?? "", run: () => go("jobmoney", d.job.id) })),
     { id: "page:jobs", group: "Go to", label: "All jobs", run: () => setPage("jobs") },
     { id: "page:plan", group: "Go to", label: "Plan", sub: "change a job's plan: walls, doors, furniture", run: () => go("plan") },
+    { id: "page:photos", group: "Go to", label: "Photos", sub: "every photo on every job, by room", run: () => setPage("photos") },
     { id: "page:money", group: "Go to", label: "Money", sub: "quotes, invoices, who owes what", run: () => setPage("money") },
     { id: "page:shop", group: "Go to", label: "Shopping", sub: "everything to buy, by store", run: () => setPage("shop") },
     { id: "page:team", group: "Go to", label: "Team", run: () => setPage("team") },
@@ -629,7 +694,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
     <div className="h-full flex flex-col">
       <header className="h-14 shrink-0 border-b border-line bg-panel flex items-center gap-2 sm:gap-4 px-3 sm:px-4">
         <button onClick={() => setPage("jobs")} aria-label="All jobs"><Logo size={20} /></button>
-        <nav className="hidden sm:flex items-center gap-1 sm:ml-2 min-w-0 overflow-x-auto">{tab("jobs", "Jobs")}{tab("plan", "Plan")}{tab("money", "Money")}{tab("shop", "Shopping")}{tab("team", "Team")}</nav>
+        <nav className="hidden sm:flex items-center gap-1 sm:ml-2 min-w-0 overflow-x-auto">{tab("jobs", "Jobs")}{tab("plan", "Plan")}{tab("money", "Money")}{tab("shop", "Shopping")}{tab("photos", "Photos")}{tab("team", "Team")}</nav>
         <GoToButton className="ml-auto" />
         <button onClick={() => setPage("new")} className={`btn btn-sm ${page === "new" ? "btn-ghost" : "btn-primary"}`}>+<span className="hidden sm:inline"> New project</span></button>
         {signedIn ? <AccountChip c={signedIn} state={saveState} /> : (
@@ -638,8 +703,8 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
       </header>
       <GoToHost />
       {/* on a phone the main places sit at the bottom, under the thumb */}
-      <nav className="mobile-nav sm:hidden fixed bottom-0 inset-x-0 z-30 h-14 pb-[env(safe-area-inset-bottom)] box-content bg-panel border-t border-line grid grid-cols-5" aria-label="Main">
-        {([["jobs", "Jobs", "M3 21V9l9-6 9 6v12M9 21v-7h6v7"], ["plan", "Plan", "M3 3h18v18H3zM3 12h9M12 3v13M16 12h5"], ["money", "Money", "M3 6h18v12H3zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"], ["shop", "Shopping", "M5 7h14l-1.5 12h-11zM9 7a3 3 0 0 1 6 0"], ["team", "Team", "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14a6.5 6.5 0 0 1 3.5 6"]] as const).map(([p, label, d]) => {
+      <nav className="mobile-nav sm:hidden fixed bottom-0 inset-x-0 z-30 h-14 pb-[env(safe-area-inset-bottom)] box-content bg-panel border-t border-line grid grid-cols-6" aria-label="Main">
+        {([["jobs", "Jobs", "M3 21V9l9-6 9 6v12M9 21v-7h6v7"], ["plan", "Plan", "M3 3h18v18H3zM3 12h9M12 3v13M16 12h5"], ["money", "Money", "M3 6h18v12H3zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"], ["shop", "Shopping", "M5 7h14l-1.5 12h-11zM9 7a3 3 0 0 1 6 0"], ["photos", "Photos", "M4 8h3l2-3h6l2 3h3v11H4zM12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"], ["team", "Team", "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14a6.5 6.5 0 0 1 3.5 6"]] as const).map(([p, label, d]) => {
           const on = page === p || (p === "jobs" && page === "job") || (p === "money" && page === "jobmoney");
           return (
             <button key={p} onClick={() => { setPage(p); }} aria-current={on ? "page" : undefined}
@@ -665,6 +730,13 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
             setVer((n) => n + 1);
             poke();
           }} />
+      ) : shown === "photos" ? (
+        <div className="flex-1 overflow-y-auto">
+          <TeamContext.Provider value={{ members: team.members, me: "m0" }}>
+            <PhotosPage jobs={photoJobs} members={team.members} jobId={photoJob} onPickJob={pickPhotoJob}
+              onShowSpot={(id, p) => { setVer((n) => n + 1); go("job", id); setPhotoStart(p); }} />
+          </TeamContext.Provider>
+        </div>
       ) : shown === "bench" ? (
         <div className="flex-1 overflow-y-auto"><PlanBench /></div>
       ) : shown === "money" ? (
@@ -699,7 +771,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
         </div>
       ) : shown === "shared" && share ? (
         <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">
-          {(() => { const v = sharedWork(jobs, share.token, pinPhotos); return v ? <SharedWorkView key={share.token + share.pin} work={v} pin={share.pin} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} inbox={(() => { const id = shares.find((l) => l.token === share.token)?.member_id; return id ? demoInbox(id) : undefined; })()} onBack={() => { setVer((n) => n + 1); setPage("job"); }} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
+          {(() => { const v = sharedWork(jobs, share.token, pinPhotos); return v ? <SharedWorkView key={share.token + share.pin} work={v} pin={share.pin} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} inbox={(() => { const id = shares.find((l) => l.token === share.token)?.member_id; return id ? demoInbox(id) : undefined; })()} addPhoto={async (job, f, input) => sendSharedJobPhoto(jobs, share.token, job, f, input)} onBack={() => { setVer((n) => n + 1); setPage("job"); }} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
         </div>
       ) : shown === "shop" ? (
         <div className="flex-1 overflow-y-auto">
@@ -815,7 +887,7 @@ function DemoLinkPage({ route }: { route: NonNullable<ReturnType<typeof demoRout
   return (
     <div className="h-full flex flex-col lg:overflow-hidden overflow-y-auto">
       {note}
-      <SharedWorkView work={v} pin={route.params.get("pin")} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} inbox={link.member_id ? demoInbox(link.member_id) : undefined} />
+      <SharedWorkView work={v} pin={route.params.get("pin")} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} inbox={link.member_id ? demoInbox(link.member_id) : undefined} addPhoto={async (job, f, input) => sendSharedJobPhoto(jobs, link.token, job, f, input)} />
     </div>
   );
 }

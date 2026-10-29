@@ -37,6 +37,7 @@ import { Inspector, ProjectSummary, type AddPin } from "./Inspector";
 import { FeedPanel } from "./FeedPanel";
 import { PinDetail, PinForm, PinsList, QuickPin, where } from "./PinsPanel";
 import { PlanPanel, UploadBox } from "./PlanPanel";
+import type { PhotoItem } from "@/lib/photos";
 import { ShareDialog } from "./ShareDialog";
 import { useFollowMarks } from "./useFollowMarks";
 import { HOUSE_LAYER, StagesPanel, StageStrip } from "./StagesPanel";
@@ -210,6 +211,17 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     setSelectedPin(null);
     showMarks([m], null, true);
   }, [view]);
+  /** a photo's spot: its pin (the map goes where the pin is), or its room or the thing in it */
+  const showPhotoSpot = useCallback((p: PhotoItem) => {
+    const pin = p.pin ? pins.find((x) => x.id === p.pin!.id) : null;
+    const to = pin && view ? pinLevel(view, pin) : null;
+    if (pin && to) { setSelected(null); setSelectedPin(pin.id); setLevelRaw(to); return; }
+    const id = p.element_id ?? p.room_id;
+    if (id) showPlace({ id, label: (view && findElement(view, id) && elementLabel(findElement(view, id)!)) || "Here" });
+  }, [pins, view, showPlace]);
+  // opened from Photos: go to the photo's spot once the plan is up
+  const firstPhoto = useRef(data.startOnPhoto ?? null);
+  useEffect(() => { const p = firstPhoto.current; if (p && view) { firstPhoto.current = null; if (p.pin) setTab("pins"); setTimeout(() => showPhotoSpot(p), 300); } }, [view, showPhotoSpot]);
   const firstPlace = useRef(data.startOnClient?.place ?? null);
   useEffect(() => { const t = firstPlace.current; if (t && view) { firstPlace.current = null; setTimeout(() => showPlace(t), 300); } }, [view, showPlace]);
   // furnishing, and how built the house looks: finished, unless a stage is picked in Stages

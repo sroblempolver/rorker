@@ -9,7 +9,7 @@ const root = path.join(here, "..");
 await esbuild.build({
   stdin: {
     contents: `export { fromRecords } from "@/lib/cloud/records";
-export { clientBuys, clientNote, clientPinIds, clientView, companyOf, crewPinIds, crewWork, findLink } from "@/lib/cloud/links";
+export { clientBuys, clientNote, clientPhotos, clientPinIds, clientView, companyOf, crewPinIds, crewWork, findLink, linkPhoto, photoJobIds } from "@/lib/cloud/links";
 export { clientBilling, forClient } from "@/lib/billing/clientGuard";
 export { linkLive } from "@/lib/share";
 export { cleanPlaces } from "@/lib/plan/tags";

@@ -35,6 +35,7 @@ function fromRecords(rows) {
     members,
     comments,
     notes: of("note").map((r) => r.data),
+    photos: of("photo").map((r) => r.data).sort((a, b) => a.created_at.localeCompare(b.created_at)),
     messages: of("message").map((r) => r.data).sort((a, b) => a.created_at.localeCompare(b.created_at)),
     team: of("team").map((r) => r.data).sort((a, b) => a.created_at.localeCompare(b.created_at)),
     access: of("access").map((r) => r.data),
@@ -192,6 +193,117 @@ function shareWork(l, company, jobs) {
   };
 }
 
+// src/lib/photos.ts
+function findElement(plan, id) {
+  for (const floor of plan.floors) {
+    const r = floor.rooms.find((x) => x.id === id);
+    if (r) return { kind: "room", floor, id, room: r.id, name: r.name };
+    const w = floor.walls.find((x) => x.id === id);
+    if (w) return { kind: "wall", floor, id, room: w.room_ids[0] ?? null, name: w.exterior ? "Exterior wall" : "Wall" };
+    const o = floor.openings.find((x) => x.id === id);
+    if (o) return { kind: "opening", floor, id, room: o.room_ids[0] ?? null, name: o.name };
+    const f = floor.fixtures.find((x) => x.id === id);
+    if (f) return { kind: "fixture", floor, id, room: f.room_id, name: f.name.replace(/\s*\((likely|probably|maybe)\)\s*$/i, "") };
+    const s = floor.stairs.find((x) => x.id === id);
+    if (s) return { kind: "stair", floor, id, room: s.room_id, name: "Stairs" };
+  }
+  return null;
+}
+function pointInPoly(pt, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if (yi > pt[1] !== yj > pt[1] && pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function placeOf(plan, at) {
+  if (!plan) return { room_id: null, element_id: at.element_id ?? null, floor_id: at.floor_id ?? null };
+  const e = at.element_id ? findElement(plan, at.element_id) : null;
+  if (e) {
+    return { room_id: e.room, element_id: e.kind === "room" ? null : e.id, floor_id: e.floor.id };
+  }
+  const sideRoom = at.side?.split(":")[0];
+  if (sideRoom) {
+    const f2 = plan.floors.find((x) => x.rooms.some((r) => r.id === sideRoom));
+    if (f2) return { room_id: sideRoom, element_id: null, floor_id: f2.id };
+  }
+  const f = at.floor_id ? plan.floors.find((x) => x.id === at.floor_id) : null;
+  if (f && at.x != null && at.y != null) {
+    const r = f.rooms.find((x) => pointInPoly([at.x, at.y], x.polygon));
+    return { room_id: r?.id ?? null, element_id: null, floor_id: f.id };
+  }
+  return { room_id: null, element_id: null, floor_id: f?.id ?? null };
+}
+function pinPlace(plan, p) {
+  return placeOf(plan, { element_id: p.element_id, floor_id: p.floor_id, x: p.anchor?.view === "wall" ? null : p.x, y: p.anchor?.view === "wall" ? null : p.y, side: p.anchor?.view === "wall" ? p.anchor.side : null });
+}
+function gatherPhotos(s) {
+  const out = [];
+  for (const u of s.uploads) out.push({
+    key: `upload:${u.id}`,
+    src: u.src,
+    source: "upload",
+    by: u.by,
+    created_at: u.created_at,
+    room_id: u.room_id,
+    element_id: u.element_id,
+    floor_id: u.floor_id,
+    stage_id: u.stage_id,
+    caption: u.caption,
+    client: u.client,
+    photo_id: u.id
+  });
+  const pins = new Map(s.pins.map((p) => [p.id, p]));
+  for (const c of s.comments) {
+    const p = pins.get(c.pin_id);
+    if (!p || !c.photos.length) continue;
+    const at = pinPlace(s.plan, p);
+    const by = c.author_id ? { kind: "team", name: s.names?.get(c.author_id) ?? c.author_name ?? "Team", member_id: c.author_id } : { kind: "crew", name: c.author_name ?? "Crew" };
+    const caption = c.body && !/^Photo from /.test(c.body) ? c.body : null;
+    c.photos.forEach((src, i) => out.push({
+      key: `pin:${c.id}:${i}`,
+      src,
+      source: "pin",
+      by,
+      created_at: c.created_at,
+      ...at,
+      stage_id: p.stage_id,
+      caption,
+      client: p.tagged.includes(s.clientId),
+      pin: { id: p.id, number: p.number, title: p.title }
+    }));
+  }
+  for (const m of s.messages) {
+    if (!m.photos.length) continue;
+    const tag = m.places?.[0];
+    const at = tag ? placeOf(s.plan, { element_id: tag.id }) : { room_id: null, element_id: null, floor_id: null };
+    m.photos.forEach((src, i) => out.push({
+      key: `message:${m.id}:${i}`,
+      src,
+      source: "message",
+      by: { kind: m.from === "client" ? "client" : "team", name: m.author_name },
+      created_at: m.created_at,
+      ...at,
+      stage_id: null,
+      caption: m.body?.replace(/@(?=\S)/g, "") ?? null,
+      client: true
+    }));
+  }
+  return out.sort((a, b) => b.created_at.localeCompare(a.created_at) || a.key.localeCompare(b.key));
+}
+function cleanPhotoInput(plan, stages, i) {
+  const str = (v, max) => typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
+  const el = str(i?.element_id, 80);
+  const fromEl = el ? placeOf(plan, { element_id: el }) : null;
+  const room = str(i?.room_id, 80);
+  const roomOk = room && plan?.floors.some((f) => f.rooms.some((r) => r.id === room)) ? room : null;
+  const room_id = fromEl?.room_id ?? roomOk;
+  const floor_id = fromEl?.floor_id ?? (room_id ? plan.floors.find((f) => f.rooms.some((r) => r.id === room_id)).id : null);
+  const stage = str(i?.stage_id, 80);
+  return { room_id, element_id: fromEl?.element_id ?? null, floor_id, stage_id: stage && stages.some((s) => s.id === stage) ? stage : null, caption: str(i?.caption, 500) };
+}
+
 // src/lib/cloud/links.ts
 function companyOf(accountId, name, s) {
   return { id: accountId, name: s?.brand.name || name, logo_url: s?.brand.logo_url ?? null, brand_color: s?.brand.brand_color || "#ff6a1f", phone: s?.brand.phone ?? s?.phone ?? null, email: s?.brand.email ?? null, license_no: s?.brand.license_no ?? null, website: null, address: s?.brand.address ?? null };
@@ -219,7 +331,20 @@ function clientPinIds(l, a) {
   const d = a.jobs.find((x) => x.job.id === l.job_id);
   return new Set(d ? d.pins.filter((p) => p.tagged.includes(clientMemberId(d.job.id))).map((p) => p.id) : []);
 }
-function clientView(l, company, a, photos = {}, messages = []) {
+function clientPhotos(l, a) {
+  const d = linkLive(l) && l.audience === "client" ? a.jobs.find((x) => x.job.id === l.job_id) : void 0;
+  if (!d) return [];
+  const pins = new Set(d.pins.map((p) => p.id));
+  return gatherPhotos({
+    plan: d.plan?.data ?? null,
+    pins: d.pins,
+    comments: a.comments.filter((c) => pins.has(c.pin_id)),
+    messages: a.messages.filter((m) => m.job_id === d.job.id),
+    uploads: (a.photos ?? []).filter((p) => p.job_id === d.job.id),
+    clientId: clientMemberId(d.job.id)
+  }).filter((p) => p.client).map((p) => p.by.kind === "crew" ? { ...p, by: { kind: "crew", name: "Crew" } } : p);
+}
+function clientView(l, company, a, photos = {}, messages = [], jobPhotos) {
   if (!linkLive(l) || l.audience !== "client") return null;
   const d = a.jobs.find((x) => x.job.id === l.job_id);
   if (!d) return null;
@@ -243,7 +368,8 @@ function clientView(l, company, a, photos = {}, messages = []) {
     })(),
     messages,
     notes: a.notes.filter((n) => n.job_id === d.job.id),
-    can_add: !!d.job.client_can_add
+    can_add: !!d.job.client_can_add,
+    ...jobPhotos ? { photos: jobPhotos } : {}
   };
 }
 function clientBuys(l, a) {
@@ -285,6 +411,18 @@ function clientNote(l, a, n, id, at) {
     closed_at: null
   };
 }
+function photoJobIds(l, a) {
+  if (!linkLive(l)) return /* @__PURE__ */ new Set();
+  if (l.audience === "client") return new Set(l.job_id ? [l.job_id] : []);
+  return new Set(a.jobs.filter((d) => l.job_id ? d.job.id === l.job_id : linkPins(l, d.pins).length > 0).map((d) => d.job.id));
+}
+function linkPhoto(l, a, jobId, input, id, path, at) {
+  const d = a.jobs.find((x) => x.job.id === jobId);
+  if (!d || !photoJobIds(l, a).has(jobId)) return null;
+  const client = l.audience === "client";
+  const by = client ? { kind: "client", name: d.job.client_name || "Client" } : { kind: "crew", name: l.label, member_id: l.member_id };
+  return { id, job_id: jobId, src: path, by, created_at: at, ...cleanPhotoInput(d.plan?.data ?? null, d.stages, input), client };
+}
 
 // src/lib/plan/tags.ts
 function cleanPlaces(v) {
@@ -308,6 +446,7 @@ export {
   clientBilling,
   clientBuys,
   clientNote,
+  clientPhotos,
   clientPinIds,
   clientView,
   companyOf,
@@ -317,5 +456,7 @@ export {
   forClient,
   fromRecords,
   linkLive,
+  linkPhoto,
+  photoJobIds,
   teamFor
 };
