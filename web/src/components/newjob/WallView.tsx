@@ -83,18 +83,23 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
   const [sel, setSel] = useState<Item | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const svg = useRef<SVGSVGElement>(null);
-  const drag = useRef<{ item: Item; from: number; c0: number; moved: boolean } | null>(null);
-  const pad = 400, H = height + 700, W = Math.max(L + pad * 2, H * 4);
+  const drag = useRef<{ item: Item; from: number; fromY: number; c0: number; b0: number | null; moved: boolean } | null>(null);
+  const pad = 400, H = height + 1200, W = Math.max(L + pad * 2, H * 4);
   // the picture keeps its shape: work out the drawn width from the box's height
+  const scale = () => { const b = svg.current!.getBoundingClientRect(); return Math.max(W / b.width, H / b.height); };
   const toX = (e: { clientX: number }) => { const b = svg.current!.getBoundingClientRect(); const k = Math.max(W / b.width, H / b.height); return L / 2 + (e.clientX - (b.left + b.width / 2)) * k; };
 
-  // move an item so its centre sits `c` mm from the left end
-  const moveTo = (it: Item, c: number, history: boolean) => {
+  // what can go up and down the wall: furniture, and windows (their sill)
+  const bottomAt = (it: Item) => (it.t === "thing" ? bottomOf(floor.fixtures![it.i]) : it.t === "window" ? floor.windows![it.i].sill_mm ?? WIN.sill : null);
+  const tallOf = (it: Item) => (it.t === "thing" ? topOf(floor.fixtures![it.i]) - bottomOf(floor.fixtures![it.i]) : it.t === "window" ? floor.windows![it.i].height_mm ?? WIN.height : 0);
+  // move an item so its centre sits `c` mm from the left end (and its bottom `bottom` mm off the floor)
+  const moveTo = (it: Item, c: number, history: boolean, bottom?: number) => {
     const P = at(Math.max(0, Math.min(L, c)));
     if (it.t === "thing") {
       const f = floor.fixtures![it.i], off = offOf(f.center);
       const q: Pt = [Math.round(P[0] + inward[0] * off), Math.round(P[1] + inward[1] * off)];
-      onChange({ ...floor, fixtures: floor.fixtures!.map((x, i) => (i === it.i ? { ...x, center: q } : x)) }, history);
+      const up = bottom == null ? {} : { elevation_mm: bottom || undefined };
+      onChange({ ...floor, fixtures: floor.fixtures!.map((x, i) => (i === it.i ? { ...x, center: q, ...up } : x)) }, history);
     } else if (it.t === "door") {
       const d = floor.doors![it.i], ref = doorWall(floor, d);
       if (!ref) return;
@@ -106,22 +111,28 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
       const n = Math.max(1, Math.min(4, w.count ?? 1));
       const list = Array.from({ length: n }, (_, k) => w.at?.[k] ?? (k + 1) / (n + 1));
       list[it.k] = Math.round(Math.max(0, Math.min(1, param(P, ref))) * 1000) / 1000;
-      onChange({ ...floor, windows: floor.windows!.map((x, i) => (i === it.i ? { ...x, at: list } : x)) }, history);
+      onChange({ ...floor, windows: floor.windows!.map((x, i) => (i === it.i ? { ...x, at: list, ...(bottom == null ? {} : { sill_mm: bottom }) } : x)) }, history);
     }
   };
   const down = (e: RPointerEvent<SVGElement>, it: Item) => {
     e.stopPropagation();
     (e.target as Element).setPointerCapture?.(e.pointerId);
     setSel(it);
-    drag.current = { item: it, from: toX(e), c0: (it.x0 + it.x1) / 2, moved: false };
+    drag.current = { item: it, from: toX(e), fromY: e.clientY, c0: (it.x0 + it.x1) / 2, b0: bottomAt(it), moved: false };
   };
   const move = (e: RPointerEvent<SVGSVGElement>) => {
     const d = drag.current;
     if (!d) return;
-    const dx = toX(e) - d.from;
-    if (!d.moved && Math.abs(dx) < 30) return;
+    const dx = toX(e) - d.from, dy = (d.fromY - e.clientY) * scale();
+    if (!d.moved && Math.hypot(dx, dy) < 30) return;
     if (!d.moved) { d.moved = true; moveTo(d.item, d.c0, true); } // keep the start for undo
-    moveTo(d.item, roundLen(d.c0 + dx, units), false);
+    // up and down too, between the floor and the ceiling; it sits on the floor when dropped near it
+    let bottom: number | undefined;
+    if (d.b0 != null) {
+      bottom = Math.max(0, Math.min(height - tallOf(d.item), roundLen(d.b0 + dy, units)));
+      if (bottom < 50) bottom = 0;
+    }
+    moveTo(d.item, roundLen(d.c0 + dx, units), false, bottom);
   };
   const up = () => { drag.current = null; };
 
@@ -239,7 +250,7 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
         {things.map((it) => {
           const f = floor.fixtures![it.i], b = bottomOf(f), t = topOf(f), on = !!sel && same(it, sel), label = f.name || CATALOG[f.kind]?.label || f.kind;
           return (
-            <g key={`f${it.i}`} onPointerDown={(e) => down(e, it)} style={{ cursor: "ew-resize" }}>
+            <g key={`f${it.i}`} onPointerDown={(e) => down(e, it)} style={{ cursor: "move" }}>
               <rect x={it.x0} y={-t} width={it.x1 - it.x0} height={t - b} fill={CATALOG[f.kind]?.fill ?? "#b9a27e"} fillOpacity={0.9} stroke={on ? "#ff6a1f" : "#0a0a0b"} strokeWidth={on ? 40 : 14} />
               <text x={(it.x0 + it.x1) / 2} y={-(b + t) / 2} fontSize={Math.min(fs * 0.7, (it.x1 - it.x0) / (label.length * 0.62))} textAnchor="middle" dominantBaseline="middle" fill="#0a0a0b" style={{ pointerEvents: "none" }}>{label}</text>
             </g>
@@ -263,7 +274,7 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
               })()}
             </g>
           ) : (
-            <g key={k} onPointerDown={(e) => down(e, it)} style={{ cursor: "ew-resize" }}>
+            <g key={k} onPointerDown={(e) => down(e, it)} style={{ cursor: "move" }}>
               {(() => {
                 const wn = floor.windows![it.i], sill = wn.sill_mm ?? WIN.sill, top = sill + (wn.height_mm ?? WIN.height);
                 return (
@@ -282,7 +293,7 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
           <g fill="#ff6a1f" fontSize={fs}>
             {/* a gap too narrow for its number goes without (the box below says it) */}
             {cur.x0 > fs * 3.5 && <text x={cur.x0 / 2} y={-height - 80} textAnchor="middle">{m(cur.x0)}</text>}
-            <text x={(cur.x0 + cur.x1) / 2} y={-height - 80} textAnchor="middle">{m(cur.x1 - cur.x0)} wide</text>
+            <text x={(cur.x0 + cur.x1) / 2} y={-height - 80 - fs * 1.1} textAnchor="middle">{m(cur.x1 - cur.x0)} wide</text>
             {L - cur.x1 > fs * 3.5 && <text x={(cur.x1 + L) / 2} y={-height - 80} textAnchor="middle">{m(L - cur.x1)}</text>}
           </g>
         )}
@@ -290,7 +301,7 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
       </svg>
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px] min-h-[44px]">
         {note && <span className="text-amber">{note}</span>}
-        {!sel && !note && <span className="text-muted">Drag a door, window or piece of furniture along the wall. Pick one to change its size or remove it.</span>}
+        {!sel && !note && <span className="text-muted">Drag a door, window or piece of furniture along the wall (windows and furniture up and down too). Pick one to change its size or remove it.</span>}
         {selThing && (
           <>
             <span className="font-medium">{selThing.name || CATALOG[selThing.kind]?.label || selThing.kind}</span>
