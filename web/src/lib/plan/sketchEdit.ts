@@ -261,3 +261,25 @@ export function hugWall(poly: Pt[], c: Pt, width: number, depth: number, reach =
   }
   return best && { center: best.center, facing: best.facing };
 }
+
+/**
+ * A new rectangular room trimmed back to the rooms it was drawn over, so rooms never overlap: an edge
+ * that runs into a neighbour stops at the neighbour's wall (one shared wall, not two). Null when it's
+ * mostly on top of another room, or not a rectangle (left as drawn).
+ */
+export function trimOverlap(poly: Pt[], others: Pt[][]): Pt[] | null {
+  const rect = (p: Pt[]) => p.length === 4 && edgesOf(p).every(([a, b]) => Math.abs(a[0] - b[0]) < 1 || Math.abs(a[1] - b[1]) < 1);
+  if (!rect(poly)) return poly;
+  let [x0, y0, x1, y1] = [Math.min(...poly.map((p) => p[0])), Math.min(...poly.map((p) => p[1])), Math.max(...poly.map((p) => p[0])), Math.max(...poly.map((p) => p[1]))];
+  for (const o of others) {
+    if (!rect(o)) continue;
+    const [bx0, by0, bx1, by1] = [Math.min(...o.map((p) => p[0])), Math.min(...o.map((p) => p[1])), Math.max(...o.map((p) => p[0])), Math.max(...o.map((p) => p[1]))];
+    const ox = Math.min(x1, bx1) - Math.max(x0, bx0), oy = Math.min(y1, by1) - Math.max(y0, by0);
+    if (ox <= 1 || oy <= 1) continue;
+    // pull back the side that went in the least
+    if (ox <= oy) { if (x0 + x1 < bx0 + bx1) x1 = Math.min(x1, bx0); else x0 = Math.max(x0, bx1); }
+    else if (y0 + y1 < by0 + by1) y1 = Math.min(y1, by0); else y0 = Math.max(y0, by1);
+    if (x1 - x0 < 300 || y1 - y0 < 300) return null;
+  }
+  return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+}
