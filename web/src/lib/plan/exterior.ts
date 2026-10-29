@@ -58,6 +58,43 @@ function snapAxis(vals: number[]): number[] {
   return out;
 }
 
+/** A gap narrower than this between parts of the house (the wall between rooms drawn apart, a sliver
+ *  the reader left) is roofed over, so the roof is one piece over the outside of the house. */
+const GAP = 900;
+
+/** One roof over the house however many walls are inside it: empty cells closed in by the house (a hole
+ *  between rooms) and narrow strips between two parts of it are roofed too. Changes `cell` in place. */
+function closeGaps(cell: number[][], xs: number[], ys: number[]) {
+  const nx = cell.length, ny = cell[0]?.length ?? 0;
+  if (!nx || !ny) return;
+  const on = (i: number, j: number) => i >= 0 && j >= 0 && i < nx && j < ny && cell[i][j] !== 0;
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+      if (cell[i][j] !== 0) continue;
+      // the run of empty cells this one is in, across and down: bridged when short and walled at both ends
+      let a = i, b = i;
+      while (a > 0 && cell[a - 1][j] === 0) a--;
+      while (b < nx - 1 && cell[b + 1][j] === 0) b++;
+      const across = on(a - 1, j) && on(b + 1, j) && xs[b + 1] - xs[a] <= GAP;
+      let c = j, d = j;
+      while (c > 0 && cell[i][c - 1] === 0) c--;
+      while (d < ny - 1 && cell[i][d + 1] === 0) d++;
+      const down = on(i, c - 1) && on(i, d + 1) && ys[d + 1] - ys[c] <= GAP;
+      if (across || down) { cell[i][j] = 1; changed = true; }
+    }
+  }
+  // empty cells the outside can't reach are inside the house
+  const out = cell.map((col) => col.map(() => false));
+  const stack: [number, number][] = [];
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) if ((i === 0 || j === 0 || i === nx - 1 || j === ny - 1) && cell[i][j] === 0) { out[i][j] = true; stack.push([i, j]); }
+  while (stack.length) {
+    const [i, j] = stack.pop()!;
+    for (const [u, v] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) if (u >= 0 && v >= 0 && u < nx && v < ny && !out[u][v] && cell[u][v] === 0) { out[u][v] = true; stack.push([u, v]); }
+  }
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) if (cell[i][j] === 0 && !out[i][j]) cell[i][j] = 1;
+}
+
 /** Splits what a floor needs roofed (its rooms minus whatever the floors above cover) into rectangles,
  *  biggest first. Returns the grid too, so the roofs can tell what they lean against. */
 function roofRects(own: Pt[][], above: Pt[][]) {
@@ -73,6 +110,7 @@ function roofRects(own: Pt[][], above: Pt[][]) {
       cell[i].push(above.some((r) => pointInPoly(c, r)) ? 2 : own.some((r) => pointInPoly(c, r)) ? 1 : 0);
     }
   }
+  closeGaps(cell, xs, ys);
   const owner: number[][] = cell.map((col) => col.map(() => -1));
   const rects: { i0: number; j0: number; i1: number; j1: number }[] = [];
   for (;;) {
