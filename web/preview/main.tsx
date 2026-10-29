@@ -49,6 +49,10 @@ import type { JobLive, MapEvent } from "@/components/AllJobsMap";
 import { today } from "@/lib/dates";
 import type { Session } from "@supabase/supabase-js";
 import * as cloud from "./cloud";
+import { credits, cloudCredits, memoryCredits } from "./credits";
+import type { AssistantSend } from "@/components/assistant/Assistant";
+import { CreditChip, CreditPrompt, CreditsPage } from "./CreditsPage";
+import { itemCount, planSize } from "@/lib/credits/rules";
 import { AuthScreen, ClientLinkPage, CrewLinkPage, HandoffPage, Loading, Problem, SharedWithYou } from "./pages";
 
 /** when this preview was built, so an out-of-date copy in the browser cache is easy to spot */
@@ -474,7 +478,7 @@ function liveCity(jobs: WorkspaceData[]): { live: Record<string, JobLive>; event
   return { live, events: events.sort((a, b) => rank[a.tone] - rank[b.tone]) };
 }
 
-type Page = "jobs" | "job" | "plan" | "photos" | "team" | "shared" | "new" | "client" | "money" | "jobmoney" | "shop" | "bench";
+type Page = "jobs" | "job" | "plan" | "photos" | "team" | "shared" | "new" | "client" | "money" | "jobmoney" | "shop" | "bench" | "credits";
 
 /** A small job with no drawing yet (the materials sample spreads across these too). */
 function plainJob(j: (typeof EXTRA_JOBS)[number], team: Member[]): WorkspaceData {
@@ -501,11 +505,11 @@ function fromHash(): { page: Page; id?: string; photoJob?: string } {
   if (a === "money" && b) return { page: "jobmoney", id: b };
   // Photos, on every job or one (#/photos/hadley)
   if (a === "photos") return { page: "photos", photoJob: b };
-  if (a === "jobs" || a === "team" || a === "new" || a === "shared" || a === "money" || a === "shop" || a === "bench") return { page: a };
+  if (a === "jobs" || a === "team" || a === "new" || a === "shared" || a === "money" || a === "shop" || a === "bench" || a === "credits") return { page: a };
   return { page: "job", id: a === "job" ? b : undefined };
 }
 const hashFor = (page: Page, id: string, photoJob?: string | null) => (page === "job" ? `#/job/${id}` : page === "plan" && id ? `#/plan/${id}` : page === "jobmoney" ? `#/money/${id}` : page === "photos" && photoJob ? `#/photos/${photoJob}` : `#/${page}`);
-const TITLES: Partial<Record<Page, string>> = { jobs: "Jobs", plan: "Plan", photos: "Photos", team: "Team", new: "New project", shared: "Shared link", money: "Money", jobmoney: "Money", shop: "Shopping", client: "Client view", bench: "Plan tests" };
+const TITLES: Partial<Record<Page, string>> = { jobs: "Jobs", plan: "Plan", photos: "Photos", team: "Team", new: "New project", shared: "Shared link", money: "Money", jobmoney: "Money", shop: "Shopping", client: "Client view", bench: "Plan tests", credits: "Credits and plan" };
 
 /** Signed in: the account and the saver that writes every change to it. */
 interface CloudBoot { account: cloud.Account; saver: cloud.Saver; email: string | null; name: string }
@@ -557,6 +561,8 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
   jobsRef.current = jobs;
   liveJobs = () => jobsRef.current;
   const poke = useMemo(() => () => signedIn?.saver.poke(), [signedIn]);
+  // credits: the account's, kept by the server; on sample data, in this page
+  useState(() => credits.use(signedIn ? cloudCredits() : memoryCredits(() => jobsRef.current.filter((d) => d.plan).length)));
   const [saveState, setSaveState] = useState<cloud.SaveState>("saved");
   useEffect(() => {
     const on = (e: Event) => setSaveState((e as CustomEvent<cloud.SaveState>).detail);
@@ -652,9 +658,20 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
         async send(body, f, places) { await cloud.addMessage(acct, active.job.id, signedIn.name, body, f, places); return cloud.listMessages(acct, active.job.id); },
       } };
     }
+    // placing a thing on the plan costs a homeowner credits (free on business plans)
+    const make = a.createItem;
+    a.createItem = async (input) => {
+      if (!(await credits.gate("place_item", { note: active.job.name }))) throw new Error("Not enough credits to place that.");
+      return make(input);
+    };
     const saved = saving(a, poke);
     const showClient = (start: ClientStart, pin?: string) => { setClient(start); setClientPin(pin ?? null); goRef.current("client"); };
-    return { ...saved, ask: previewAsk(active, saved), afterAssistant: () => { setVer((n) => n + 1); poke(); },
+    const ask = previewAsk(active, saved);
+    const gated: AssistantSend = async (turns, context, signal) => {
+        if (!(await credits.gate("assistant_ask", { note: active.job.name }))) throw new Error("Out of credits for the assistant. Buy credits or move up a plan on the Credits page.");
+        return ask(turns, context, signal);
+      };
+    return { ...saved, ask: gated, afterAssistant: () => { setVer((n) => n + 1); poke(); },
       openShare: signedIn ? a.openShare : (token: string, pin?: string) => {
         if (shares.find((l) => l.token === token)?.audience === "client") return showClient(null, pin);
         setShare({ token, pin }); goRef.current("shared");
@@ -685,7 +702,9 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
     window.addEventListener("preview-nav", go);
     return () => window.removeEventListener("preview-nav", go);
   }, []);
-  const created = (r: NewProjectResult) => {
+  const created = async (r: NewProjectResult) => {
+    // a new plan costs credits and has to fit the account's plan (how many plans, floors, square feet)
+    if (r.plan && !(await credits.gate("plan_create", { newPlan: true, size: planSize(r.plan), note: r.job.name }))) return;
     const d = fromAssistant(r, team.members);
     setJobs((js) => [d, ...js]);
     go("job", d.job.id);
@@ -701,6 +720,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
     { id: "page:money", group: "Go to", label: "Money", sub: "quotes, invoices, who owes what", run: () => setPage("money") },
     { id: "page:shop", group: "Go to", label: "Shopping", sub: "everything to buy, by store", run: () => setPage("shop") },
     { id: "page:team", group: "Go to", label: "Team", run: () => setPage("team") },
+    { id: "page:credits", group: "Go to", label: "Credits and plan", sub: "your balance, buy credits, change plan", keywords: "billing subscription upgrade", run: () => setPage("credits") },
     { id: "page:new", group: "Go to", label: "New project", sub: "from a drawing, PDF or photo", run: () => setPage("new") },
     { id: "page:bench", group: "Go to", label: "Plan tests", sub: "how well the plan reader reads real plans", run: () => setPage("bench") },
   ], [jobs]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -715,12 +735,14 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
         <button onClick={() => setPage("jobs")} aria-label="All jobs"><Logo size={20} /></button>
         <nav className="hidden sm:flex items-center gap-1 sm:ml-2 min-w-0 overflow-x-auto">{tab("jobs", "Jobs")}{tab("money", "Money")}{tab("shop", "Shopping")}{tab("photos", "Photos")}{tab("team", "Team")}</nav>
         <GoToButton className="ml-auto" />
+        <CreditChip onOpen={() => setPage("credits")} />
         <button onClick={() => setPage("new")} className={`btn btn-sm ${page === "new" ? "btn-ghost" : "btn-primary"}`}>+<span className="hidden sm:inline"> New project</span></button>
         {signedIn ? <AccountChip c={signedIn} state={saveState} /> : (
           <span className="chip hidden md:inline-flex" title={`Build ${__BUILD__}`}><span>Sample data, nothing is saved</span><button className="underline" onClick={() => { if (OPEN_DEMO) { location.href = "/accounts/"; return; } location.hash = ""; location.reload(); }}>Sign in</button></span>
         )}
       </header>
       <GoToHost />
+      <CreditPrompt onOpen={() => setPage("credits")} />
       {/* on a phone the main places sit at the bottom, under the thumb */}
       <nav className="mobile-nav sm:hidden fixed bottom-0 inset-x-0 z-30 h-14 pb-[env(safe-area-inset-bottom)] box-content bg-panel border-t border-line grid grid-cols-5" aria-label="Main">
         {([["jobs", "Jobs", "M3 21V9l9-6 9 6v12M9 21v-7h6v7"], ["money", "Money", "M3 6h18v12H3zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"], ["shop", "Shopping", "M5 7h14l-1.5 12h-11zM9 7a3 3 0 0 1 6 0"], ["photos", "Photos", "M4 8h3l2-3h6l2 3h3v11H4zM12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"], ["team", "Team", "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14a6.5 6.5 0 0 1 3.5 6"]] as const).map(([p, label, d]) => {
@@ -740,9 +762,14 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
       ) : shown === "plan" ? (
         <PlanPage jobs={jobs.map((d) => ({ id: d.job.id, name: d.job.name, address: d.job.address, plan: d.plan?.data ?? null, build: d.edits[JOB_KEY]?.build }))} jobId={activeId || null}
           onPick={(id) => go("plan", id)} onOpenJob={(id) => { setVer((n) => n + 1); go("job", id); }} onNew={() => setPage("new")}
-          onSave={(id, plan) => {
+          onSave={async (id, plan) => {
             const d = jobsRef.current.find((j) => j.job.id === id);
             if (!d) return;
+            // a first plan for a job is a new plan; after that, things placed since the last save cost a homeowner credits
+            const ok = d.plan
+              ? await credits.gate("place_item", { count: Math.max(0, itemCount(plan) - itemCount(d.plan.data)), size: planSize(plan), note: d.job.name })
+              : await credits.gate("plan_create", { newPlan: true, size: planSize(plan), note: d.job.name });
+            if (!ok) return false;
             d.plan = d.plan ? { ...d.plan, version: d.plan.version + 1, data: plan } : { id: uid(), job_id: id, version: 1, data: plan, created_at: now() };
             d.job = { ...d.job, current_plan_id: d.plan.id };
             setJobs((js) => [...js]);
@@ -765,6 +792,8 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
               onShowSpot={(id, p) => { setVer((n) => n + 1); go("job", id); setPhotoStart(p); }} />
           </TeamContext.Provider>
         </div>
+      ) : shown === "credits" ? (
+        <div className="flex-1 overflow-y-auto"><CreditsPage company={COMPANY.name} /></div>
       ) : shown === "bench" ? (
         <div className="flex-1 overflow-y-auto"><PlanBench /></div>
       ) : shown === "money" ? (
@@ -871,6 +900,7 @@ function AccountChip({ c, state }: { c: CloudBoot; state: cloud.SaveState }) {
           <p className="text-muted truncate">{c.email}</p>
           <p className="text-muted">{state === "error" ? "The last change didn't save. Check your connection." : state === "saving" ? "Saving your last change…" : "Everything is saved to your account."}</p>
           {state === "error" && <button className="btn btn-sm w-full" onClick={() => void c.saver.flush()}>Try again</button>}
+          <a className="btn btn-sm w-full" href="#/credits" onClick={() => setOpen(false)}>Credits and plan</a>
           <button className="btn btn-ghost btn-sm w-full" onClick={async () => { await c.saver.flush(); await cloud.signOut(); location.hash = ""; location.reload(); }}>Sign out</button>
         </div>
       )}
