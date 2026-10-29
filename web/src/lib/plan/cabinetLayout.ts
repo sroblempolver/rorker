@@ -149,7 +149,10 @@ export function slot(f: SketchFloor, fc: Face, x: number, w: number, z: number, 
   for (let k = 0; k < 4; k++) {
     const hit = others.find((o) => best + w / 2 > o.x0 + 1 && best - w / 2 < o.x1 - 1);
     if (!hit) break;
-    best = Math.abs(best - (hit.x0 - w / 2)) < Math.abs(best - (hit.x1 + w / 2)) ? hit.x0 - w / 2 : hit.x1 + w / 2;
+    // only to a side it fits on, between the corners
+    const sides = [hit.x0 - w / 2, hit.x1 + w / 2], fits = sides.filter((c) => c - w / 2 >= fc.s0 - 1 && c + w / 2 <= fc.s1 + 1);
+    const cur = best;
+    best = (fits.length ? fits : sides).reduce((a, b) => (Math.abs(a - cur) <= Math.abs(b - cur) ? a : b));
   }
   if (fc.s1 - fc.s0 >= w) best = Math.min(fc.s1 - w / 2, Math.max(fc.s0 + w / 2, best));
   return best;
