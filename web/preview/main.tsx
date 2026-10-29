@@ -566,7 +566,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
         <GoToButton className="ml-auto" />
         <button onClick={() => setPage("new")} className={`btn btn-sm ${page === "new" ? "btn-ghost" : "btn-primary"}`}>+<span className="hidden sm:inline"> New project</span></button>
         {signedIn ? <AccountChip c={signedIn} state={saveState} /> : (
-          <span className="chip hidden md:inline-flex" title={`Build ${__BUILD__}`}><span>Sample data, nothing is saved</span><button className="underline" onClick={() => { location.hash = ""; location.reload(); }}>Sign in</button></span>
+          <span className="chip hidden md:inline-flex" title={`Build ${__BUILD__}`}><span>Sample data, nothing is saved</span><button className="underline" onClick={() => { if (OPEN_DEMO) { location.href = "/accounts/"; return; } location.hash = ""; location.reload(); }}>Sign in</button></span>
         )}
       </header>
       <GoToHost />
@@ -691,6 +691,10 @@ function linkRoute(): { kind: "s" | "c"; token: string; params: URLSearchParams 
   return m ? { kind: m[1] as "s" | "c", token: m[2], params: new URLSearchParams(m[3] ?? "") } : null;
 }
 
+// build.rorker.com itself stays the open demo (no sign-in); accounts live at build.rorker.com/accounts/
+// until they're ready for everyone. Shared crew and client links open anywhere.
+const OPEN_DEMO = location.hostname === "build.rorker.com" && !location.pathname.startsWith("/accounts");
+
 type Boot = { kind: "loading" } | { kind: "auth"; error?: string } | { kind: "app"; jobs: WorkspaceData[]; signedIn?: CloudBoot };
 
 /** Open the signed-in person's account; a brand-new account gets the sample jobs to start from. */
@@ -721,7 +725,7 @@ async function openAccount(s: Session): Promise<Boot> {
 
 function Root() {
   const [link, setLink] = useState(linkRoute);
-  const [boot, setBoot] = useState<Boot>({ kind: "loading" });
+  const [boot, setBoot] = useState<Boot>(() => (OPEN_DEMO ? { kind: "app", jobs: sampleJobs() } : { kind: "loading" }));
   useEffect(() => {
     const on = () => setLink(linkRoute());
     window.addEventListener("hashchange", on);
@@ -732,7 +736,7 @@ function Root() {
     setBoot({ kind: "loading" });
     try { setBoot(await openAccount(s)); } catch (e) { setBoot({ kind: "auth", error: e instanceof Error ? e.message : "Couldn't open your account." }); }
   };
-  useEffect(() => { if (!link) void cloud.currentSession().then(start); }, [!link]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!link && !OPEN_DEMO) void cloud.currentSession().then(start); }, [!link]); // eslint-disable-line react-hooks/exhaustive-deps
   if (link) return link.kind === "c"
     ? <ClientLinkPage token={link.token} open={link.params.get("open")} pin={link.params.get("pin")} />
     : <CrewLinkPage token={link.token} pin={link.params.get("pin")} />;
