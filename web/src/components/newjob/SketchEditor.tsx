@@ -13,6 +13,7 @@ import { CATALOG } from "@/lib/plan/catalog";
 import { MATERIAL_BASE, ROOM_MATERIAL } from "@/components/plan/style";
 import { useEscape, editable } from "@/components/ui/hotkeys";
 import { WallView } from "./WallView";
+import { tidyStroke } from "@/lib/plan/pen";
 import { fmtArea, fmtLen, parseLength, type Units } from "@/lib/plan/units";
 import type { IntakePart } from "@/lib/intake/files";
 
@@ -43,10 +44,11 @@ const DOOR_KINDS = [["door", "Door"], ["double_door", "Double door"], ["sliding_
 const SIDES: Side[] = ["north", "east", "south", "west"];
 const OPP: Record<Side, Side> = { north: "south", south: "north", east: "west", west: "east" };
 
-type Tool = "select" | "room" | "split" | "door" | "window" | "thing" | "scale" | "match" | "picture";
+type Tool = "select" | "room" | "pen" | "split" | "door" | "window" | "thing" | "scale" | "match" | "picture";
 const TOOLS: { id: Tool; label: string; key: string; help: string }[] = [
   { id: "select", label: "Select", key: "v", help: "Click a room, door, window or thing to change it. Drag a room to move it, a corner to reshape it, or a wall to slide it (the room next door follows). Click a wall of the picked room to see it from the side. Arrow keys nudge. Drag empty space to look around, scroll to zoom." },
   { id: "room", label: "Room", key: "r", help: "Drag out a room over the drawing, corner to corner, on the middle of the walls. Edges snap to the rooms beside it so they share the wall." },
+  { id: "pen", label: "Pen", key: "e", help: "Draw a room's outline freehand, all the way round. Wobbly lines come out straight and nearly square corners come out square; a wall drawn on a slant keeps its slant. Then type the exact sizes." },
   { id: "split", label: "Split", key: "s", help: "Drag a line across a room to cut it in two (for two rooms read as one)." },
   { id: "door", label: "Door", key: "d", help: "Click a wall between two rooms to put a door in it, or an outside wall for an outside door." },
   { id: "window", label: "Window", key: "w", help: "Click an outside wall of a room to add a window there. Click again for another." },
@@ -61,6 +63,7 @@ type Drag =
   | { k: "pan"; c: Pt; v: View }
   | { k: "newRoom"; a: Pt; b: Pt }
   | { k: "split"; a: Pt; b: Pt }
+  | { k: "pen"; pts: Pt[] }
   | { k: "move"; i: number; from: Pt; orig: Pt[]; moved: boolean }
   | { k: "corner"; i: number; v: number; orig: Pt[] }
   | { k: "wall"; s: Seg; from: Pt; orig: SketchRoom[]; i: number; e: number; moved: boolean }
@@ -323,6 +326,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     } else if (tool === "room") {
       const a = snapPt(p);
       setDrag({ k: "newRoom", a, b: a });
+    } else if (tool === "pen") {
+      setDrag({ k: "pen", pts: [p] });
     } else if (tool === "split") {
       setDrag({ k: "split", a: p, b: p });
     } else if (tool === "picture") {
@@ -337,6 +342,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       const k = v.w / box.w;
       setView({ x: drag.v.x - (e.clientX - drag.c[0]) * k, y: drag.v.y - (e.clientY - drag.c[1]) * k, w: drag.v.w });
     } else if (drag.k === "newRoom") setDrag({ ...drag, b: snapPt(p) });
+    else if (drag.k === "pen") { if (dist(p, drag.pts[drag.pts.length - 1]) > 3 * px) setDrag({ k: "pen", pts: [...drag.pts, p] }); }
     else if (drag.k === "split") setDrag({ ...drag, b: p });
     else if (drag.k === "move") {
       const raw: Pt = [p[0] - drag.from[0], p[1] - drag.from[1]];
@@ -379,6 +385,15 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       const name = uniqueName(`Room ${floor.rooms.length + 1}`);
       setFloor({ ...floor, rooms: [...floor.rooms, { name, type: "other", polygon: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] }] });
       setSel({ t: "room", i: floor.rooms.length });
+      return;
+    }
+    if (d?.k === "pen") {
+      const poly = tidyStroke(d.pts, px < 8 ? 10 : 50);
+      if (!poly) { setNote("Draw the room's outline all the way round, like drawing a box on paper."); return; }
+      const name = uniqueName(`Room ${floor.rooms.length + 1}`);
+      setFloor({ ...floor, rooms: [...floor.rooms, { name, type: "other", polygon: poly.map((q) => snapCorner(snapPt(q))) }] });
+      setSel({ t: "room", i: floor.rooms.length });
+      setNote(null);
       return;
     }
     if (d?.k === "split") {
@@ -555,6 +570,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             {winSpots.map((list, i) => list.map((s, k) => <line key={`w${i}-${k}`} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "window" && sel.i === i ? "#fff" : "#8fd3f0"} strokeWidth={6 * px} />))}
             {room && room.polygon.map((q, k) => <rect key={k} x={q[0] - 5 * px} y={q[1] - 5 * px} width={10 * px} height={10 * px} fill="#ff6a1f" stroke="#fff" strokeWidth={px} />)}
             {room && edgesOf(room.polygon).map((s, k) => <circle key={`m${k}`} cx={(s[0][0] + s[1][0]) / 2} cy={(s[0][1] + s[1][1]) / 2} r={4 * px} fill="#fff" stroke="#ff6a1f" strokeWidth={1.5 * px} />)}
+            {drag?.k === "pen" && <polyline points={drag.pts.map((q) => q.join(",")).join(" ")} fill="none" stroke="#ff6a1f" strokeWidth={2.5 * px} strokeLinejoin="round" strokeLinecap="round" />}
             {drag?.k === "newRoom" && <rect x={Math.min(drag.a[0], drag.b[0])} y={Math.min(drag.a[1], drag.b[1])} width={Math.abs(drag.b[0] - drag.a[0])} height={Math.abs(drag.b[1] - drag.a[1])} fill="#ff6a1f" fillOpacity={0.2} stroke="#ff6a1f" strokeWidth={2 * px} />}
             {drag?.k === "newRoom" && <text x={Math.max(drag.a[0], drag.b[0])} y={Math.max(drag.a[1], drag.b[1]) + fontMm} fontSize={fontMm} fill="#ff6a1f" textAnchor="end">{fmtLen(Math.abs(drag.b[0] - drag.a[0]), lu, true)} × {fmtLen(Math.abs(drag.b[1] - drag.a[1]), lu)}</text>}
             {drag?.k === "split" && <line x1={drag.a[0]} y1={drag.a[1]} x2={drag.b[0]} y2={drag.b[1]} stroke="#ff6a1f" strokeWidth={2 * px} strokeDasharray={`${6 * px} ${4 * px}`} />}

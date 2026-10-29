@@ -7,8 +7,8 @@ import { bboxOf, polyArea } from "./geometry";
 
 export type Side = "north" | "south" | "east" | "west";
 export interface SketchRoom { name: string; type?: string; polygon: Pt[]; unit?: string }
-export interface SketchDoor { rooms: [string, string]; kind?: OpeningKind; width_mm?: number; at?: number; /** an outside door: which side of the house */ side?: Side }
-export interface SketchWindow { room: string; side: Side; width_mm?: number; count?: number; /** where each one sits along the wall, 0 to 1 (spread evenly when left out) */ at?: number[] }
+export interface SketchDoor { rooms: [string, string]; kind?: OpeningKind; width_mm?: number; height_mm?: number; at?: number; /** an outside door: which side of the house */ side?: Side }
+export interface SketchWindow { room: string; side: Side; width_mm?: number; height_mm?: number; /** bottom of the window above the floor */ sill_mm?: number; count?: number; /** where each one sits along the wall, 0 to 1 (spread evenly when left out) */ at?: number[] }
 export interface SketchFixture { kind: string; name?: string; room?: string; center: Pt; width_mm?: number; depth_mm?: number; facing?: Side | null }
 export interface SketchFloor {
   name?: string; level: number; height_mm?: number; rooms: SketchRoom[]; doors?: SketchDoor[]; windows?: SketchWindow[]; fixtures?: SketchFixture[];
@@ -164,7 +164,7 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
   // doors between rooms, windows on a room's outside walls
   const openings: Opening[] = [];
   const used = new Map<string, number[]>();
-  const place = (w: Wall, width: number, at: number, kind: OpeningKind, name: string, prefix: string) => {
+  const place = (w: Wall, width: number, at: number, kind: OpeningKind, name: string, prefix: string, size: { sill_mm?: number; height_mm?: number } = {}) => {
     const s = wallLines.get(w.id)!;
     const L = len(s.a, s.b);
     const wd = Math.min(width, Math.max(500, L - 200));
@@ -182,6 +182,7 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
       id: `${code}-${prefix}${String(n).padStart(2, "0")}`, kind, name, a, b, width_mm: Math.round(wd), thickness_mm: w.thickness_mm, exterior: w.exterior,
       polygon: band(a, b, w.thickness_mm), room_ids: [...w.room_ids], confidence: 0.6,
       leaves: kind === "door" ? [{ hinge: a, radius: Math.round(wd), start_angle: ang, end_angle: ang + 90 }] : [],
+      ...(size.sill_mm != null ? { sill_mm: size.sill_mm } : {}), ...(size.height_mm ? { height_mm: size.height_mm } : {}),
     };
     openings.push(o);
     for (const rid of w.room_ids) rooms.find((r) => r.id === rid)?.opening_ids.push(o.id);
@@ -197,7 +198,7 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
     const w = cands.sort((x, y) => y.length_mm - x.length_mm)[0];
     if (!w) { if (!out) notes.push(`${r1.name} and ${r2!.name} don't share a wall, so the door between them was left out.`); continue; }
     const kind = d.kind && d.kind !== "window" ? d.kind : "door";
-    place(w, d.width_mm ?? (kind === "garage_door" ? 2400 : kind === "double_door" || kind === "sliding_door" ? 1500 : kind === "opening" ? 1200 : 820), d.at ?? 0.5, kind, kind === "opening" ? "Opening" : out ? "Front door" : "Door", kind === "opening" ? "OP" : "D");
+    place(w, d.width_mm ?? (kind === "garage_door" ? 2400 : kind === "double_door" || kind === "sliding_door" ? 1500 : kind === "opening" ? 1200 : 820), d.at ?? 0.5, kind, kind === "opening" ? "Opening" : kind === "sliding_door" ? (r2?.outdoor ? "Balcony door" : "Patio door") : out ? "Front door" : "Door", kind === "opening" ? "OP" : "D", { height_mm: d.height_mm });
   }
   for (const wn of sf.windows ?? []) {
     const r = byName(wn.room);
@@ -207,7 +208,7 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
     const w = cands[0];
     if (!w) continue;
     const count = Math.max(1, Math.min(4, wn.count ?? 1));
-    for (let k = 0; k < count; k++) place(w, wn.width_mm ?? 1200, wn.at?.[k] ?? (k + 1) / (count + 1), "window", "Window", "WN");
+    for (let k = 0; k < count; k++) place(w, wn.width_mm ?? 1200, wn.at?.[k] ?? (k + 1) / (count + 1), "window", "Window", "WN", { sill_mm: wn.sill_mm, height_mm: wn.height_mm });
   }
 
   // objects at their real size, facing into the room
