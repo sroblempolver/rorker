@@ -13,7 +13,7 @@ import { TeamManager, type TeamApi } from "@/components/team/TeamManager";
 import type { WorkspaceApi, WorkspaceData } from "@/components/workspace/api";
 import { useFeedback } from "@/components/ui/feedback";
 import { DEFAULT_TEMPLATES } from "@/lib/data/templates";
-import { clientMemberId, type Company, type JobItem, type JobMessage, type JobStage, type JobSummary, type Member, type MemberInput, type Pin, type PinComment, type PlanRow, type ShareLink } from "@/lib/data/types";
+import { clientMemberId, type Company, type JobItem, type JobMessage, type JobPhoto, type JobPhotoInput, type JobStage, type JobSummary, type Member, type MemberInput, type Pin, type PinComment, type PlanRow, type ShareLink } from "@/lib/data/types";
 import { JOB_KEY } from "@/lib/plan/build";
 import type { Plan } from "@/lib/plan/types";
 import { previewAsk } from "./assistant";
@@ -23,7 +23,7 @@ import { NewProject, type NewProjectResult } from "@/components/newjob/NewProjec
 import { PlanBench } from "@/components/bench/PlanBench";
 import { ClientMoneyView } from "@/components/billing/ClientMoneyView";
 import { ClientPage, type ClientApi } from "@/components/share/ClientPage";
-import { clientNote, clientView } from "@/lib/cloud/links";
+import { clientNote, clientPhotos, clientView, linkPhoto } from "@/lib/cloud/links";
 import type { PlaceTag } from "@/lib/plan/places";
 import { unread } from "@/lib/seen";
 import type { SavedAccount } from "@/lib/cloud/records";
@@ -152,6 +152,11 @@ function sharedWork(jobs: WorkspaceData[], token: string, photos: Map<string, st
 /** photos posted on pins in the preview, by pin id, so a shared link can show them */
 const pinPhotos = new Map<string, string[]>();
 
+/** photos added straight to a job's Photos in the preview (from the app or a link) */
+let jobPhotos: JobPhoto[] = [];
+/** the owner's name, for photos and comments posted from the app */
+const ownerName = () => team.members.find((m) => m.is_owner)?.full_name ?? "You";
+
 /** pin threads in the preview, by pin id */
 const comments = new Map<string, PinComment[]>();
 /** each job's thread with its client, by job id */
@@ -209,14 +214,14 @@ function clientLink(d: WorkspaceData): ShareLink {
 function savedAccount(jobs: WorkspaceData[]): SavedAccount {
   return {
     jobs: jobs.map((d) => ({ job: d.job, plan: d.plan, stages: d.stages, pins: d.pins, items: d.items, edits: d.edits, states: d.states, runs: d.runs, billing: d.billing })),
-    members: team.members, materials: materials.lines, shares, settings: { brand: BRAND, phone: COMPANY.phone }, comments: [], messages: [...messages.values()].flat(), notes: clientNotes,
+    members: team.members, materials: materials.lines, shares, settings: { brand: BRAND, phone: COMPANY.phone }, comments: [...comments.values()].flat(), messages: [...messages.values()].flat(), notes: clientNotes, photos: jobPhotos,
   };
 }
 /** what the client's link shows and does, on the preview's own data */
 function demoClient(jobs: () => WorkspaceData[], d: WorkspaceData): { view: ReturnType<typeof clientView>; api: ClientApi } {
   const l = clientLink(d);
   return {
-    view: clientView(l, COMPANY, savedAccount(jobs()), Object.fromEntries(d.pins.map((p) => [p.id, pinPhotos.get(p.id) ?? []])), messages.get(d.job.id) ?? []),
+    view: clientView(l, COMPANY, savedAccount(jobs()), Object.fromEntries(d.pins.map((p) => [p.id, pinPhotos.get(p.id) ?? []])), messages.get(d.job.id) ?? [], clientPhotos(l, savedAccount(jobs()))),
     api: {
       thread: { list: async () => messages.get(d.job.id) ?? [], send: async (body, f, places) => post(d, "client", body, f, places) },
       billing: (b) => { d.billing = b; },
@@ -228,6 +233,12 @@ function demoClient(jobs: () => WorkspaceData[], d: WorkspaceData): { view: Retu
       },
       async removeNote(id) { clientNotes = clientNotes.filter((n) => n.id !== id); d.pins = d.pins.filter((p) => p.id !== id || p.created_by !== "client"); },
       async got(id, undo) { materials.lines = materials.lines.map((m) => (m.id === id ? { ...m, status: undo ? "to_buy" : "got" } : m)); },
+      async addPhoto(f, input) {
+        const p = linkPhoto(l, savedAccount(jobs()), d.job.id, input, uid(), URL.createObjectURL(f), now());
+        if (!p) throw new Error("Couldn't add the photo.");
+        jobPhotos = [...jobPhotos, p];
+        return clientPhotos(l, savedAccount(jobs()));
+      },
     },
   };
 }
@@ -237,6 +248,14 @@ async function sendSharedPhoto(label: string, pinId: string, file: File) {
   comments.set(pinId, list);
   pinPhotos.set(pinId, list.flatMap((c) => c.photos));
   return pinPhotos.get(pinId)!;
+}
+
+/** a photo sent from a crew link into one of their jobs' Photos */
+function sendSharedJobPhoto(jobs: WorkspaceData[], token: string, jobId: string, f: File, input: Partial<JobPhotoInput>) {
+  const l = shares.find((x) => x.token === token);
+  const p = l && linkPhoto(l, savedAccount(jobs), jobId, input, uid(), URL.createObjectURL(f), now());
+  if (!p) throw new Error("Couldn't add the photo to this job.");
+  jobPhotos = [...jobPhotos, p];
 }
 
 function memoryApi(d: WorkspaceData): WorkspaceApi {
@@ -262,7 +281,7 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
     async deletePin(id) { d.pins = d.pins.filter((p) => p.id !== id); },
     async listComments(id) { return comments.get(id) ?? []; },
     async addComment(id, body, photos) {
-      const list = [...(comments.get(id) ?? []), { id: uid(), pin_id: id, author_id: null, author_name: "You", body: body || null, photos: photos.map((f) => URL.createObjectURL(f)), created_at: now() }];
+      const list = [...(comments.get(id) ?? []), { id: uid(), pin_id: id, author_id: "m0", author_name: ownerName(), body: body || null, photos: photos.map((f) => URL.createObjectURL(f)), created_at: now() }];
       pinPhotos.set(id, list.flatMap((c) => c.photos));
       comments.set(id, list);
       return list;
@@ -309,6 +328,22 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
       return l;
     },
     shareUrl: (token) => demoUrl(token),
+    photos: {
+      async list() {
+        const ids = new Set(d.pins.map((p) => p.id));
+        return { uploads: jobPhotos.filter((p) => p.job_id === d.job.id), comments: [...comments.values()].flat().filter((c) => ids.has(c.pin_id)), messages: messages.get(d.job.id) ?? [] };
+      },
+      async add(f, input) {
+        const p: JobPhoto = { id: uid(), job_id: d.job.id, src: URL.createObjectURL(f), by: { kind: "team", name: ownerName(), member_id: "m0" }, created_at: now(), ...input };
+        jobPhotos = [...jobPhotos, p];
+        return p;
+      },
+      async update(id, patch) {
+        jobPhotos = jobPhotos.map((p) => (p.id === id ? { ...p, ...patch } : p));
+        return jobPhotos.find((p) => p.id === id)!;
+      },
+      async remove(id) { jobPhotos = jobPhotos.filter((p) => p.id !== id); },
+    },
     client: {
       thread: {
         async list() { return messages.get(d.job.id) ?? []; },
@@ -523,6 +558,12 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
           return list;
         },
         shareUrl: (token: string) => url(token),
+        photos: {
+          list: () => cloud.listPhotos(acct, active.job.id),
+          add: (f: File, input: JobPhotoInput) => cloud.addPhoto(acct, active.job.id, { kind: "team", name: signedIn.name, member_id: signedIn.account.memberId }, input, f),
+          update: (id: string, patch: Partial<JobPhotoInput>) => cloud.updatePhoto(acct, id, patch),
+          remove: (id: string) => cloud.removePhoto(acct, id),
+        },
       });
       // a new link is saved before it's copied or opened, or it wouldn't open yet on another phone
       const made = { create: a.createShareLink!, person: a.personLink! };
@@ -651,7 +692,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
         </div>
       ) : shown === "shared" && share ? (
         <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">
-          {(() => { const v = sharedWork(jobs, share.token, pinPhotos); return v ? <SharedWorkView key={share.token + share.pin} work={v} pin={share.pin} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} onBack={() => { setVer((n) => n + 1); setPage("job"); }} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
+          {(() => { const v = sharedWork(jobs, share.token, pinPhotos); return v ? <SharedWorkView key={share.token + share.pin} work={v} pin={share.pin} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} addPhoto={async (job, f, input) => sendSharedJobPhoto(jobs, share.token, job, f, input)} onBack={() => { setVer((n) => n + 1); setPage("job"); }} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
         </div>
       ) : shown === "shop" ? (
         <div className="flex-1 overflow-y-auto">
@@ -765,7 +806,7 @@ function DemoLinkPage({ route }: { route: NonNullable<ReturnType<typeof demoRout
   return (
     <div className="h-full flex flex-col lg:overflow-hidden overflow-y-auto">
       {note}
-      <SharedWorkView work={v} pin={route.params.get("pin")} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} />
+      <SharedWorkView work={v} pin={route.params.get("pin")} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} addPhoto={async (job, f, input) => sendSharedJobPhoto(jobs, link.token, job, f, input)} />
     </div>
   );
 }

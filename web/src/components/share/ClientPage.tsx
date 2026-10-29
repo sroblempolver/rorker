@@ -4,10 +4,12 @@
 // look at, their shopping list, their own notes and the photos from the job), one message thread with
 // the contractor, and their money page (quotes, change orders, invoices). Notes they drop on the map are
 // theirs alone, unless the contractor lets them share notes, then they can tick "share".
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Billing } from "@/lib/billing/types";
 import type { ClientView } from "@/lib/cloud/links";
-import { clientMemberId, type ClientNoteInput, type Member, type Pin, type SharedMaterial } from "@/lib/data/types";
+import { clientMemberId, type ClientNoteInput, type JobPhotoInput, type Member, type Pin, type SharedMaterial } from "@/lib/data/types";
+import { byDay, filterPhotos, photoWhere, roomOptions, type PhotoItem, type RoomOption } from "@/lib/photos";
+import type { Plan } from "@/lib/plan/types";
 import { STATUS_COLOR, STATUS_LABEL, qtyText, type Unit } from "@/lib/materials/types";
 import type { ElementStatus } from "@/lib/plan/types";
 import { applyEdits } from "@/lib/plan/edits";
@@ -38,6 +40,8 @@ export interface ClientApi {
   removeNote(id: string): Promise<void>;
   /** tick a line on their shopping list (undo puts it back) */
   got(id: string, undo: boolean): Promise<void>;
+  /** add a photo to the job's Photos, tagged with a room; returns the photos they see now */
+  addPhoto?(file: File, input: Partial<JobPhotoInput>): Promise<PhotoItem[]>;
 }
 
 type Tab = "job" | "messages" | "money";
@@ -150,6 +154,14 @@ function ClientJob({ v, api, firstPin, onMessages }: { v: ClientView; api: Clien
   const mine = [...notes, ...shared.filter((p) => p.created_by === "client")];
   const toBuy = mats.filter((m) => m.you_get);
   const photos = [...Object.values(given?.photos ?? {}).flat(), ...v.messages.flatMap((m) => m.photos)];
+  const [jobPhotos, setJobPhotos] = useState(v.photos);
+  /** a photo's spot: its pin, or a blinking dot on its room or thing */
+  const showPhoto = (p: PhotoItem) => {
+    if (p.pin && pins.some((x) => x.id === p.pin!.id)) return show(p.pin.id);
+    const id = p.element_id ?? p.room_id;
+    const m = id && plan ? markFor(plan, id, photoWhere(p, plan, roomOptions(plan)) ?? "Here", MARK_COLORS[0][1]) : null;
+    if (m) { setPinId(null); showMarks([m], null, true); }
+  };
   const pin = pins.find((p) => p.id === pinId) ?? null;
   const ownNote = !!pin && pin.created_by === "client";
   const isPrivate = !!pin && notes.some((n) => n.id === pin.id);
@@ -252,7 +264,8 @@ function ClientJob({ v, api, firstPin, onMessages }: { v: ClientView; api: Clien
                   {mine.length ? mine.map((p) => <PinRow key={p.id} pin={p} plan={plan} onClick={() => show(p.id)} />)
                     : <p className="text-[13px] text-muted">{plan ? "Tap + Add a note on the plan to keep your own notes on the house" : "Notes on the plan open up once the plan is ready"}{v.can_add ? `, and share the ones ${v.company.name} should see.` : ". Only you see them."}</p>}
                 </section>
-                {photos.length > 0 && <section className="space-y-1.5"><p className="eyebrow">Photos from the job</p><Photos list={photos} /></section>}
+                {jobPhotos ? <ClientPhotos list={jobPhotos} plan={plan} add={api.addPhoto && (async (f, input) => setJobPhotos(await api.addPhoto!(f, input)))} onShow={showPhoto} />
+                  : photos.length > 0 && <section className="space-y-1.5"><p className="eyebrow">Photos from the job</p><Photos list={photos} /></section>}
               </>
             )}
           </div>
@@ -260,6 +273,83 @@ function ClientJob({ v, api, firstPin, onMessages }: { v: ClientView; api: Clien
         </aside>
       </div>
     </TeamContext.Provider>
+  );
+}
+
+/** The job's photos the client sees, by room, and a button to add their own (tagged with a room). */
+function ClientPhotos({ list, plan, add, onShow }: { list: PhotoItem[]; plan: Plan | null; add?: (f: File, input: Partial<JobPhotoInput>) => Promise<void>; onShow: (p: PhotoItem) => void }) {
+  const rooms = useMemo(() => roomOptions(plan), [plan]);
+  const [room, setRoom] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [tag, setTag] = useState({ room: "", caption: "" });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const used = rooms.filter((r) => list.some((p) => p.room_id === r.id));
+  const shown = filterPhotos(list, { room });
+  const item = list.find((p) => p.key === open);
+  const send = async () => {
+    if (!file || !add) return;
+    setBusy(true); setErr(null);
+    try { await add(file, { room_id: tag.room || null, caption: tag.caption.trim() || null }); setFile(null); setTag({ room: "", caption: "" }); }
+    catch (x) { setErr(x instanceof Error ? x.message : "Couldn't send the photo."); } finally { setBusy(false); }
+  };
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center gap-2">
+        <p className="eyebrow flex-1">Photos</p>
+        {add && !file && <button className="btn btn-sm" onClick={() => fileRef.current?.click()}>+ Add a photo</button>}
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" aria-label="Add a photo" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) { setFile(f); setErr(null); } }} />
+      </div>
+      {file && (
+        <div className="card !rounded-[3px] p-2.5 space-y-2">
+          <p className="text-[13px] truncate">{file.name}</p>
+          <select className="input" aria-label="Which room" value={tag.room} onChange={(e) => setTag({ ...tag, room: e.target.value })}>
+            <option value="">Which room? (optional)</option>
+            {rooms.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+          </select>
+          <input className="input" placeholder="A note (optional)" value={tag.caption} onChange={(e) => setTag({ ...tag, caption: e.target.value })} />
+          <div className="flex gap-2">
+            <button className="btn btn-primary btn-sm flex-1" disabled={busy} onClick={() => void send()}>{busy ? "Sending…" : "Send photo"}</button>
+            <button className="btn btn-sm" disabled={busy} onClick={() => setFile(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {err && <p className="text-red text-[13px]">{err}</p>}
+      {item ? (
+        <div className="space-y-2">
+          <button onClick={() => setOpen(null)} className="text-[13px] text-muted hover:text-text">← All photos</button>
+          <a href={item.src} target="_blank" rel="noreferrer noopener"><img src={item.src} alt="" className="w-full max-h-[50vh] object-contain rounded-[3px] border border-line bg-ink" /></a>
+          {item.caption && <p className="text-[14px] whitespace-pre-wrap">{item.caption}</p>}
+          <p className="text-[13px] text-muted">{[photoWhere(item, plan, rooms) ?? "No room", item.by.name, new Date(item.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })].join(" · ")}</p>
+          {plan && (item.room_id || item.element_id || item.pin) && <button className="btn btn-sm" onClick={() => onShow(item)}>Show on the plan</button>}
+        </div>
+      ) : (
+        <>
+          {used.length > 0 && (
+            <div className="flex gap-1.5 overflow-x-auto scroll-thin pb-1">
+              <button className={`chip !h-7 shrink-0 ${!room ? "!text-accent !border-accent" : ""}`} onClick={() => setRoom(null)}>All</button>
+              {used.map((r: RoomOption) => <button key={r.id} className={`chip !h-7 shrink-0 ${room === r.id ? "!text-accent !border-accent" : ""}`} onClick={() => setRoom(room === r.id ? null : r.id)}>{r.label}</button>)}
+            </div>
+          )}
+          {!list.length && <p className="text-[13px] text-muted">No photos yet.{add ? " Add one of anything you want them to see, and pick the room." : ""}</p>}
+          {byDay(shown).map((g) => (
+            <div key={g.day} className="space-y-1">
+              <p className="text-[11.5px] text-muted">{g.label}</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {g.photos.map((p) => (
+                  <button key={p.key} onClick={() => setOpen(p.key)} className="relative text-left">
+                    <img src={p.src} alt="" loading="lazy" className="w-full aspect-square object-cover rounded-[3px] border border-line" />
+                    <span className="absolute inset-x-0 bottom-0 px-1.5 py-1 rounded-b-[3px] bg-gradient-to-t from-black/80 to-transparent text-[11px] text-white truncate">{photoWhere(p, plan, rooms) ?? ""}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </section>
   );
 }
 

@@ -6,7 +6,7 @@ import type { PlaceTag } from "@/lib/plan/places";
 import type { ClientStart } from "@/components/billing/MoneyPanel";
 import type { Billing, Brand } from "@/lib/billing/types";
 import type { MaterialLine, MaterialsApi, MaterialsJob } from "@/lib/materials/types";
-import type { ElementEdit, ElementState, ItemInput, Job, JobItem, JobStage, Member, Pin, PinComment, PinInput, PinStatus, PlanRow, PlanRun, ShareLink, ShareLinkInput, StageStatus } from "@/lib/data/types";
+import type { ElementEdit, ElementState, ItemInput, Job, JobItem, JobMessage, JobPhoto, JobPhotoInput, JobStage, Member, Pin, PinComment, PinInput, PinStatus, PlanRow, PlanRun, ShareLink, ShareLinkInput, StageStatus } from "@/lib/data/types";
 
 export interface WorkspaceData {
   job: Job;
@@ -81,6 +81,9 @@ export interface WorkspaceApi {
   materials?: MaterialsApi;
   /** open the shopping run across every job */
   openShopping?: () => void;
+  /** the job's Photos: everything added straight there, and the photos on its pins and in its client
+   *  thread (with addresses to show); left out, the Photos tab is hidden */
+  photos?: PhotosApi;
   /** the job's client: one thread with them, whether they may add notes you see, and their page; left
    *  out (or no client on the job), the Client tab is hidden */
   client?: {
@@ -89,4 +92,12 @@ export interface WorkspaceApi {
     /** show what the client sees on their link */
     open(): void;
   };
+}
+
+export interface PhotosApi {
+  /** everything Photos shows, fresh (crew and the client add photos from their links) */
+  list(): Promise<{ uploads: JobPhoto[]; comments: PinComment[]; messages: JobMessage[] }>;
+  add(file: File, input: JobPhotoInput): Promise<JobPhoto>;
+  update(id: string, patch: Partial<JobPhotoInput>): Promise<JobPhoto>;
+  remove(id: string): Promise<void>;
 }

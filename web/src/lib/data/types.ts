@@ -146,6 +146,25 @@ export interface JobMessage {
   /** rooms and objects tagged in the words ("@Bedroom 1 › Bed"); a tap shows them on the map */
   places?: PlaceTag[];
 }
+/** Who put a photo on the job: someone signed in to the company, crew from their link, or the client. */
+export interface PhotoBy { kind: "team" | "crew" | "client"; name: string; member_id?: string | null }
+/** A photo added straight to the job's Photos (not on a pin or in a message), tagged with where it was
+ *  taken. Photos on pins and in the client thread show in Photos too, tagged from where they were posted. */
+export interface JobPhoto {
+  id: string; job_id: string;
+  /** a stored file path when saved; an address to show when handed to a page */
+  src: string;
+  by: PhotoBy; created_at: string;
+  room_id: string | null;
+  /** a thing in the room (a window, the sink), when it was picked */
+  element_id: string | null;
+  floor_id: string | null;
+  stage_id: string | null;
+  caption: string | null;
+  /** the job's client sees it on their page */
+  client: boolean;
+}
+export type JobPhotoInput = Pick<JobPhoto, "room_id" | "element_id" | "floor_id" | "stage_id" | "caption" | "client">;
 export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole; crew?: CrewKind }
 
 /** A no-sign-in link for a team member or a one-time sub. It shows the plan and only the pins that are

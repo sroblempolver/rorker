@@ -9,6 +9,7 @@ import type { ClientStart } from "@/components/billing/MoneyPanel";
 import type { Billing } from "@/lib/billing/types";
 import type { JobMessage, Pin, SharedWork } from "@/lib/data/types";
 import type { ClientView } from "@/lib/cloud/links";
+import type { PhotoItem } from "@/lib/photos";
 import * as cloud from "./cloud";
 
 const BG = { background: "radial-gradient(900px 500px at 75% -10%, rgb(255 106 31 / 0.10) 0%, transparent 60%), repeating-linear-gradient(0deg, transparent 0 39px, rgb(255 255 255 / 0.025) 39px 40px), repeating-linear-gradient(90deg, transparent 0 39px, rgb(255 255 255 / 0.025) 39px 40px), var(--ink)" };
@@ -94,7 +95,8 @@ export function CrewLinkPage({ token, pin }: { token: string; pin: string | null
     <div className="h-full flex flex-col lg:overflow-hidden overflow-y-auto">
       <SharedWorkView work={data.work} pin={pin}
         send={async (pinId, file) => (await cloud.call<{ photos: string[] }>("photo", { token, pin: pinId, ...(await cloud.photoData(file)) })).photos}
-        done={async (pinId) => { await cloud.call("done", { token, pin: pinId }); }} />
+        done={async (pinId) => { await cloud.call("done", { token, pin: pinId }); }}
+        addPhoto={async (job, file, input) => { await cloud.call("upload", { token, job, input, ...(await cloud.photoData(file)) }); }} />
     </div>
   );
 }
@@ -118,6 +120,7 @@ export function ClientLinkPage({ token, open, pin }: { token: string; open: stri
     addNote: async (note) => (await cloud.call<{ note: Pin }>("note", { token, note })).note,
     removeNote: async (id) => { await cloud.call("unnote", { token, id }); },
     got: async (id, undo) => { await cloud.call("got", { token, id, undo }); },
+    addPhoto: async (file, input) => (await cloud.call<{ photos: PhotoItem[] }>("upload", { token, input, ...(await cloud.photoData(file)) })).photos,
   }), [token]);
   if (error) return <Problem title="This link doesn't open" body={error} />;
   if (!data) return <Loading text="Opening your project…" />;

@@ -10,10 +10,12 @@
 //   note    a client drops a note on their map: private, or shared with the contractor if the job allows
 //   unnote  a client takes one of their own notes off
 //   got     a client ticks off something on their shopping list
+//   upload  crew or a client adds a photo to a job's Photos, tagged with a room (clients get back the
+//           job's photos they see)
 // The rules for what a link shows and what a client may change are in core.js, built from the page's own
 // code (web/preview/build-links.mjs), so both sides agree.
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
-import { cleanPlaces, clientBilling, clientBuys, clientNote, clientPinIds, clientView, companyOf, crewPinIds, crewWork, findLink, forClient, fromRecords, linkLive } from "./core.js";
+import { cleanPlaces, clientBilling, clientBuys, clientNote, clientPhotos, clientPinIds, clientView, companyOf, crewPinIds, crewWork, findLink, forClient, fromRecords, linkLive, linkPhoto } from "./core.js";
 
 const ORIGINS = [/^https:\/\/([a-z0-9-]+\.)?rorker\.com$/, /^https:\/\/[a-z0-9-]+\.github\.io$/, /^https?:\/\/localhost(:\d+)?$/, /^https?:\/\/127\.0\.0\.1(:\d+)?$/];
 const extra = (Deno.env.get("ALLOWED_ORIGINS") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -75,6 +77,11 @@ async function thread(messages: Msg[], jobId: string) {
   const urls = await sign(mine.flatMap((m) => m.photos));
   return mine.map((m) => ({ ...m, photos: m.photos.map((p) => urls.get(p)).filter(Boolean) }));
 }
+/** The job's photos a client sees, with addresses to show. */
+async function photosForClient(list: { src: string }[]) {
+  const urls = await sign(list.map((p) => p.src));
+  return list.flatMap((p) => (urls.get(p.src) ? [{ ...p, src: urls.get(p.src) }] : []));
+}
 async function photo(body: Record<string, unknown>) {
   const type = str(body.type, 40) || "image/jpeg";
   if (!/^image\/(jpeg|png|webp|heic|heif|gif)$/.test(type)) return { error: "Send a photo (JPG, PNG or HEIC)." };
@@ -124,7 +131,7 @@ Deno.serve(async (req) => {
 
     if (action === "link") {
       if (link.audience === "client") {
-        const view = clientView(link, company, saved, await photosByPin(saved.comments, clientPinIds(link, saved)), await thread(saved.messages, link.job_id));
+        const view = clientView(link, company, saved, await photosByPin(saved.comments, clientPinIds(link, saved)), await thread(saved.messages, link.job_id), await photosForClient(clientPhotos(link, saved)));
         return view ? json({ kind: "client", view }) : json({ error: "This job isn't there any more." }, 404);
       }
       const pins = new Set(saved.jobs.flatMap((d: { pins: { id: string }[] }) => d.pins.map((p) => p.id)));
@@ -161,6 +168,22 @@ Deno.serve(async (req) => {
       if (error) throw error;
       const by = await photosByPin([...pinComments, comment], new Set([pinId]));
       return json({ photos: by[pinId] ?? [] });
+    }
+
+    if (action === "upload") {
+      if (limited(`upload:${token}`, 60)) return json({ error: "That's a lot of photos at once. Give it a minute." }, 429);
+      const jobId = link.audience === "client" ? link.job_id : str(body.job, 80);
+      const f = await photo(body);
+      if ("error" in f) return json({ error: f.error }, 400);
+      const id = uid();
+      const p = linkPhoto(link, saved, jobId, body.input, id, `${accountId}/${jobId}/photos/${id}.${f.ext}`, new Date().toISOString());
+      if (!p) return json({ error: "You can't add photos to that job from this link." }, 403);
+      const up = await db.storage.from(BUCKET).upload(p.src, f.bytes, { contentType: f.type });
+      if (up.error) throw up.error;
+      const { error } = await db.from("records").insert({ account_id: accountId, kind: "photo", id: p.id, job_id: jobId, data: p });
+      if (error) throw error;
+      if (link.audience !== "client") return json({ ok: true });
+      return json({ photos: await photosForClient(clientPhotos(link, { ...saved, photos: [...saved.photos, p] })) });
     }
 
     if (action === "client") {
