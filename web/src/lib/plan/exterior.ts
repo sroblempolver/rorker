@@ -125,9 +125,11 @@ export function planExterior(plan: Plan): Exterior {
       const sib = sides.map((s) => [s, touch(s, (i, j) => placed.includes(owner[i][j]))] as const).sort((a, b) => b[1] - a[1])[0];
       const top = fi === floors.length - 1;
       const eaveY = base(fi) + height(fi);
-      let kind: RoofPart["kind"] = rules.roof, high: Side | null = null, pitch = top && !roofs.length ? rules.pitch : RULES.lowPitch;
+      let kind: RoofPart["kind"] = rules.roof, high: Side | null = null, pitch = top && !roofs.length ? rules.pitch : rules.lowPitch;
       if (rules.roof === "flat") kind = "flat";
       else if (tall[1] > 600) { kind = "shed"; high = tall[0]; }
+      // a shed roof on its own rises toward the back (north), across the short way
+      else if (kind === "shed") high = w >= d ? "y0" : "x0";
       // a bump-out on the same floor gets its own small roof at the main roof's pitch, tucked into it
       else if (sib[1] > 600) pitch = roofs.find((q) => q.floorIndex === fi)?.pitch ?? pitch;
       // a lean-to against the floor above stays under that floor's windows
@@ -149,7 +151,7 @@ export function planExterior(plan: Plan): Exterior {
     if (!rings[fi].length) return;
     const items: { ids: string[]; box: BBox }[] = [];
     for (const ring of ringOf(f)) if (!rings[fi].includes(ring)) items.push({ ids: [], box: bboxOf(ring) });
-    for (const w of f.walls) if (!w.room_ids.length) items.push({ ids: [w.id], box: bboxOf(w.polygon) });
+    for (const w of f.walls) if (!w.room_ids.length && !w.free) items.push({ ids: [w.id], box: bboxOf(w.polygon) });
     // pieces close together are one porch
     const groups: { ids: string[]; box: BBox }[] = [];
     for (const it of items) {
@@ -178,7 +180,7 @@ export function planExterior(plan: Plan): Exterior {
   const overlap = (a: BBox, b: BBox) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
   for (const z of zones) {
     const f = floors[z.floorIndex];
-    const own = f.walls.filter((w) => !w.room_ids.length && overlap(bboxOf(w.polygon), z.rect) > 0);
+    const own = f.walls.filter((w) => !w.room_ids.length && !w.free && overlap(bboxOf(w.polygon), z.rect) > 0);
     const columns = own.filter((w) => { const b = bboxOf(w.polygon); return Math.max(b[2] - b[0], b[3] - b[1]) <= 600 && Math.min(b[2] - b[0], b[3] - b[1]) > 200; });
     const upper = zones.find((u) => u.floorIndex === z.floorIndex + 1 && overlap(u.rect, z.rect) > 0.3 * Math.min((z.rect[2] - z.rect[0]) * (z.rect[3] - z.rect[1]), (u.rect[2] - u.rect[0]) * (u.rect[3] - u.rect[1])));
     z.cover = upper ? "balcony" : columns.length ? "canopy" : null;

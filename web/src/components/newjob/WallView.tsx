@@ -7,6 +7,8 @@ import type { Pt } from "@/lib/plan/types";
 import type { SketchDoor, SketchFixture, SketchFloor, SketchWindow } from "@/lib/plan/sketch";
 import { CATALOG, bottomOf, topOf } from "@/lib/plan/catalog";
 import { RULES } from "@/lib/plan/rules";
+import { fillWall } from "@/lib/plan/cabinetLayout";
+import { CabinetFront } from "./CabinetFront";
 import { fmtLen, parseLength, roundLen, type Units } from "@/lib/plan/units";
 import { doorSpot, doorWall, doorWidth, edgesOf, outsidePieces, param, pointInPoly, sameLine, segLen, sideOf, wallAt, windowSpots, windowWall, type Seg } from "@/lib/plan/sketchEdit";
 
@@ -236,6 +238,7 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
           <button className="btn btn-sm btn-ghost" onClick={() => onEdge((edge + 1) % n)} aria-label="Wall to the right">▶</button>
           <button className="btn btn-sm" onClick={() => add("door")}>+ Door</button>
           <button className="btn btn-sm" onClick={() => add("window")}>+ Window</button>
+          <button className="btn btn-sm" title="Stock base and wall cabinets from corner to corner, around doors, windows and appliances" onClick={() => { const r = fillWall(floor, room, edge, { base: true, wall: true }); setNote(r.note ?? null); if (r.floor) onChange(r.floor); }}>Fill with cabinets</button>
           <button className="btn btn-sm" onClick={() => add("balcony")} title={floor.level <= 0 ? "A patio door out to the garden" : "A balcony outside this wall, with a patio door onto it"}>{floor.level <= 0 ? "+ Patio door" : "+ Balcony"}</button>
           <button className="btn btn-sm btn-ghost" onClick={onClose} aria-label="Close the wall view">✕</button>
         </span>
@@ -248,8 +251,10 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
           const f = floor.fixtures![it.i], b = bottomOf(f), t = topOf(f), on = !!sel && same(it, sel), label = f.name || CATALOG[f.kind]?.label || f.kind;
           return (
             <g key={`f${it.i}`} onPointerDown={(e) => down(e, it)} style={{ cursor: "move" }}>
+              {f.cab ? <CabinetFront f={f} x0={it.x0} x1={it.x1} on={on} fs={fs} /> : <>
               <rect x={it.x0} y={-t} width={it.x1 - it.x0} height={t - b} fill={CATALOG[f.kind]?.fill ?? "#b9a27e"} fillOpacity={0.9} stroke={on ? "#ff6a1f" : "#0a0a0b"} strokeWidth={on ? 40 : 14} />
               <text x={(it.x0 + it.x1) / 2} y={-(b + t) / 2} fontSize={Math.min(fs * 0.7, (it.x1 - it.x0) / (label.length * 0.62))} textAnchor="middle" dominantBaseline="middle" fill="#0a0a0b" style={{ pointerEvents: "none" }}>{label}</text>
+              </>}
             </g>
           );
         })}

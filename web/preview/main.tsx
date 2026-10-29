@@ -11,6 +11,7 @@ import { Logo } from "@/components/ui/AuthShell";
 import { JobWorkspace } from "@/components/workspace/JobWorkspace";
 import { TeamManager, type TeamApi } from "@/components/team/TeamManager";
 import type { WorkspaceApi, WorkspaceData } from "@/components/workspace/api";
+import { useFeedback } from "@/components/ui/feedback";
 import { DEFAULT_TEMPLATES } from "@/lib/data/templates";
 import { clientMemberId, type Company, type JobItem, type JobMessage, type JobStage, type JobSummary, type Member, type MemberInput, type Pin, type PinComment, type PlanRow, type ShareLink } from "@/lib/data/types";
 import { JOB_KEY } from "@/lib/plan/build";
@@ -26,7 +27,7 @@ import { clientNote, clientView } from "@/lib/cloud/links";
 import type { PlaceTag } from "@/lib/plan/places";
 import { unread } from "@/lib/seen";
 import type { SavedAccount } from "@/lib/cloud/records";
-import type { ClientStart } from "@/components/billing/MoneyPanel";
+import { MoneyPanel, type ClientStart } from "@/components/billing/MoneyPanel";
 import type { Brand } from "@/lib/billing/types";
 import { SAMPLE_BRAND, sampleBilling } from "@/demo/billing-sample";
 import { MoneyOverview } from "@/components/billing/MoneyOverview";
@@ -38,11 +39,12 @@ import { TeamContext } from "@/components/team/context";
 import { FeedbackProvider } from "@/components/ui/feedback";
 import { GoToButton, GoToHost, useGoTo, type GoItem } from "@/components/ui/GoTo";
 import { JobCards } from "@/components/JobCards";
-import { jobGlance } from "@/lib/feed";
+import { feedItems, jobGlance } from "@/lib/feed";
+import type { JobLive, MapEvent } from "@/components/AllJobsMap";
 import { today } from "@/lib/dates";
 import type { Session } from "@supabase/supabase-js";
 import * as cloud from "./cloud";
-import { AuthScreen, ClientLinkPage, CrewLinkPage, Loading } from "./pages";
+import { AuthScreen, ClientLinkPage, CrewLinkPage, Loading, Problem } from "./pages";
 
 /** when this preview was built, so an out-of-date copy in the browser cache is easy to spot */
 declare const __BUILD__: string;
@@ -306,7 +308,7 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
       shares.unshift(l);
       return l;
     },
-    shareUrl: (token) => `https://app.rorker.com/${shares.find((l) => l.token === token)?.audience === "client" ? "c" : "s"}/${token}`,
+    shareUrl: (token) => demoUrl(token),
     client: {
       thread: {
         async list() { return messages.get(d.job.id) ?? []; },
@@ -378,7 +380,27 @@ function fromAssistant(r: NewProjectResult, team: Member[]): WorkspaceData {
   };
 }
 
-type Page = "jobs" | "job" | "team" | "shared" | "new" | "client" | "money" | "shop" | "bench";
+/** The all-jobs map as a living city: who's on which job today, what's going on, what's late and on the way. */
+function liveCity(jobs: WorkspaceData[]): { live: Record<string, JobLive>; events: MapEvent[] } {
+  const day = today();
+  const live: Record<string, JobLive> = {};
+  const events: MapEvent[] = [];
+  for (const d of jobs) {
+    const lines = materials.lines.filter((l) => l.job_id === d.job.id);
+    const items = feedItems(d.pins, lines, day);
+    const names = new Map(d.members.map((m) => [m.id, m.full_name]));
+    const crew = new Map<string, { id: string; name: string; working?: boolean }>();
+    for (const it of items) if (it.when === "now" || it.when === "today" || it.when === "late")
+      for (const p of it.people) if (names.has(p)) { const c = crew.get(p) ?? { id: p, name: names.get(p)! }; if (it.when === "now") c.working = true; crew.set(p, c); }
+    live[d.job.id] = { crew: [...crew.values()], now: items.filter((i) => i.when === "now").length, late: items.filter((i) => i.when === "late").length, enRoute: lines.filter((l) => l.status === "ordered").length };
+    for (const it of items) if (it.when === "now" || it.when === "late" || it.when === "today")
+      events.push({ jobId: d.job.id, jobName: d.job.name, who: it.people.map((p) => names.get(p)?.split(" ")[0]).filter(Boolean)[0], text: it.title, tone: it.when as MapEvent["tone"] });
+  }
+  const rank = { late: 0, now: 1, today: 2 } as const;
+  return { live, events: events.sort((a, b) => rank[a.tone] - rank[b.tone]) };
+}
+
+type Page = "jobs" | "job" | "team" | "shared" | "new" | "client" | "money" | "jobmoney" | "shop" | "bench";
 
 /** A small job with no drawing yet (the materials sample spreads across these too). */
 function plainJob(j: (typeof EXTRA_JOBS)[number], team: Member[]): WorkspaceData {
@@ -401,17 +423,20 @@ function sampleJobs(owner?: Owner): WorkspaceData[] {
  * and a copied link all land where you were. */
 function fromHash(): { page: Page; id?: string } {
   const [a, b] = location.hash.replace(/^#\/?/, "").split("/");
+  if (a === "money" && b) return { page: "jobmoney", id: b };
   if (a === "jobs" || a === "team" || a === "new" || a === "shared" || a === "money" || a === "shop" || a === "bench") return { page: a };
   return { page: "job", id: a === "job" ? b : undefined };
 }
-const hashFor = (page: Page, id: string) => (page === "job" ? `#/job/${id}` : `#/${page}`);
-const TITLES: Partial<Record<Page, string>> = { jobs: "Jobs", team: "Team", new: "New project", shared: "Shared link", money: "Money", shop: "Shopping", client: "Client view", bench: "Plan tests" };
+const hashFor = (page: Page, id: string) => (page === "job" ? `#/job/${id}` : page === "jobmoney" ? `#/money/${id}` : `#/${page}`);
+const TITLES: Partial<Record<Page, string>> = { jobs: "Jobs", team: "Team", new: "New project", shared: "Shared link", money: "Money", jobmoney: "Money", shop: "Shopping", client: "Client view", bench: "Plan tests" };
 
 /** Signed in: the account and the saver that writes every change to it. */
 interface CloudBoot { account: cloud.Account; saver: cloud.Saver; email: string | null; name: string }
 
 /** Where a link opens: this same page, on the link's own address. */
-const linkBase = () => `${location.origin}${location.pathname.replace(/app\.html$/, "")}`;
+// share links open on their own page, build.rorker.com/link/, which is outside the site's sign-in
+declare const __LINK_ONLY__: boolean;
+const linkBase = () => (location.hostname === "build.rorker.com" ? `${location.origin}/link/` : `${location.origin}${location.pathname.replace(/app\.html$/, "")}`);
 /** api methods that only read, so they don't need a save after */
 const READS = new Set(["listComments", "listShareLinks", "refreshPlan", "shareUrl", "openShare", "ask", "afterAssistant", "openShopping", "list", "openClient", "open"]);
 /** Every change through the api is followed by a save. */
@@ -482,8 +507,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
   const active: WorkspaceData | undefined = jobs.find((j) => j.job.id === activeId) ?? jobs[0];
   // the assistant changes the job behind the screen's back: hand the workspace a fresh copy after
   const [ver, setVer] = useState(0);
-  const [fromClient, setFromClient] = useState(false);
-  const current = useMemo(() => active && ({ ...active, startOnMoney: fromClient, startOnClient: clientStart ?? undefined, materials: { lines: materials.lines, jobs: mjobs } }), [active, ver, fromClient, clientStart, jobs.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const current = useMemo(() => active && ({ ...active, startOnClient: clientStart ?? undefined, materials: { lines: materials.lines, jobs: mjobs } }), [active, ver, clientStart, jobs.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const api = useMemo(() => {
     if (!active) return null;
     const a = memoryApi(active);
@@ -500,6 +524,10 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
         },
         shareUrl: (token: string) => url(token),
       });
+      // a new link is saved before it's copied or opened, or it wouldn't open yet on another phone
+      const made = { create: a.createShareLink!, person: a.personLink! };
+      a.createShareLink = async (input) => { const l = await made.create(input); await signedIn.saver.flush(); return l; };
+      a.personLink = async (m) => { const l = await made.person(m); await signedIn.saver.flush(); return l; };
       const base = a.updatePin;
       // a photo sent from a crew link is in the database, not in this page: look before closing
       a.updatePin = async (id, input) => { if (input.status === "done") comments.set(id, await cloud.listComments(acct, id)); return base(id, input); };
@@ -547,7 +575,8 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
   };
   // the app's own places in the Go to box (Ctrl+K): every job and every screen
   const goItems = useMemo<GoItem[]>(() => [
-    ...jobs.map((d) => ({ id: `job:${d.job.id}`, group: "Jobs", label: d.job.name, sub: [d.job.address, d.job.client_name].filter(Boolean).join(" · "), keywords: d.job.client_name ?? "", run: () => { setFromClient(false); go("job", d.job.id); } })),
+    ...jobs.map((d) => ({ id: `job:${d.job.id}`, group: "Jobs", label: d.job.name, sub: [d.job.address, d.job.client_name].filter(Boolean).join(" · "), keywords: d.job.client_name ?? "", run: () => { go("job", d.job.id); } })),
+    ...jobs.filter((d) => d.billing).map((d) => ({ id: `money:${d.job.id}`, group: "Money", label: `${d.job.name}: money`, sub: "quotes, invoices, payments", keywords: d.job.client_name ?? "", run: () => go("jobmoney", d.job.id) })),
     { id: "page:jobs", group: "Go to", label: "All jobs", run: () => setPage("jobs") },
     { id: "page:money", group: "Go to", label: "Money", sub: "quotes, invoices, who owes what", run: () => setPage("money") },
     { id: "page:shop", group: "Go to", label: "Shopping", sub: "everything to buy, by store", run: () => setPage("shop") },
@@ -557,7 +586,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
   ], [jobs]); // eslint-disable-line react-hooks/exhaustive-deps
   useGoTo("app", goItems);
   const tab = (p: Page, label: string) => (
-    <button onClick={() => { setFromClient(false); setPage(p); }} className={`shrink-0 px-1.5 sm:px-3 h-9 rounded-[3px] font-display text-[13px] sm:text-[15px] font-bold tracking-[0.06em] sm:tracking-[0.1em] uppercase ${page === p ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</button>
+    <button onClick={() => { setPage(p); }} className={`shrink-0 px-1.5 sm:px-3 h-9 rounded-[3px] font-display text-[13px] sm:text-[15px] font-bold tracking-[0.06em] sm:tracking-[0.1em] uppercase ${page === p || (p === "money" && page === "jobmoney") ? "text-accent bg-panel-2" : "text-muted hover:text-text"}`}>{label}</button>
   );
   const shown: Page = page === "job" && !active ? "jobs" : page;
   return (
@@ -575,9 +604,9 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
       {/* on a phone the main places sit at the bottom, under the thumb */}
       <nav className="mobile-nav sm:hidden fixed bottom-0 inset-x-0 z-30 h-14 pb-[env(safe-area-inset-bottom)] box-content bg-panel border-t border-line grid grid-cols-4" aria-label="Main">
         {([["jobs", "Jobs", "M3 21V9l9-6 9 6v12M9 21v-7h6v7"], ["money", "Money", "M3 6h18v12H3zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"], ["shop", "Shopping", "M5 7h14l-1.5 12h-11zM9 7a3 3 0 0 1 6 0"], ["team", "Team", "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14a6.5 6.5 0 0 1 3.5 6"]] as const).map(([p, label, d]) => {
-          const on = page === p || (p === "jobs" && page === "job");
+          const on = page === p || (p === "jobs" && page === "job") || (p === "money" && page === "jobmoney");
           return (
-            <button key={p} onClick={() => { setFromClient(false); setPage(p); }} aria-current={on ? "page" : undefined}
+            <button key={p} onClick={() => { setPage(p); }} aria-current={on ? "page" : undefined}
               className={`flex flex-col items-center justify-center gap-0.5 font-display text-[11.5px] font-bold tracking-[0.08em] uppercase ${on ? "text-accent" : "text-muted"}`}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
               {label}
@@ -593,7 +622,17 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
       ) : shown === "money" ? (
         <div className="flex-1 overflow-y-auto">
           <MoneyOverview rows={[...jobs.filter((j) => j.billing).map((j) => ({ jobId: j.job.id, jobName: j.job.name, clientName: j.job.client_name, address: j.job.address, billing: j.billing! })), ...(signedIn ? [] : otherJobs)]}
-            onOpenJob={(id) => { if (jobs.some((j) => j.job.id === id)) { setVer((n) => n + 1); go("job", id); } }} />
+            onOpenJob={(id) => { if (jobs.some((j) => j.job.id === id)) go("jobmoney", id); }} />
+        </div>
+      ) : shown === "jobmoney" && active && api?.money && active.billing ? (
+        // one job's quotes, invoices and payments: on the Money page, not in the job's side menu
+        <div className="flex-1 overflow-y-auto">
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 px-4 py-2 border-b border-line bg-panel">
+            <button className="btn btn-ghost btn-sm" onClick={() => setPage("money")}>‹ All money</button>
+            <p className="font-display text-[17px] font-bold uppercase tracking-[0.04em] truncate min-w-0 flex-1">{active.job.name}{active.job.client_name ? <span className="text-muted font-sans normal-case tracking-normal text-[13.5px] font-normal"> · {active.job.client_name}</span> : null}</p>
+            <button className="btn btn-sm" onClick={() => { setVer((n) => n + 1); go("job"); }}>Open the job ›</button>
+          </div>
+          <JobMoney key={`${active.job.id}-${ver}`} d={active} api={api.money} onShowRoom={() => { setVer((n) => n + 1); go("job"); }} />
         </div>
       ) : shown === "client" && active ? (
         <div className="flex-1 min-h-0 flex flex-col">
@@ -607,7 +646,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
             const c = demoClient(() => jobsRef.current, active);
             if (!c.view) return <p className="p-6 text-muted">This job has no client page.</p>;
             return <ClientPage key={`${client?.id ?? "home"}-${clientPin}-${tier}`} view={{ ...c.view, brand: { ...c.view.brand, tier } }} api={c.api} start={client} pin={clientPin} seenKey={`client-demo:${active.job.id}`}
-              onBack={() => { setFromClient(!!client); setVer((n) => n + 1); setPage("job"); }} />;
+              onBack={() => { setVer((n) => n + 1); setPage(client ? "jobmoney" : "job"); }} />;
           })()}
         </div>
       ) : shown === "shared" && share ? (
@@ -640,10 +679,10 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
               <p className="text-muted text-sm">Click a building or a card to go inside. Press <kbd className="kbd !h-5 !text-[10.5px]">/</kbd> to jump straight to any job, room or pin.</p>
             </div>
           </div>
-          <ClientNews jobs={jobs} onOpen={(id, place) => { setFromClient(false); go("job", id); setClientStart({ place }); }} />
+          <ClientNews jobs={jobs} onOpen={(id, place) => { go("job", id); setClientStart({ place }); }} />
           {jobs.length ? (
             <>
-              <div className="px-4 sm:px-6"><AllJobsMap jobs={jobs.map(summary)} /></div>
+              <div className="px-4 sm:px-6"><AllJobsMap jobs={jobs.map(summary)} {...liveCity(jobs)} /></div>
               <div className="px-4 sm:px-6 py-6"><JobCards jobs={jobs.map((d) => ({ ...summary(d), ...jobGlance(d.pins, materials.lines.filter((l) => l.job_id === d.job.id), today()) }))} /></div>
             </>
           ) : (
@@ -689,6 +728,48 @@ function AccountChip({ c, state }: { c: CloudBoot; state: cloud.SaveState }) {
   );
 }
 
+/** A link made on the sample data carries the link itself (who it's for, which tasks), so it opens on any
+ *  phone or browser on the same sample job: #/d/s/<link> for crew, #/d/c/<link> for a client. */
+type DemoLink = Pick<ShareLink, "token" | "job_id" | "label" | "member_id" | "pin_ids" | "audience">;
+const b64url = (s: string) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64url = (s: string) => decodeURIComponent(escape(atob(s.replace(/-/g, "+").replace(/_/g, "/"))));
+function demoUrl(token: string) {
+  const l = shares.find((x) => x.token === token);
+  if (!l) return `${linkBase()}#/`;
+  const d: DemoLink = { token: l.token, job_id: l.job_id, label: l.label, member_id: l.member_id, pin_ids: l.pin_ids, audience: l.audience };
+  return `${linkBase()}#/d/${l.audience === "client" ? "c" : "s"}/${b64url(JSON.stringify(d))}`;
+}
+function demoRoute(): { kind: "s" | "c"; link: DemoLink | null; params: URLSearchParams } | null {
+  const m = location.hash.match(/^#\/d\/(s|c)\/([A-Za-z0-9_-]{8,4000})(?:\?(.*))?$/);
+  if (!m) return null;
+  let link: DemoLink | null = null;
+  try { const x = JSON.parse(unb64url(m[2])) as DemoLink; if (typeof x.token === "string" && Array.isArray(x.pin_ids)) link = x; } catch { /* a broken link */ }
+  return { kind: m[1] as "s" | "c", link, params: new URLSearchParams(m[3] ?? "") };
+}
+
+/** What a sub, an employee or the client sees from a link made on the sample data. */
+function DemoLinkPage({ route }: { route: NonNullable<ReturnType<typeof demoRoute>> }) {
+  const [jobs] = useState(() => sampleJobs());
+  const { link } = route;
+  useState(() => { if (link && !shares.some((x) => x.token === link.token)) shares.unshift({ id: uid(), company_id: COMPANY.id, expires_at: null, revoked_at: null, created_at: now(), ...link }); });
+  if (!link) return <Problem title="This link doesn't open" body="Part of it is missing. Ask for the link again." />;
+  const note = <p className="shrink-0 px-4 py-1.5 text-[12.5px] text-center bg-panel-2 border-b border-line text-muted">Sample data: this is what they&apos;d see. Nothing here is saved. <a className="underline" href="/accounts/">Make an account</a> to send real links.</p>;
+  if (route.kind === "c") {
+    const d = jobs.find((j) => j.job.id === link.job_id) ?? jobs[0];
+    const c = demoClient(() => jobs, d);
+    if (!c.view) return <Problem title="This link doesn't open" body="This job has no client page." />;
+    return <div className="h-full flex flex-col">{note}<div className="flex-1 min-h-0"><ClientPage view={c.view} api={c.api} start={null} pin={route.params.get("pin")} seenKey={`client-demo:${d.job.id}`} /></div></div>;
+  }
+  const v = sharedWork(jobs, link.token, pinPhotos);
+  if (!v) return <Problem title="This link doesn't open" body="It was turned off." />;
+  return (
+    <div className="h-full flex flex-col lg:overflow-hidden overflow-y-auto">
+      {note}
+      <SharedWorkView work={v} pin={route.params.get("pin")} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} />
+    </div>
+  );
+}
+
 /** A link's own address: #/s/<token> for crew, #/c/<token> for a client, with ?pin= or ?open= after. */
 function linkRoute(): { kind: "s" | "c"; token: string; params: URLSearchParams } | null {
   const m = location.hash.match(/^#\/(s|c)\/([A-Za-z0-9_-]{16,64})(?:\?(.*))?$/);
@@ -729,9 +810,10 @@ async function openAccount(s: Session): Promise<Boot> {
 
 function Root() {
   const [link, setLink] = useState(linkRoute);
-  const [boot, setBoot] = useState<Boot>(() => (OPEN_DEMO ? { kind: "app", jobs: sampleJobs() } : { kind: "loading" }));
+  const [demo, setDemo] = useState(demoRoute);
+  const [boot, setBoot] = useState<Boot>(() => (OPEN_DEMO && !__LINK_ONLY__ ? { kind: "app", jobs: sampleJobs() } : { kind: "loading" }));
   useEffect(() => {
-    const on = () => setLink(linkRoute());
+    const on = () => { setLink(linkRoute()); setDemo(demoRoute()); };
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
@@ -740,7 +822,9 @@ function Root() {
     setBoot({ kind: "loading" });
     try { setBoot(await openAccount(s)); } catch (e) { setBoot({ kind: "auth", error: e instanceof Error ? e.message : "Couldn't open your account." }); }
   };
-  useEffect(() => { if (!link && !OPEN_DEMO) void cloud.currentSession().then(start); }, [!link]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!link && !demo && !OPEN_DEMO && !__LINK_ONLY__) void cloud.currentSession().then(start); }, [!link, !demo]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (demo) return <DemoLinkPage route={demo} />;
+  if (__LINK_ONLY__ && !link) return <Problem title="Open the link you were sent" body="This page only shows the tasks or project someone shared with you. Use the full link from your text or email." />;
   if (link) return link.kind === "c"
     ? <ClientLinkPage token={link.token} open={link.params.get("open")} pin={link.params.get("pin")} />
     : <CrewLinkPage token={link.token} pin={link.params.get("pin")} />;
@@ -750,3 +834,16 @@ function Root() {
 }
 
 createRoot(document.getElementById("root")!).render(<StrictMode><FeedbackProvider><Root /></FeedbackProvider></StrictMode>);
+
+/** One job's money on the Money page: its quotes, invoices and payments, saved back to the job. */
+function JobMoney({ d, api, onShowRoom }: { d: WorkspaceData; api: NonNullable<WorkspaceApi["money"]>; onShowRoom: () => void }) {
+  const [connected, setConnected] = useState(!!d.payoutsConnected);
+  const { toast } = useFeedback();
+  const say = (m: string) => toast(m);
+  return (
+    <MoneyPanel initial={d.billing!} brand={d.brand ?? BRAND} jobId={d.job.id} plan={d.plan?.data ?? null} stages={d.stages} connected={connected}
+      job={{ name: d.job.name, address: d.job.address, client_name: d.job.client_name, client_email: d.job.client_email, client_phone: d.job.client_phone }}
+      onConnect={() => void api.connectPayouts().then(() => { setConnected(true); say("Payouts are on. Clients can now pay by card or bank."); })}
+      api={{ say, openClient: api.openClient, save: api.save, showRoom: onShowRoom }} />
+  );
+}
