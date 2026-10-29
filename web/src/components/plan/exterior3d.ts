@@ -149,12 +149,166 @@ const seamTex = () => texture("seam", 64, 16, (g, W, H) => {
   g.fillStyle = "#9a9a9a"; g.fillRect(0, 0, 3, H);
 }, 0.406, 1);
 
-const PATTERN: Partial<Record<Surface["pattern"], () => THREE.Texture>> = { lap: sidingTex, brick: brickTex, block: blockTex, stucco: speckTex, osb: osbTex, wrap: wrapTex, batt: battTex, shingle: shingleTex, metal: seamTex };
+// fiber cement: deeper laps, 7" exposure, a fine embossed grain
+const cementTex = () => texture("cementlap", 128, 64, (g, W, H) => {
+  const grd = g.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, "#9a9a9a"); grd.addColorStop(0.1, "#e8e8e8"); grd.addColorStop(1, "#ffffff");
+  g.fillStyle = grd; g.fillRect(0, 0, W, H);
+  const rnd = seeded(31);
+  for (let i = 0; i < 70; i++) { g.fillStyle = "rgba(0,0,0,0.06)"; g.fillRect(rnd() * W, 8 + rnd() * (H - 10), 10 + rnd() * 30, 1); }
+  g.fillStyle = "#7d7d7d"; g.fillRect(0, 0, W, 4);
+}, 1.2, 0.178);
+// wood lap: boards of different tones and lengths, grain lines and the odd knot
+const woodTex = () => texture("woodlap", 256, 128, (g, W, H) => {
+  const rnd = seeded(37), rows = 4, rh = H / rows;
+  for (let r = 0; r < rows; r++) {
+    let x = -rnd() * 80;
+    while (x < W) {
+      const len = 70 + rnd() * 120, v = 185 + Math.round(rnd() * 60);
+      const grd = g.createLinearGradient(0, r * rh, 0, (r + 1) * rh);
+      grd.addColorStop(0, `rgb(${v - 60},${v - 60},${v - 60})`); grd.addColorStop(0.12, `rgb(${v},${v},${v})`); grd.addColorStop(1, `rgb(${v + 10},${v + 10},${v + 10})`);
+      g.fillStyle = grd; g.fillRect(x, r * rh, len, rh);
+      g.strokeStyle = "rgba(0,0,0,0.12)"; g.lineWidth = 1;
+      for (let k = 0; k < 4; k++) { const y = r * rh + 6 + rnd() * (rh - 8); g.beginPath(); g.moveTo(x, y); g.bezierCurveTo(x + len / 3, y + 2, x + (2 * len) / 3, y - 2, x + len, y + 1); g.stroke(); }
+      if (rnd() < 0.3) { g.fillStyle = "rgba(60,40,20,0.35)"; g.beginPath(); g.ellipse(x + rnd() * len, r * rh + rh / 2, 4, 2.5, 0, 0, Math.PI * 2); g.fill(); }
+      g.fillStyle = "rgba(0,0,0,0.3)"; g.fillRect(x + len - 1, r * rh, 1, rh);
+      x += len;
+    }
+  }
+}, 2.4, 0.6);
+// stone: fieldstone of all sizes in grey mortar
+const stoneTex = () => texture("stone", 256, 256, (g, W, H) => {
+  g.fillStyle = "#9b9b9b"; g.fillRect(0, 0, W, H);
+  const rnd = seeded(41);
+  let y = 0;
+  while (y < H) {
+    const rh = 22 + rnd() * 26;
+    let x = -rnd() * 30;
+    while (x < W) {
+      const w = 26 + rnd() * 50, v = 175 + Math.round(rnd() * 75);
+      g.fillStyle = `rgb(${v},${v},${v})`;
+      g.beginPath(); g.ellipse(x + w / 2, y + rh / 2, w / 2 - 2, rh / 2 - 2, (rnd() - 0.5) * 0.3, 0, Math.PI * 2); g.fill();
+      x += w;
+    }
+    y += rh;
+  }
+}, 1.6, 1.6);
+// plywood: veneer grain running across a 4' x 8' sheet, panel seams
+const plyTex = () => texture("plywood", 256, 256, (g, W, H) => {
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H);
+  const rnd = seeded(43);
+  g.strokeStyle = "rgba(0,0,0,0.13)"; g.lineWidth = 2;
+  for (let k = 0; k < 26; k++) { const y0 = rnd() * H; g.beginPath(); g.moveTo(0, y0); for (let x = 0; x <= W; x += 32) g.lineTo(x, y0 + Math.sin(x / 40 + k) * 6); g.stroke(); }
+  g.fillStyle = "rgba(90,60,30,0.25)"; for (let i = 0; i < 6; i++) { g.beginPath(); g.ellipse(rnd() * W, rnd() * H, 9, 4, 0, 0, Math.PI * 2); g.fill(); }
+  g.fillStyle = "#8f8f8f"; g.fillRect(0, 0, 2, H); g.fillRect(0, 0, W, 2);
+}, 1.22, 2.44);
+// ZIP: the flaked board with its printed logo band and taped seams
+const zipTex = () => texture("zip", 256, 256, (g, W, H) => {
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H);
+  const rnd = seeded(47);
+  for (let i = 0; i < 400; i++) { const v = 205 + Math.round(rnd() * 50); g.save(); g.translate(rnd() * W, rnd() * H); g.rotate(rnd() * Math.PI); g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(-8, -2, 16, 4); g.restore(); }
+  g.fillStyle = "rgba(255,255,255,0.75)"; for (let x = 20; x < W; x += 80) g.fillRect(x, H / 2 - 4, 44, 8);
+  g.fillStyle = "#d9d9d9"; g.fillRect(0, 0, 10, H); g.fillRect(0, 0, W, 10);
+}, 1.22, 2.44);
+// foam board: smooth with a printed grid every foot and the board edges
+const foamTex = () => texture("foamboard", 256, 256, (g, W, H) => {
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H);
+  g.fillStyle = "rgba(0,0,0,0.08)";
+  for (let k = 1; k < 4; k++) { g.fillRect((k * W) / 4, 0, 1, H); g.fillRect(0, (k * H) / 8, W, 1); g.fillRect(0, ((k + 4) * H) / 8, W, 1); }
+  g.fillStyle = "#a9a9a9"; g.fillRect(0, 0, 2, H); g.fillRect(0, 0, W, 2);
+}, 1.22, 2.44);
+// felt: black paper rolled on in courses, a white chalk line on each, overlaps showing
+const feltTex = () => texture("felt", 128, 128, (g, W, H) => {
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H);
+  const rnd = seeded(53);
+  for (let i = 0; i < 300; i++) { g.fillStyle = "rgba(0,0,0,0.08)"; g.fillRect(rnd() * W, rnd() * H, 2, 2); }
+  g.fillStyle = "rgba(0,0,0,0.3)"; g.fillRect(0, 0, W, 3);
+  g.fillStyle = "rgba(255,255,255,0.9)"; g.fillRect(0, H * 0.2, W, 2);
+}, 1, 0.86);
+// mineral wool: denser and coarser than fiberglass, still between the studs
+const mineralTex = () => texture("mineral", 64, 64, (g, W, H) => {
+  const grd = g.createLinearGradient(0, 0, W, 0);
+  grd.addColorStop(0, "#a8a8a8"); grd.addColorStop(0.08, "#f2f2f2"); grd.addColorStop(0.92, "#ebebeb"); grd.addColorStop(1, "#a8a8a8");
+  g.fillStyle = grd; g.fillRect(0, 0, W, H);
+  const rnd = seeded(59);
+  for (let i = 0; i < 500; i++) { g.fillStyle = rnd() < 0.5 ? "rgba(0,0,0,0.1)" : "rgba(255,255,255,0.4)"; g.fillRect(rnd() * W, rnd() * H, 2, 1); }
+}, 0.406, 0.6);
+// spray foam: lumpy, sprayed between the studs and over them
+const sprayTex = () => texture("spray", 128, 128, (g, W, H) => {
+  g.fillStyle = "#e9e9e9"; g.fillRect(0, 0, W, H);
+  const rnd = seeded(61);
+  for (let i = 0; i < 90; i++) {
+    const x = rnd() * W, y = rnd() * H, r = 6 + rnd() * 14;
+    const grd = g.createRadialGradient(x - r / 3, y - r / 3, 1, x, y, r);
+    grd.addColorStop(0, "#ffffff"); grd.addColorStop(1, "rgba(200,200,200,0)");
+    g.fillStyle = grd; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+}, 0.6, 0.6);
+// blown cellulose: grey fluff behind netting stapled to the studs
+const celluloseTex = () => texture("cellulose", 128, 128, (g, W, H) => {
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H);
+  const rnd = seeded(67);
+  for (let i = 0; i < 1600; i++) { const v = 170 + Math.round(rnd() * 85); g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(rnd() * W, rnd() * H, 2, 2); }
+  g.strokeStyle = "rgba(255,255,255,0.55)"; g.lineWidth = 1;
+  for (let k = -W; k < W; k += 8) { g.beginPath(); g.moveTo(k, 0); g.lineTo(k + H, H); g.stroke(); g.beginPath(); g.moveTo(k + H, 0); g.lineTo(k, H); g.stroke(); }
+  g.fillStyle = "#9a9a9a"; g.fillRect(0, 0, 4, H);
+}, 0.406, 0.406);
+// poly sheet: see-through with a sheen, creases and taped seams
+const polyTex = () => texture("poly", 256, 256, (g, W, H) => {
+  g.fillStyle = "#f4f4f4"; g.fillRect(0, 0, W, H);
+  const rnd = seeded(71);
+  for (let i = 0; i < 18; i++) { const x = rnd() * W; const grd = g.createLinearGradient(x - 14, 0, x + 14, 0); grd.addColorStop(0, "rgba(255,255,255,0)"); grd.addColorStop(0.5, "rgba(255,255,255,1)"); grd.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = grd; g.fillRect(x - 14, 0, 28, H); }
+  g.strokeStyle = "rgba(0,0,0,0.08)"; for (let i = 0; i < 14; i++) { g.beginPath(); g.moveTo(rnd() * W, rnd() * H); g.lineTo(rnd() * W, rnd() * H); g.stroke(); }
+  g.fillStyle = "rgba(0,0,0,0.12)"; g.fillRect(0, 0, W, 6);
+}, 2.4, 2.4);
+// kraft facing: paper over each bay with its stapling flanges on the studs
+const kraftTex = () => texture("kraft", 64, 64, (g, W, H) => {
+  g.fillStyle = "#f2f2f2"; g.fillRect(0, 0, W, H);
+  const rnd = seeded(73);
+  for (let i = 0; i < 120; i++) { g.fillStyle = "rgba(0,0,0,0.05)"; g.fillRect(rnd() * W, rnd() * H, 4, 1); }
+  g.fillStyle = "#c4c4c4"; g.fillRect(0, 0, 5, H);
+  g.fillStyle = "#7a7a7a"; for (let y = 4; y < H; y += 16) g.fillRect(2, y, 1, 4);
+}, 0.406, 0.6);
+// clay tile: rounded barrel courses in rows
+const tileTex = () => texture("tile", 128, 64, (g, W, H) => {
+  g.fillStyle = "#8a8a8a"; g.fillRect(0, 0, W, H);
+  const n = 4, w = W / n;
+  for (let r = 0; r < 2; r++) for (let k = 0; k < n; k++) {
+    const grd = g.createLinearGradient(k * w, 0, (k + 1) * w, 0);
+    grd.addColorStop(0, "#b0b0b0"); grd.addColorStop(0.45, "#ffffff"); grd.addColorStop(1, "#9c9c9c");
+    g.fillStyle = grd; g.fillRect(k * w + 1, r * (H / 2), w - 2, H / 2 - 4);
+  }
+}, 0.9, 0.7);
+// flat membrane: light sheets with welded seams
+const membraneTex = () => texture("membrane", 128, 128, (g, W, H) => {
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H);
+  g.fillStyle = "rgba(0,0,0,0.12)"; g.fillRect(0, 0, W, 3);
+}, 3, 3);
+
+// framing: studs 16" apart with the plates, the bays dark between them
+const studTex = () => texture("studs", 64, 64, (g, W, H) => {
+  g.fillStyle = "#3a3a3a"; g.fillRect(0, 0, W, H);
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, 6, H);
+  g.fillStyle = "rgba(0,0,0,0.15)"; g.fillRect(5, 0, 1, H);
+}, 0.406, 0.6);
+// drywall: smooth board, taped and mudded joints every 4'
+const drywallTex = () => texture("drywall", 128, 128, (g, W, H) => {
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H);
+  g.fillStyle = "rgba(0,0,0,0.06)"; g.fillRect(0, 0, 8, H); g.fillRect(0, 0, W, 6);
+  g.fillStyle = "rgba(0,0,0,0.25)"; for (let y = 10; y < H; y += 20) g.fillRect(W / 2, y, 2, 2);
+}, 1.22, 1.22);
+
+const PATTERN: Partial<Record<Surface["pattern"], () => THREE.Texture>> = {
+  lap: sidingTex, cementlap: cementTex, woodlap: woodTex, brick: brickTex, stone: stoneTex, block: blockTex, stucco: speckTex,
+  osb: osbTex, plywood: plyTex, zip: zipTex, foamboard: foamTex, wrap: wrapTex, felt: feltTex,
+  batt: battTex, mineral: mineralTex, spray: sprayTex, cellulose: celluloseTex, poly: polyTex, kraft: kraftTex,
+  studs: studTex, drywall: drywallTex, shingle: shingleTex, tile: tileTex, metal: seamTex, membrane: membraneTex,
+};
 /** A chosen surface on a wall or roof, lined up with the floor like the siding. */
 export function surfaceMaterial(s: Surface, from = 0) {
   const map = PATTERN[s.pattern]?.() ?? undefined;
   const m = std(s.color, { map, rough: s.pattern === "metal" ? 0.45 : 0.9, metal: s.pattern === "metal" ? 0.35 : 0, opacity: s.opacity });
-  if (map && s.pattern === "lap") map.offset.y = -((from * S) / 0.18);
+  if (map && (s.pattern === "lap" || s.pattern === "cementlap")) map.offset.y = -((from * S) / 0.18);
   return m;
 }
 /** The outside as chosen: siding and roofing over the usual ones. */
@@ -506,4 +660,28 @@ export function buildSite(ex: Exterior, ground: Floor | undefined): THREE.Group 
     }
   }
   return g;
+}
+
+const swatches = new Map<string, string>();
+/** A small picture of a surface, its pattern in its colour, for the build questions' answers. */
+export function surfaceSwatch(s: Surface, size = 64): string {
+  const key = `${s.pattern}${s.color}${size}`;
+  const hit = swatches.get(key);
+  if (hit || typeof document === "undefined") return hit ?? "";
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d")!;
+  g.fillStyle = s.color; g.fillRect(0, 0, size, size);
+  const img = PATTERN[s.pattern]?.().image as HTMLCanvasElement | undefined;
+  if (img) {
+    // about a foot and a half of wall: the laps, courses and flakes at the size they'd look
+    // a few repeats across, so laps, courses, studs and flakes read at a glance
+    const k = Math.min(1, (size * 0.42) / Math.max(img.width, img.height) * (img.width > 128 ? 1.6 : 1));
+    const w = img.width * k, h = img.height * k;
+    g.globalCompositeOperation = "multiply";
+    for (let x = 0; x < size; x += w) for (let y = 0; y < size; y += h) g.drawImage(img, x, y, w, h);
+  }
+  const url = c.toDataURL();
+  swatches.set(key, url);
+  return url;
 }

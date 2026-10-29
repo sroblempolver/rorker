@@ -6,13 +6,17 @@
 // and any answer tapped again to change it. The answers become the job's stages (lib/plan/buildSpec.ts).
 import { useEffect, useRef, useState } from "react";
 import { answerLabel, cheer, matchAnswer, nextQuestion, question, questionsFor, tidy, type BuildSpec, type QuestionId } from "@/lib/plan/buildSpec";
+import { surfaceSwatch } from "@/components/plan/exterior3d";
+import type { Surface } from "@/lib/plan/buildSpec";
 import { MicButton, VoiceNote, canSpeak, speak, stopSpeaking, useDictation } from "@/components/voice/speech";
 
 /** "Skipped" is kept as an answer so the question isn't asked again; it adds nothing to the stages. */
 const SKIP = "none";
 
-export function BuildQuestions({ spec, onSpec, onDone }: {
+export function BuildQuestions({ spec, onSpec, onDone, intro }: {
   spec: BuildSpec; onSpec: (s: BuildSpec) => void;
+  /** the opening line, before anything is answered */
+  intro?: string;
   /** every question answered or skipped */
   onDone?: () => void;
 }) {
@@ -53,7 +57,7 @@ export function BuildQuestions({ spec, onSpec, onDone }: {
         {all.map((x) => <span key={x.id} className={`h-1.5 flex-1 rounded-full ${x.id in spec ? "bg-accent/70" : x === q ? "bg-accent" : "bg-line"}`} />)}
       </div>
       <div ref={list} className="max-h-[260px] overflow-y-auto scroll-thin space-y-1.5">
-        {asked.length === 0 && <p className="text-[14px] leading-snug">Plan&apos;s done, nice work. A few quick ones about how the house goes together, from the outside of the wall in. That&apos;s how I lay out your stages and color the walls in 3D.</p>}
+        {asked.length === 0 && <p className="text-[14px] leading-snug">{intro ?? "A few quick ones about how the house goes together, from the outside of the wall in. That's how I lay out your stages and color the walls in 3D."}</p>}
         {asked.map((x) => (
           <div key={x.id} className="flex items-baseline gap-2 text-[13px]">
             <span className="text-muted flex-1 min-w-0 truncate">{x.ask}</span>
@@ -70,7 +74,7 @@ export function BuildQuestions({ spec, onSpec, onDone }: {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
             {q.options.map((o) => (
               <button key={o.id} onClick={() => answer(q.id, o.id)} className="text-left px-2.5 py-2 rounded-[4px] border border-line hover:border-accent hover:bg-panel-2 flex items-start gap-2">
-                {o.surface && <span className="w-4 h-4 mt-0.5 rounded-[2px] shrink-0 border border-black/20" style={{ background: o.surface.color }} aria-hidden />}
+                {o.surface && <Swatch s={o.surface} />}
                 <span className="min-w-0"><span className="block text-[14px] leading-tight">{o.label}</span>{o.hint && <span className="block text-[11.5px] text-muted leading-tight mt-0.5">{o.hint}</span>}</span>
               </button>
             ))}
@@ -84,7 +88,7 @@ export function BuildQuestions({ spec, onSpec, onDone }: {
           <VoiceNote dictation={dict} />
         </div>
       ) : (
-        <p className="text-[14px]">{said ? `${said} ` : ""}That&apos;s everything. Your stages are below, built from these answers. Tap one to see the house at that stage.</p>
+        <p className="text-[14px]">{said ? `${said} ` : ""}That&apos;s everything. Your stages are made from these answers; tap one to see the house at that stage.</p>
       )}
     </section>
   );
@@ -126,4 +130,11 @@ export function SpecStageList({ names, hints, play }: { names: string[]; hints?:
       </ol>
     </section>
   );
+}
+
+/** The look of an answer: its pattern in its colour (drawn in the browser, once). */
+function Swatch({ s }: { s: Surface }) {
+  const [url, setUrl] = useState("");
+  useEffect(() => setUrl(surfaceSwatch(s)), [s]);
+  return <span className="w-9 h-9 rounded-[3px] shrink-0 border border-black/30" style={{ background: url ? `url(${url}) center/cover` : s.color, opacity: s.opacity ?? 1 }} aria-hidden />;
 }

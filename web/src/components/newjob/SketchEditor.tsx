@@ -4,7 +4,8 @@
 // reshape), a room can be cut in two, doors go on the wall between two rooms (or an outside wall),
 // windows on outside walls, and things (a sink, a bed) are dropped where they are. Scale comes from one
 // length you know. The result is the same sketch the reader makes, so the plan is built the same way.
-import type { BuildSpec } from "@/lib/plan/buildSpec";
+import { nextQuestion, stagesFromSpec, type BuildSpec } from "@/lib/plan/buildSpec";
+import { BuildQuestions } from "./BuildQuestions";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import type { Pt } from "@/lib/plan/types";
 import type { Side, Sketch, SketchDoor, SketchFloor } from "@/lib/plan/sketch";
@@ -115,13 +116,15 @@ const dist = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const blankFloor = (level: number): SketchFloor => ({ name: level === 0 ? "Ground floor" : `Level ${level}`, level, rooms: [], doors: [], windows: [], fixtures: [] });
 
 
-export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCancel, doneLabel = "Use this plan", viewAs = "contractor", build }: {
+export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCancel, doneLabel = "Use this plan", viewAs = "contractor", build, onBuild }: {
   initial: Sketch | null; pictures: Picture[]; initialBackdrops?: Record<number, Backdrop>;
   onDone: (sketch: Sketch, backdrops: Record<number, Backdrop>) => void; onCancel: () => void; doneLabel?: string;
   /** who is drawing: the contractor, or their client (whose changes are suggestions) */
   viewAs?: ViewAs;
-  /** how the house is built, when the build questions were answered: "Build it" follows its stages */
+  /** how the house is built (the build questions): "Build it" follows its stages. With `onBuild` the
+   *  questions can be answered here too, from "How it's built" in the toolbar */
   build?: BuildSpec;
+  onBuild?: (s: BuildSpec) => void;
 }) {
   const [sk, setSk] = useState<Sketch>(() => (initial?.floors?.length ? flatten(initial) : { floors: [blankFloor(0)] }));
   const past = useRef<Sketch[]>([]);
@@ -158,6 +161,12 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   const [showRoof, setShowRoof] = useState(false);
   // the checks in the side panel, the one picked, and a standard opened from a check
   const [showChecks, setShowChecks] = useState(false);
+  // the build questions in the side panel; opened by itself once when none are answered yet
+  const [showBuild, setShowBuild] = useState(() => !!onBuild && !Object.keys(build ?? {}).length);
+  // picking something or another tool brings the drawing help back
+  useEffect(() => { if (sel) setShowBuild(false); }, [sel]);
+  const firstTool = useRef(tool);
+  useEffect(() => { if (tool !== firstTool.current) { firstTool.current = tool; setShowBuild(false); } }, [tool]);
   const [activeNudge, setActiveNudge] = useState<string | null>(null);
   const [stdFocus, setStdFocus] = useState<string | null>(null);
   const stdV = useStandards();
@@ -943,6 +952,12 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           {checks.open.length ? <><span className="inline-block h-2 w-2 rounded-full mr-1.5" style={{ background: NUDGE_COLOR[checks.open.some((n) => n.severity === "warn") ? "warn" : "info"] }} />{checks.open.length} to look at</> : "Checks"}
         </button>
         {sg.as === "contractor" && <button className={`btn btn-sm ${showStd ? "btn-primary" : "btn-ghost"}`} onClick={() => { setShowStd((x) => !x); setStdFocus(null); }} title="Your default sizes and the limits the checks use">Standards</button>}
+        {onBuild && sg.as === "contractor" && (
+          <button className={`btn btn-sm ${showBuild && !showStd && !showChecks ? "btn-primary" : "btn-ghost"}`} onClick={() => { setShowBuild(!(showBuild && !showStd && !showChecks)); setShowStd(false); setShowChecks(false); setShowRoof(false); }}
+            title="Siding, wrap, studs, insulation, drywall, foundation and roof: they make the job's stages">
+            {nextQuestion(build ?? {}) && <span className="inline-block h-2 w-2 rounded-full mr-1.5 bg-accent" />}How it&apos;s built
+          </button>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 border-b border-line text-[13px]">
         {sk.floors.map((f, i) => (
@@ -1113,7 +1128,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           <div className="h-[44vh] xl:h-auto">
             <Live3D sketch={sk} fi={fi} sel={sel?.t === "room" || sel?.t === "thing" ? { t: sel.t, i: sel.i } : null} walls={walls3d} onWalls={setWalls3d}
               onPick={(f, s) => { if (f !== fi) { setFi(f); setClicks([]); setWall(null); } setSel(s); }}
-              onFloor={(i) => { setFi(i); setSel(null); setClicks([]); setWall(null); }} roofOn={showRoof} onRoof={() => { setShowRoof((x) => !x); setShowStd(false); }} marks={sg.locked ? sg.marks : null} build={build} />
+              onFloor={(i) => { setFi(i); setSel(null); setClicks([]); setWall(null); }} roofOn={showRoof} onRoof={() => { setShowRoof((x) => !x); setShowStd(false); setShowBuild(false); }} marks={sg.locked ? sg.marks : null} build={build} />
           </div>
         )}
         </div>
@@ -1125,6 +1140,12 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           {showStd ? <StandardsPanel units={lu} focus={stdFocus} onClose={() => { setShowStd(false); setStdFocus(null); }} /> : showChecks ? (
             <ChecksPanel sk={sk} open={checksFirst(trade, checks.open)} ignored={checks.ignored} active={activeNudge} onPick={pickNudge} onStd={openStd} onClose={() => setShowChecks(false)}
               onIgnore={(n) => ignoreNudge(n.id, true)} onUnignore={(n) => ignoreNudge(n.id, false)} />
+          ) : showBuild && onBuild ? (
+            <div className="space-y-2">
+              <BuildQuestions spec={build ?? {}} onSpec={onBuild} />
+              {Object.keys(build ?? {}).length > 0 && <ol className="text-[12.5px] text-muted list-decimal pl-5 space-y-0.5" aria-label="The stages these answers make">{stagesFromSpec(build ?? {}).map((s) => <li key={s.key}>{s.name}</li>)}</ol>}
+              <button className="btn btn-sm btn-ghost w-full" onClick={() => setShowBuild(false)}>Back to drawing</button>
+            </div>
           ) : showRoof ? <RoofPanel sketch={sk} units={lu} onChange={(s, h) => (h === false ? setSk(s) : commit(s))} onClose={() => setShowRoof(false)} /> : <>
           {sg.clientPanel}
           {sg.as === "contractor" && !sg.locked && <>
