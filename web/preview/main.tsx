@@ -42,7 +42,7 @@ import { jobGlance } from "@/lib/feed";
 import { today } from "@/lib/dates";
 import type { Session } from "@supabase/supabase-js";
 import * as cloud from "./cloud";
-import { AuthScreen, ClientLinkPage, CrewLinkPage, Loading } from "./pages";
+import { AuthScreen, ClientLinkPage, CrewLinkPage, Loading, Problem } from "./pages";
 
 /** when this preview was built, so an out-of-date copy in the browser cache is easy to spot */
 declare const __BUILD__: string;
@@ -306,7 +306,7 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
       shares.unshift(l);
       return l;
     },
-    shareUrl: (token) => `https://app.rorker.com/${shares.find((l) => l.token === token)?.audience === "client" ? "c" : "s"}/${token}`,
+    shareUrl: (token) => demoUrl(token),
     client: {
       thread: {
         async list() { return messages.get(d.job.id) ?? []; },
@@ -500,6 +500,10 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
         },
         shareUrl: (token: string) => url(token),
       });
+      // a new link is saved before it's copied or opened, or it wouldn't open yet on another phone
+      const made = { create: a.createShareLink!, person: a.personLink! };
+      a.createShareLink = async (input) => { const l = await made.create(input); await signedIn.saver.flush(); return l; };
+      a.personLink = async (m) => { const l = await made.person(m); await signedIn.saver.flush(); return l; };
       const base = a.updatePin;
       // a photo sent from a crew link is in the database, not in this page: look before closing
       a.updatePin = async (id, input) => { if (input.status === "done") comments.set(id, await cloud.listComments(acct, id)); return base(id, input); };
@@ -689,6 +693,48 @@ function AccountChip({ c, state }: { c: CloudBoot; state: cloud.SaveState }) {
   );
 }
 
+/** A link made on the sample data carries the link itself (who it's for, which tasks), so it opens on any
+ *  phone or browser on the same sample job: #/d/s/<link> for crew, #/d/c/<link> for a client. */
+type DemoLink = Pick<ShareLink, "token" | "job_id" | "label" | "member_id" | "pin_ids" | "audience">;
+const b64url = (s: string) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64url = (s: string) => decodeURIComponent(escape(atob(s.replace(/-/g, "+").replace(/_/g, "/"))));
+function demoUrl(token: string) {
+  const l = shares.find((x) => x.token === token);
+  if (!l) return `${linkBase()}#/`;
+  const d: DemoLink = { token: l.token, job_id: l.job_id, label: l.label, member_id: l.member_id, pin_ids: l.pin_ids, audience: l.audience };
+  return `${linkBase()}#/d/${l.audience === "client" ? "c" : "s"}/${b64url(JSON.stringify(d))}`;
+}
+function demoRoute(): { kind: "s" | "c"; link: DemoLink | null; params: URLSearchParams } | null {
+  const m = location.hash.match(/^#\/d\/(s|c)\/([A-Za-z0-9_-]{8,4000})(?:\?(.*))?$/);
+  if (!m) return null;
+  let link: DemoLink | null = null;
+  try { const x = JSON.parse(unb64url(m[2])) as DemoLink; if (typeof x.token === "string" && Array.isArray(x.pin_ids)) link = x; } catch { /* a broken link */ }
+  return { kind: m[1] as "s" | "c", link, params: new URLSearchParams(m[3] ?? "") };
+}
+
+/** What a sub, an employee or the client sees from a link made on the sample data. */
+function DemoLinkPage({ route }: { route: NonNullable<ReturnType<typeof demoRoute>> }) {
+  const [jobs] = useState(() => sampleJobs());
+  const { link } = route;
+  useState(() => { if (link && !shares.some((x) => x.token === link.token)) shares.unshift({ id: uid(), company_id: COMPANY.id, expires_at: null, revoked_at: null, created_at: now(), ...link }); });
+  if (!link) return <Problem title="This link doesn't open" body="Part of it is missing. Ask for the link again." />;
+  const note = <p className="shrink-0 px-4 py-1.5 text-[12.5px] text-center bg-panel-2 border-b border-line text-muted">Sample data: this is what they&apos;d see. Nothing here is saved. <a className="underline" href="/accounts/">Make an account</a> to send real links.</p>;
+  if (route.kind === "c") {
+    const d = jobs.find((j) => j.job.id === link.job_id) ?? jobs[0];
+    const c = demoClient(() => jobs, d);
+    if (!c.view) return <Problem title="This link doesn't open" body="This job has no client page." />;
+    return <div className="h-full flex flex-col">{note}<div className="flex-1 min-h-0"><ClientPage view={c.view} api={c.api} start={null} pin={route.params.get("pin")} seenKey={`client-demo:${d.job.id}`} /></div></div>;
+  }
+  const v = sharedWork(jobs, link.token, pinPhotos);
+  if (!v) return <Problem title="This link doesn't open" body="It was turned off." />;
+  return (
+    <div className="h-full flex flex-col lg:overflow-hidden overflow-y-auto">
+      {note}
+      <SharedWorkView work={v} pin={route.params.get("pin")} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} />
+    </div>
+  );
+}
+
 /** A link's own address: #/s/<token> for crew, #/c/<token> for a client, with ?pin= or ?open= after. */
 function linkRoute(): { kind: "s" | "c"; token: string; params: URLSearchParams } | null {
   const m = location.hash.match(/^#\/(s|c)\/([A-Za-z0-9_-]{16,64})(?:\?(.*))?$/);
@@ -729,9 +775,10 @@ async function openAccount(s: Session): Promise<Boot> {
 
 function Root() {
   const [link, setLink] = useState(linkRoute);
+  const [demo, setDemo] = useState(demoRoute);
   const [boot, setBoot] = useState<Boot>(() => (OPEN_DEMO ? { kind: "app", jobs: sampleJobs() } : { kind: "loading" }));
   useEffect(() => {
-    const on = () => setLink(linkRoute());
+    const on = () => { setLink(linkRoute()); setDemo(demoRoute()); };
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
@@ -740,7 +787,8 @@ function Root() {
     setBoot({ kind: "loading" });
     try { setBoot(await openAccount(s)); } catch (e) { setBoot({ kind: "auth", error: e instanceof Error ? e.message : "Couldn't open your account." }); }
   };
-  useEffect(() => { if (!link && !OPEN_DEMO) void cloud.currentSession().then(start); }, [!link]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!link && !demo && !OPEN_DEMO) void cloud.currentSession().then(start); }, [!link, !demo]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (demo) return <DemoLinkPage route={demo} />;
   if (link) return link.kind === "c"
     ? <ClientLinkPage token={link.token} open={link.params.get("open")} pin={link.params.get("pin")} />
     : <CrewLinkPage token={link.token} pin={link.params.get("pin")} />;
