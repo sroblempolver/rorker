@@ -10,6 +10,7 @@ import type { Side, Sketch, SketchDoor, SketchFloor, SketchRoom } from "@/lib/pl
 import { OUTSIDE, doorSpot, hugWall, outsidePieces, edgesOf, flatten, moveCorner, moveWall, nearSeg, pointInPoly, roomArea, sideOf, snapTo, splitPoly, wallAt, windowSpots, type Seg } from "@/lib/plan/sketchEdit";
 import { bboxOf, centroid } from "@/lib/plan/geometry";
 import { CATALOG } from "@/lib/plan/catalog";
+import { RULES } from "@/lib/plan/rules";
 import { MATERIAL_BASE, ROOM_MATERIAL } from "@/components/plan/style";
 import { useEscape, editable } from "@/components/ui/hotkeys";
 import { DOOR_W, WallView } from "./WallView";
@@ -489,7 +490,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
 
   const applyScale = (everything: boolean) => {
     const real = parseLength(lengthText, lu);
-    if (clicks.length < 2 || !real) { setNote("Type the length, like 3.6 m or 3600."); return; }
+    if (clicks.length < 2 || !real) { setNote("Type the length, like 12' 6\" or 150 in."); return; }
     const k = real / Math.max(1, dist(clicks[0], clicks[1]));
     const o = clicks[0];
     const sc = (q: Pt): Pt => [r10(o[0] + (q[0] - o[0]) * k), r10(o[1] + (q[1] - o[1]) * k)];
@@ -624,7 +625,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             <p className="absolute inset-x-0 top-1/3 text-center text-muted text-[14px] pointer-events-none px-6">Pick Draw and draw the outline of the first room. Rooms that touch share a wall.</p>
           )}
         </div>
-        {seen && <WallView key={`${seen.room}-${seen.edge}`} floor={floor} room={seen.room} edge={seen.edge} height={2700} units={lu} addOnOpen={wallAdd} onAdded={() => setWallAdd(null)} onChange={(f, h) => setFloor(f, h ?? true)} onClose={() => setWall(null)} onEdge={(edge) => setWall({ room: seen.room, edge })} />}
+        {seen && <WallView key={`${seen.room}-${seen.edge}`} floor={floor} room={seen.room} edge={seen.edge} height={RULES.ceiling} units={lu} addOnOpen={wallAdd} onAdded={() => setWallAdd(null)} onChange={(f, h) => setFloor(f, h ?? true)} onClose={() => setWall(null)} onEdge={(edge) => setWall({ room: seen.room, edge })} />}
         </div>
 
         <aside className="border-t lg:border-t-0 lg:border-l border-line p-3 space-y-3 text-[13.5px] max-h-[62vh] overflow-y-auto scroll-thin">
@@ -645,7 +646,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           {tool === "scale" && clicks.length === 2 && (
             <div className="space-y-2">
               <label className="label" htmlFor="len">How long is that?</label>
-              <input id="len" autoFocus className="input !h-9" value={lengthText} onChange={(e) => setLengthText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") applyScale(floor.rooms.length > 0); }} placeholder="e.g. 3.6 m, 3600 mm or 12 ft" />
+              <input id="len" autoFocus className="input !h-9" value={lengthText} onChange={(e) => setLengthText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") applyScale(floor.rooms.length > 0); }} placeholder={"e.g. 12' 6\", 150 in or 3.6 m"} />
               <div className="flex gap-2">
                 <button className="btn btn-sm btn-primary flex-1" onClick={() => applyScale(floor.rooms.length > 0)}>{floor.rooms.length ? "Scale everything" : "Set the scale"}</button>
                 {floor.rooms.length > 0 && bg && <button className="btn btn-sm btn-ghost" onClick={() => applyScale(false)}>Picture only</button>}

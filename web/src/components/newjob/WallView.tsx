@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEven
 import type { Pt } from "@/lib/plan/types";
 import type { SketchDoor, SketchFixture, SketchFloor, SketchWindow } from "@/lib/plan/sketch";
 import { CATALOG, bottomOf, topOf } from "@/lib/plan/catalog";
+import { RULES } from "@/lib/plan/rules";
 import { fmtLen, parseLength, roundLen, type Units } from "@/lib/plan/units";
 import { doorSpot, doorWall, doorWidth, edgesOf, outsidePieces, param, pointInPoly, sameLine, segLen, sideOf, wallAt, windowSpots, windowWall, type Seg } from "@/lib/plan/sketchEdit";
 
@@ -33,7 +34,7 @@ export function wallFromInside(poly: Pt[], e: number): Seg {
   return ux * rx + uy * ry >= 0 ? [a, b] : [b, a];
 }
 
-export function WallView({ floor, room, edge, height = 2700, units = "ft", addOnOpen, onAdded, onChange, onClose, onEdge }: {
+export function WallView({ floor, room, edge, height = RULES.ceiling as number, units = "ft", addOnOpen, onAdded, onChange, onClose, onEdge }: {
   floor: SketchFloor; room: number; edge: number; height?: number; units?: Units;
   /** add this as soon as the wall opens (picked from the plan's Doors & windows menu) */
   addOnOpen?: "balcony" | null; onAdded?: () => void;
