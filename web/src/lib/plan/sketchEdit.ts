@@ -232,3 +232,32 @@ export function flatten(s: Sketch): Sketch {
   if (!c.units?.some((u) => u.copy_of)) return c;
   return { ...c, floors: expandUnits(c), units: c.units.map((u) => ({ name: u.name })) };
 }
+
+/**
+ * A piece of furniture put near a wall, pushed back flat against it and turned to face the room (how the
+ * Sims and floor planners place a cabinet). Only when its back is within `reach` mm of a straight
+ * (square to the page) wall; otherwise it stays where it was put.
+ */
+export function hugWall(poly: Pt[], c: Pt, width: number, depth: number, reach = 450): { center: Pt; facing: Side } | null {
+  let best: { center: Pt; facing: Side; gap: number } | null = null;
+  for (const s of edgesOf(poly)) {
+    const horiz = Math.abs(s[0][1] - s[1][1]) < 1, vert = Math.abs(s[0][0] - s[1][0]) < 1;
+    if (!horiz && !vert) continue;
+    const ax = horiz ? 0 : 1, line = horiz ? s[0][1] : s[0][0];
+    const lo = Math.min(s[0][ax], s[1][ax]), hi = Math.max(s[0][ax], s[1][ax]);
+    if (c[ax] < lo || c[ax] > hi || hi - lo < 300) continue;
+    // which way the room is from this wall
+    const mid: Pt = horiz ? [(lo + hi) / 2, line + 30] : [line + 30, (lo + hi) / 2];
+    const into = pointInPoly(mid, poly) ? 1 : -1;
+    const off = (c[1 - ax] - line) * into;
+    if (off < -100) continue;
+    const gap = Math.abs(off - depth / 2);
+    if (gap > reach || (best && gap >= best.gap)) continue;
+    const along = Math.min(hi - width / 2, Math.max(lo + width / 2, c[ax]));
+    const across = line + into * depth / 2;
+    const center: Pt = horiz ? [along, across] : [across, along];
+    const facing: Side = horiz ? (into > 0 ? "south" : "north") : into > 0 ? "east" : "west";
+    best = { center, facing, gap };
+  }
+  return best && { center: best.center, facing: best.facing };
+}
