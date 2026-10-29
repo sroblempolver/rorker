@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plan3D, webglAvailable } from "@/components/plan/Plan3D";
 import { planFromSketch, type Sketch } from "@/lib/plan/sketch";
 import { useStandards } from "@/lib/plan/standards";
-import type { Plan } from "@/lib/plan/types";
+import type { ElementStatus, Plan } from "@/lib/plan/types";
 import { editable } from "@/components/ui/hotkeys";
 
 export type Walls = "up" | "cut" | "down";
@@ -29,11 +29,13 @@ const roomsOf = (sk: Sketch, i: number) => sk.floors[i].rooms.map((r, k) => (Arr
 const thingsOf = (sk: Sketch, i: number) => (sk.floors[i].fixtures ?? []).map((f, k) => (Array.isArray(f.center) && f.kind ? k : -1)).filter((k) => k >= 0);
 const num = (n: number) => String(n + 1).padStart(2, "0");
 
-export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoof, roofOn }: {
+export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoof, roofOn, marks }: {
   sketch: Sketch; fi: number; sel: LiveSel; walls: Walls; onWalls: (w: Walls) => void;
   /** a click in 3D: the floor and what's on it (null for empty space) */
   onPick: (fi: number, sel: LiveSel) => void;
   onFloor: (fi: number) => void; onRoof: () => void; roofOn: boolean;
+  /** rooms and things to light up on this floor (a client's changes): the rest goes grey */
+  marks?: { rooms: number[]; things: number[] } | null;
 }) {
   const [gl, setGl] = useState(true);
   useEffect(() => setGl(webglAvailable()), []);
@@ -68,6 +70,19 @@ export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoo
     const n = (sel.t === "room" ? roomsOf : thingsOf)(built.sk, fi).indexOf(sel.i);
     return n < 0 ? null : `${f.id}-${sel.t === "room" ? "R" : "F"}${num(n)}`;
   }, [built, sel, fi]);
+
+  // lit up: the marked rooms, their walls and the marked things, by their ids in the plan
+  const lit = useMemo(() => {
+    if (!built || !marks) return null;
+    const f = built.plan.floors[floorOrder(built.sk).indexOf(fi)];
+    if (!f || !built.sk.floors[fi]) return null;
+    const m = new Map<string, ElementStatus>();
+    for (const i of marks.rooms) { const n = roomsOf(built.sk, fi).indexOf(i); if (n >= 0) m.set(`${f.id}-R${num(n)}`, "in_progress"); }
+    for (const i of marks.things) { const n = thingsOf(built.sk, fi).indexOf(i); if (n >= 0) m.set(`${f.id}-F${num(n)}`, "in_progress"); }
+    // the floors keep their finish, so a lit room shows by its walls
+    for (const w of f.walls) if (w.room_ids.some((id) => m.has(id))) m.set(w.id, "in_progress");
+    return m.size ? m : null;
+  }, [built, marks, fi]);
 
   const pick = (id: string | null) => {
     if (!id || !built) return onPick(fi, null);
@@ -104,7 +119,7 @@ export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoo
     <div className="relative h-full min-h-[300px] bg-ink border-t xl:border-t-0 xl:border-l border-line" aria-label="The house in 3D"
       onPointerDownCapture={(e) => { if (!(e.target as Element).closest("button")) touched.current = true; }} onWheelCapture={() => { touched.current = true; }}>
       {gl && shown ? (
-        <Plan3D plan={shown} mode="building" floor={null} room={null} selected={selected} selectedPin={null} selectedItem={null} states={states} colorMode="type"
+        <Plan3D plan={shown} mode="building" floor={null} room={null} selected={selected} selectedPin={null} selectedItem={null} states={lit ?? states} colorMode={lit ? "progress" : "type"}
           pins={NO_PINS} items={NO_PINS} pinMode={false} draft={null} wallMode={walls === "down" ? "low" : "full"} locked live={live} controls={controls}
           onSelect={pick} onSelectPin={noop} onSelectItem={noop} onPlacePin={noop} onMoveFixture={noop} onMoveItem={noop} onMovePin={noop} onOpenFloor={noop} onLimitOut={noop} />
       ) : (
