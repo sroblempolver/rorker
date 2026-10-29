@@ -10,6 +10,8 @@ import { planFromSketch, type Sketch } from "@/lib/plan/sketch";
 import { useStandards } from "@/lib/plan/standards";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
 import { editable } from "@/components/ui/hotkeys";
+import { BuildPlayBar, useBuildPlay } from "./BuildPlay";
+import type { StageId } from "@/lib/plan/buildPlay";
 
 export type Walls = "up" | "cut" | "down";
 const WALLS: Walls[] = ["up", "cut", "down"];
@@ -21,6 +23,8 @@ export type LiveSel = { t: "room" | "thing"; i: number } | null;
 const glass = "bg-[#17181b]/90 backdrop-blur-sm border border-line";
 const NO_PINS: never[] = [];
 const noop = () => {};
+// while "Build it" plays: walls standing, the roof on from its step; cut away to see the cabinets go in
+const PLAY_OPEN = { open: 0, roof: false }, PLAY_ROOF = { open: 0, roof: true }, PLAY_INSIDE = { open: 1, roof: false };
 
 /** Which sketch floor each plan floor came from (planFromSketch leaves out empty floors, lowest first). */
 const floorOrder = (sk: Sketch) => sk.floors.map((f, i) => ({ f, i })).filter(({ f }) => f.rooms?.length || f.walls?.length).sort((a, b) => a.f.level - b.f.level).map(({ i }) => i);
@@ -29,13 +33,15 @@ const roomsOf = (sk: Sketch, i: number) => sk.floors[i].rooms.map((r, k) => (Arr
 const thingsOf = (sk: Sketch, i: number) => (sk.floors[i].fixtures ?? []).map((f, k) => (Array.isArray(f.center) && f.kind ? k : -1)).filter((k) => k >= 0);
 const num = (n: number) => String(n + 1).padStart(2, "0");
 
-export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoof, roofOn, marks }: {
+export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoof, roofOn, marks, crewDays }: {
   sketch: Sketch; fi: number; sel: LiveSel; walls: Walls; onWalls: (w: Walls) => void;
   /** a click in 3D: the floor and what's on it (null for empty space) */
   onPick: (fi: number, sel: LiveSel) => void;
   onFloor: (fi: number) => void; onRoof: () => void; roofOn: boolean;
   /** rooms and things to light up on this floor (a client's changes): the rest goes grey */
   marks?: { rooms: number[]; things: number[] } | null;
+  /** crew days by build stage, when the job has a schedule: "Build it" then shows the day of each step */
+  crewDays?: Partial<Record<StageId, number>>;
 }) {
   const [gl, setGl] = useState(true);
   useEffect(() => setGl(webglAvailable()), []);
@@ -56,6 +62,9 @@ export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoo
   const live = useMemo(() => ({ open: walls === "cut" ? 1 : 0, roof: !above }), [walls, above]);
   const states = useMemo(() => new Map(), []);
   const ctl = useRef<{ zoomBy: (f: number) => void; home: () => void } | null>(null);
+  // "Build it": the whole house going up, step by step (BuildPlay.tsx)
+  const play = useBuildPlay(built?.plan ?? null, crewDays);
+  const pl = play.shown;
   const controls = useCallback((api: { zoomBy: (f: number) => void; home: () => void }) => { ctl.current = api; }, []);
   // the whole house stays in view as it grows, until you move the camera; then it stays where you put it
   const touched = useRef(false);
@@ -119,6 +128,11 @@ export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoo
     <div className="relative h-full min-h-[300px] bg-ink border-t xl:border-t-0 xl:border-l border-line" aria-label="The house in 3D"
       onPointerDownCapture={(e) => { if (!(e.target as Element).closest("button")) touched.current = true; }} onWheelCapture={() => { touched.current = true; }}>
       {gl && shown ? (
+        pl ? (
+          <Plan3D plan={pl.plan} mode="building" floor={null} room={null} selected={null} selectedPin={null} selectedItem={null} states={states} colorMode="type" look={pl.step.look}
+            pins={NO_PINS} items={NO_PINS} pinMode={false} draft={null} wallMode={pl.step.walls ? "full" : "none"} locked live={pl.step.objects !== "none" ? PLAY_INSIDE : pl.step.roof ? PLAY_ROOF : PLAY_OPEN} controls={controls}
+            onSelect={noop} onSelectPin={noop} onSelectItem={noop} onPlacePin={noop} onMoveFixture={noop} onMoveItem={noop} onMovePin={noop} onOpenFloor={noop} onLimitOut={noop} />
+        ) :
         <Plan3D plan={shown} mode="building" floor={null} room={null} selected={selected} selectedPin={null} selectedItem={null} states={lit ?? states} colorMode={lit ? "progress" : "type"}
           pins={NO_PINS} items={NO_PINS} pinMode={false} draft={null} wallMode={walls === "down" ? "low" : "full"} locked live={live} controls={controls}
           onSelect={pick} onSelectPin={noop} onSelectItem={noop} onPlacePin={noop} onMoveFixture={noop} onMoveItem={noop} onMovePin={noop} onOpenFloor={noop} onLimitOut={noop} />
@@ -128,17 +142,22 @@ export function Live3D({ sketch, fi, sel, walls, onWalls, onPick, onFloor, onRoo
       {built && !built.plan.floors.length && <p className="absolute inset-x-0 top-1/3 text-center text-muted text-[14px] px-6 pointer-events-none">Draw a room and it stands up here.</p>}
       <div className="absolute left-2 top-2 right-2 flex flex-wrap gap-1.5 items-start pointer-events-none">
         <button onClick={() => onWalls(WALLS[(WALLS.indexOf(walls) + 1) % WALLS.length])} title={`${WALL_HELP[walls]}. Click to change (Home / End)`}
-          className={`pointer-events-auto h-8 px-2.5 rounded-[4px] text-[12px] font-display font-bold tracking-[0.08em] uppercase ${glass} hover:bg-panel-3`}>{WALL_LABEL[walls]}</button>
-        <div className={`pointer-events-auto flex items-center rounded-[4px] overflow-hidden ${glass}`} role="group" aria-label="Floor">
+          className={`pointer-events-auto h-8 px-2.5 rounded-[4px] text-[12px] font-display font-bold tracking-[0.08em] uppercase ${glass} hover:bg-panel-3 ${play.on ? "hidden" : ""}`}>{WALL_LABEL[walls]}</button>
+        <div className={`pointer-events-auto flex items-center rounded-[4px] overflow-hidden ${glass} ${play.on ? "hidden" : ""}`} role="group" aria-label="Floor">
           <button onClick={() => step(-1)} disabled={k <= 0} title="Floor down (Page Down)" aria-label="Floor down" className="h-8 w-8 hover:bg-panel-3 disabled:opacity-30">▼</button>
           <span className="px-1.5 text-[12px] font-display font-bold tracking-[0.08em] uppercase whitespace-nowrap">{cur?.name || `Level ${cur?.level ?? 0}`}</span>
           <button onClick={() => step(1)} disabled={k >= byLevel.length - 1} title="Floor up (Page Up)" aria-label="Floor up" className="h-8 w-8 hover:bg-panel-3 disabled:opacity-30">▲</button>
         </div>
         <button onClick={onRoof} aria-pressed={roofOn} title="Roof shape, pitch, overhang and foundation"
-          className={`pointer-events-auto h-8 px-2.5 rounded-[4px] text-[12px] font-display font-bold tracking-[0.08em] uppercase ${glass} hover:bg-panel-3 ${roofOn ? "!text-accent !border-accent" : ""}`}>Roof</button>
+          className={`pointer-events-auto h-8 px-2.5 rounded-[4px] text-[12px] font-display font-bold tracking-[0.08em] uppercase ${glass} hover:bg-panel-3 ${roofOn ? "!text-accent !border-accent" : ""} ${play.on ? "hidden" : ""}`}>Roof</button>
+        {!play.on && built && built.plan.floors.length > 0 && (
+          <button onClick={() => { touched.current = false; ctl.current?.home(); play.start(); }} title="Watch the house go up in the order it's built: foundation, framing, walls, roof, then what goes inside"
+            className={`pointer-events-auto h-8 px-2.5 rounded-[4px] text-[12px] font-display font-bold tracking-[0.08em] uppercase ml-auto ${glass} hover:bg-panel-3`}>▶ Build it</button>
+        )}
         <button onClick={() => { touched.current = false; ctl.current?.home(); }} title="See the whole house" className={`pointer-events-auto h-8 px-2.5 rounded-[4px] text-[12px] font-display font-bold tracking-[0.08em] uppercase ml-auto ${glass} hover:bg-panel-3`}>Fit</button>
       </div>
-      {above && <p className="absolute left-2 bottom-2 text-[12px] text-muted pointer-events-none">Floors above lifted off</p>}
+      <BuildPlayBar p={play} />
+      {above && !play.on && <p className="absolute left-2 bottom-2 text-[12px] text-muted pointer-events-none">Floors above lifted off</p>}
     </div>
   );
 }

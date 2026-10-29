@@ -9,6 +9,7 @@ import { polyArea } from "./geometry";
 import { RULES } from "./rules";
 import { defineStandards, std } from "./standards";
 import { homesOf } from "./homes";
+import { onOutline, wallHeight, wallLen } from "./walls";
 
 defineStandards([
   { key: "paint.coverage", group: "Painting", label: "Coverage, ft² per gallon per coat", value: 350, unit: "count", help: "Most interior latex paints say 350 to 400 ft² a gallon on smooth walls; less on new drywall or texture." },
@@ -82,6 +83,17 @@ export function allSurfaces(sk: Sketch, ceiling: (f: SketchFloor) => number): Ro
   return sk.floors.flatMap((f, fi) => f.rooms.map((r, i) => (Array.isArray(r.polygon) && r.polygon.length >= 3 && !OUTDOOR.has(low(r.type)) ? roomSurfaces(f, i, ceiling(f), fi) : null)).filter((x): x is RoomSurfaces => !!x));
 }
 
+export interface FreeWall { fi: number; k: number; length: number; height: number; half: boolean; /** both faces, mm² */ area: number; /** along both sides */ baseboard: number }
+/** The walls drawn on their own (a half wall, a wall that doesn't close a room): both faces, at their own
+ *  height. Pieces lying on a room's outline are that room's walls and are counted with the room. */
+export function freeWalls(sk: Sketch, ceiling: (f: SketchFloor) => number): FreeWall[] {
+  return sk.floors.flatMap((f, fi) => (f.walls ?? []).map((w, k) => {
+    if (f.rooms.some((r) => Array.isArray(r.polygon) && r.polygon.length >= 3 && onOutline(w, r.polygon))) return null;
+    const length = wallLen(w), height = Math.min(ceiling(f), wallHeight(w, ceiling(f)));
+    return length < 100 ? null : { fi, k, length, height, half: !!w.half || height < ceiling(f), area: 2 * length * height, baseboard: 2 * length };
+  }).filter((x): x is FreeWall => !!x));
+}
+
 /** Gallons for an area: area × coats with the extra for waste, over the coverage of a gallon. */
 export function gallons(area_ft2: number, coverage: number, coats: number, wastePct: number): number {
   if (!(coverage > 0) || !(area_ft2 > 0)) return 0;
@@ -100,11 +112,11 @@ export function fmtGal(gal: number): string {
 
 export interface PaintSum { wall_ft2: number; ceiling_ft2: number; baseboard: number; casing: number; wallGal: number; ceilingGal: number }
 /** The painting totals for a set of rooms, with the company's coverage, coats and waste. */
-export function paintSum(rooms: RoomSurfaces[], o = { coverage: std("paint.coverage"), coats: std("paint.coats"), waste: std("paint.waste") }): PaintSum {
-  const wall_ft2 = ft2(rooms.reduce((n, r) => n + r.wall, 0)), ceiling_ft2 = ft2(rooms.reduce((n, r) => n + r.ceiling, 0));
+export function paintSum(rooms: RoomSurfaces[], o = { coverage: std("paint.coverage"), coats: std("paint.coats"), waste: std("paint.waste") }, free: FreeWall[] = []): PaintSum {
+  const wall_ft2 = ft2(rooms.reduce((n, r) => n + r.wall, 0) + free.reduce((n, w) => n + w.area, 0)), ceiling_ft2 = ft2(rooms.reduce((n, r) => n + r.ceiling, 0));
   return {
     wall_ft2, ceiling_ft2,
-    baseboard: rooms.reduce((n, r) => n + r.baseboard, 0),
+    baseboard: rooms.reduce((n, r) => n + r.baseboard, 0) + free.reduce((n, w) => n + w.baseboard, 0),
     casing: rooms.reduce((n, r) => n + r.doorCasing + r.windowCasing, 0),
     wallGal: gallons(wall_ft2, o.coverage, o.coats, o.waste),
     ceilingGal: gallons(ceiling_ft2, o.coverage, o.coats, o.waste),

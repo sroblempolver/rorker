@@ -83,7 +83,7 @@ export function checklist(sk: Sketch, trade: Trade, open: Nudge[]): Step[] | nul
       step("appliances", "Appliances placed", sink && cook && fridge, still(missing([[sink, "sink"], [cook, "range or cooktop"], [fridge, "fridge"]])) || "Sink, range and fridge are in."),
       step("cabinets", "Cabinets filled", base.length > 0 && wall, still(missing([[base.length > 0, "base cabinets"], [wall, "wall cabinets"]])) || "Base and wall cabinets are in."),
       step("counters", "Counters", base.length > 0 && base.every((t) => t.cab?.counter), base.length ? "Every base cabinet gets a countertop (pick one to turn it on)." : "Counters go on the base cabinets."),
-      step("aisles", "Aisles clear", k.length > 0 && !aisles.length, aisles.length ? `${aisles.length} aisle ${aisles.length === 1 ? "check" : "checks"} to look at.` : "Room to work between the counters."),
+      step("aisles", "Aisles clear", base.length > 0 && !aisles.length, aisles.length ? `${aisles.length} aisle ${aisles.length === 1 ? "check" : "checks"} to look at.` : base.length ? "Room to work between the counters." : "Checked once the cabinets are in."),
     ];
   }
   if (trade === "bath") {

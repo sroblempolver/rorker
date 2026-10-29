@@ -39,6 +39,8 @@ import { WallPieces } from "./WallPieces";
 import { MarkLayer, useSuggest, type ViewAs } from "./SuggestPanel";
 import { LibraryPanel, usePlacing } from "./LibraryPanel";
 import { HomesPanel } from "./HomesPanel";
+import { TradePanel } from "./TradePanel";
+import { checksFirst, toolOrder, tradeOf } from "@/lib/plan/trades";
 import { pieceOf, placePiece, saveToLibrary } from "@/lib/plan/library";
 
 /** A picture of the drawing to trace over. `mmPerPx` when its scale is known (an AutoCAD drawing). */
@@ -394,6 +396,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   // the real rules, run again whenever the drawing or a standard changes
   const before = useMemo(() => (initial?.floors?.length ? flatten(initial) : null), [initial]);
   const checks = useMemo(() => runChecks(sk, before), [sk, before, stdV]); // eslint-disable-line react-hooks/exhaustive-deps
+  // what the job is: the order of the tools, the checks first in the list, the side panel (lib/plan/trades.ts)
+  const trade = tradeOf(sk);
   const fly = (to: Pt, floorIdx: number) => {
     const from = floorIdx === fi ? v : null;
     const w = Math.min(Math.max(from?.w ?? 9000, 4000), 9000), h = (w * box.h) / box.w;
@@ -905,7 +909,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       )}
       {sg.banner}
       <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b border-line bg-panel">
-        {TOOLS.filter((t) => !t.menu && !t.more).flatMap((t) => [
+        {toolOrder(trade, TOOLS).filter((t) => !t.menu && !t.more).flatMap((t) => [
           <button key={t.id} onClick={() => pickTool(t.id)} title={`${t.label} (${t.key.toUpperCase()})`}
             className={`btn btn-sm ${tool === t.id ? "btn-primary" : "btn-ghost"}`}>{t.label}</button>,
           // doors, windows and balconies in one menu, after Split room
@@ -1116,10 +1120,14 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
 
         <aside className="border-t lg:border-t-0 lg:border-l border-line p-3 space-y-3 text-[13.5px] max-h-[62vh] overflow-y-auto scroll-thin">
           {showStd ? <StandardsPanel units={lu} focus={stdFocus} onClose={() => { setShowStd(false); setStdFocus(null); }} /> : showChecks ? (
-            <ChecksPanel sk={sk} open={checks.open} ignored={checks.ignored} active={activeNudge} onPick={pickNudge} onStd={openStd} onClose={() => setShowChecks(false)}
+            <ChecksPanel sk={sk} open={checksFirst(trade, checks.open)} ignored={checks.ignored} active={activeNudge} onPick={pickNudge} onStd={openStd} onClose={() => setShowChecks(false)}
               onIgnore={(n) => ignoreNudge(n.id, true)} onUnignore={(n) => ignoreNudge(n.id, false)} />
           ) : showRoof ? <RoofPanel sketch={sk} units={lu} onChange={(s, h) => (h === false ? setSk(s) : commit(s))} onClose={() => setShowRoof(false)} /> : <>
           {sg.clientPanel}
+          {sg.as === "contractor" && !sg.locked && <>
+            <TradePanel sk={sk} fi={fi} units={lu} open={checks.open} compact={!!sel} onChange={commit} onStd={openStd} onRoom={(f, i) => { setFi(f); setWall(null); setSel({ t: "room", i }); }} />
+            {trade === "property" && !sel && <HomesPanel sk={sk} fi={fi} units={lu} lit={homeLit} onLight={setHomeLit} onChange={commit} onNote={setNote} onFloor={(i) => { setFi(i); setWall(null); }} />}
+          </>}
           {sg.locked && <p className="text-[#55b2ff] leading-snug">This is your client&apos;s version, with their changes lit up. Approve them to put them in the plan.</p>}
           {lib.placing && <p className="text-accent leading-snug">Click on the plan where {lib.placing.item.name} goes. It snaps to the walls beside it. Esc to stop.</p>}
           <p className="text-muted leading-snug">{TOOLS.find((t) => t.id === tool)?.help}</p>
@@ -1279,7 +1287,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             </div>
           )}
           {!sel && sg.as === "contractor" && !sg.locked && <>
-            <HomesPanel sk={sk} fi={fi} units={lu} lit={homeLit} onLight={setHomeLit} onChange={commit} onNote={setNote} onFloor={(i) => { setFi(i); setWall(null); }} />
+            {trade !== "property" && <HomesPanel sk={sk} fi={fi} units={lu} lit={homeLit} onLight={setHomeLit} onChange={commit} onNote={setNote} onFloor={(i) => { setFi(i); setWall(null); }} />}
             <LibraryPanel sk={sk} floor={floor} units={lu} placingId={lib.placing?.item.id ?? null} onPlace={(it) => { setSel(null); setTool("select"); lib.start(it); }}
               onStart={(s, name) => { commit(flatten(s)); setFi(0); setSel(null); setView(null); setNote(`Started from ${name}. Undo takes you back.`); }} />
           </>}
