@@ -125,7 +125,9 @@ export function pushWall(f: SketchFloor, s: Seg, want: number): { floor: SketchF
   const next: SketchFloor = { ...f, rooms };
   next.fixtures = (f.fixtures ?? []).map((x) => {
     const half = halfSize(x);
-    const near = Math.abs(Math.abs(x.center[k] - line) - half[k]) <= touch && x.center[al] + half[al] > lo && x.center[al] - half[al] < hi;
+    // backed onto the wall: its back at the wall's inside face (half the wall in from the room outline), give or take
+    const gap = Math.abs(x.center[k] - line) - half[k];
+    const near = gap >= -touch && gap <= std("wall.exterior") / 2 + touch && x.center[al] + half[al] > lo && x.center[al] - half[al] < hi;
     let y: SketchFixture = near ? { ...x, center: (h ? [x.center[0], x.center[1] + by] : [x.center[0] + by, x.center[1]]) as Pt } : x;
     const ri = roomOfFixture(f, x);
     if (ri >= 0 && rooms[ri] !== f.rooms[ri]) y = keepInside(y, rooms[ri].polygon);

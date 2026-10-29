@@ -67,6 +67,18 @@ export function WallPanel({ floor, i, units, ceiling, onChange, onJoin, onCopy, 
         <input type="checkbox" checked={!!w.half} onChange={(e) => set({ half: e.target.checked || undefined, height_mm: undefined })} />
         <span>Half wall <span className="text-muted">({fmtLen(std("wall.halfHeight"), units)} high)</span></span>
       </label>
+      {(w.doors?.length || w.windows?.length) ? (
+        <div>
+          <p className="label !mb-1">In this wall</p>
+          {[...(w.doors ?? []).map((d, k) => ({ k, door: true, at: d.at, name: d.kind && d.kind !== "door" ? d.kind.replace(/_/g, " ") : "door" })),
+            ...(w.windows ?? []).map((d, k) => ({ k, door: false, at: d.at, name: "window" }))].map((o) => (
+            <div key={`${o.door}-${o.k}`} className="flex items-center gap-2 text-[13px]">
+              <span className="flex-1 capitalize">{o.name} <span className="text-muted normal-case">{fmtLen(wallLen(w) * o.at, units)} from the {ends[0].toLowerCase()}</span></span>
+              <button className="text-[12px] text-muted underline" onClick={() => set(o.door ? { doors: w.doors!.filter((_, j) => j !== o.k) } : { windows: w.windows!.filter((_, j) => j !== o.k) })}>Take out</button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <p className="text-muted leading-snug">Drag the wall to move it, or an end to make it longer or shorter. Ends snap onto other walls. Alt-drag an end to pull it off the wall it joins.</p>
       <div className="flex flex-wrap gap-2">
         {onJoin && <button className="btn btn-sm" onClick={onJoin} title="Make the room these walls close whole again: push and pull its walls as one room">Join into a room</button>}

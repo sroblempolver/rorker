@@ -258,6 +258,25 @@ export function shiftWall(walls: SketchWall[], i: number, d: Pt): SketchWall[] {
   });
 }
 
+/** The furniture and cabinets backed onto wall i of `f`, moved by d with it (as a room's pushed wall
+ *  takes what stands against it). */
+export function followWall(f: SketchFloor, i: number, d: Pt): SketchFloor {
+  const w = (f.walls ?? [])[i];
+  if (!w || (!d[0] && !d[1])) return f;
+  const L = wallLen(w) || 1, u: Pt = [(w.b[0] - w.a[0]) / L, (w.b[1] - w.a[1]) / L], n: Pt = [-u[1], u[0]];
+  const reach = wallThickness(w, true) / 2 + std("draw.wallTouch");
+  return { ...f, fixtures: (f.fixtures ?? []).map((x) => {
+    const across = x.facing === "east" || x.facing === "west";
+    const hw = ((across ? x.depth_mm : x.width_mm) ?? 600) / 2, hd = ((across ? x.width_mm : x.depth_mm) ?? 600) / 2;
+    // its half size along the wall and across it
+    const halfAlong = Math.abs(u[0]) * hw + Math.abs(u[1]) * hd, halfAcross = Math.abs(n[0]) * hw + Math.abs(n[1]) * hd;
+    const rel: Pt = [x.center[0] - w.a[0], x.center[1] - w.a[1]];
+    const t = rel[0] * u[0] + rel[1] * u[1], off = Math.abs(rel[0] * n[0] + rel[1] * n[1]);
+    const near = off - halfAcross <= reach && off - halfAcross >= -reach && t + halfAlong > 0 && t - halfAlong < L;
+    return near ? { ...x, center: [Math.round(x.center[0] + d[0]), Math.round(x.center[1] + d[1])] as Pt } : x;
+  }) };
+}
+
 /** Make wall i `len` long, keeping end `keep` where it is (0 a, 1 b) or its middle ("mid"). */
 export function setLength(walls: SketchWall[], i: number, len: number, keep: 0 | 1 | "mid"): SketchWall[] {
   const w = walls[i], L = wallLen(w) || 1, u: Pt = [(w.b[0] - w.a[0]) / L, (w.b[1] - w.a[1]) / L];
