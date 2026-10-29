@@ -1,6 +1,6 @@
 "use client";
 // Talk to the plan: in Build mode, say what to change ("put a sofa facing the TV in the living room",
-// "move the bed 30 cm north", "rename the study to Office") and the assistant changes the plan. The mic
+// "move the bed a foot north", "rename the study to Office") and the assistant changes the plan. The mic
 // is the main button; the keyboard button opens a line to type. Quick buttons furnish a room or the
 // whole house in one tap.
 import { useEffect, useRef, useState } from "react";
