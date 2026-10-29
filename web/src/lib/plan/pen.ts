@@ -97,3 +97,44 @@ export function tidyStroke(raw: Pt[], grid = 50): Pt[] | null {
   const span = Math.max(...out.map((p) => Math.hypot(p[0] - out[0][0], p[1] - out[0][1])));
   return span > diag * 2 ? null : out;
 }
+
+/**
+ * An open stroke (mm) as straight walls end to end: the corners in order, each wall square to the page
+ * when nearly square (45° when near it), slants kept. Null when it's too short to be a wall.
+ */
+export function tidyLine(raw: Pt[], grid = 50): Pt[] | null {
+  if (raw.length < 2) return null;
+  const xs = raw.map((p) => p[0]), ys = raw.map((p) => p[1]);
+  const diag = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  if (diag < 300) return null;
+  let v = simplify(raw, Math.max(80, diag * 0.06));
+  // corners that aren't (a wobble) and stubs where the pen came to rest
+  const close = Math.max(150, diag * 0.06);
+  for (let changed = true; changed && v.length > 2;) {
+    changed = false;
+    for (let i = 1; i < v.length - 1; i++) {
+      const a = v[i - 1], b = v[i], c = v[i + 1];
+      const turn = Math.abs(((deg(Math.atan2(c[1] - b[1], c[0] - b[0]) - Math.atan2(b[1] - a[1], b[0] - a[0])) + 540) % 360) - 180);
+      if (turn < 20 || Math.hypot(c[0] - b[0], c[1] - b[1]) < close || Math.hypot(b[0] - a[0], b[1] - a[1]) < close) { v = v.filter((_, j) => j !== i); changed = true; break; }
+    }
+  }
+  const lines: Line[] = v.slice(1).map((b, i) => {
+    const a = v[i], r = (snapAngle(deg(Math.atan2(b[1] - a[1], b[0] - a[0]))) * Math.PI) / 180;
+    return { p: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], d: [Math.cos(r), Math.sin(r)] };
+  });
+  // the ends: where the pen started and stopped, brought onto the first and last wall
+  const foot = (l: Line, p: Pt): Pt => { const t = (p[0] - l.p[0]) * l.d[0] + (p[1] - l.p[1]) * l.d[1]; return [l.p[0] + l.d[0] * t, l.p[1] + l.d[1] * t]; };
+  const out: Pt[] = [foot(lines[0], v[0])];
+  for (let i = 1; i < lines.length; i++) out.push(meet(lines[i - 1], lines[i]) ?? v[i]);
+  out.push(foot(lines[lines.length - 1], v[v.length - 1]));
+  return out.map((p) => [Math.round(p[0] / grid) * grid, Math.round(p[1] / grid) * grid] as Pt).filter((p, i, a) => i === 0 || Math.hypot(p[0] - a[i - 1][0], p[1] - a[i - 1][1]) > 1);
+}
+
+/** Whether a stroke came back to where it started: a shape (a room), not a line of walls. */
+export function isClosedStroke(raw: Pt[], tol: number): boolean {
+  if (raw.length < 6) return false;
+  const xs = raw.map((p) => p[0]), ys = raw.map((p) => p[1]);
+  const diag = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  const [a, b] = [raw[0], raw[raw.length - 1]];
+  return Math.hypot(b[0] - a[0], b[1] - a[1]) < Math.max(tol, diag * 0.18);
+}

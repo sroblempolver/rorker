@@ -1,15 +1,25 @@
 // Turns a simple room sketch (what the New project assistant reads off an upload: rooms as outlines in
 // mm, which rooms a door joins, which side a window is on, the main objects) into a full plan the
 // viewers can draw in 2D and 3D. Walls are traced from the room edges: an edge two rooms share is an
-// inside wall, an edge only one room has is an outside wall.
+// inside wall, an edge only one room has is an outside wall. Walls drawn as pieces of their own (`walls`,
+// lib/plan/walls.ts) are added on top: one lying on a room's wall gives that wall its thickness and height.
 import type { BBox, Fixture, Floor, Opening, OpeningKind, Plan, Pt, Question, Room, RoomType, Stair, Wall } from "./types";
 import { bboxOf, polyArea } from "./geometry";
 import { std } from "./standards";
 import "./rules"; // registers the house standards read below
 import { floorRise, stairGeom } from "./stairs";
+import { freeWallsToPlan } from "./walls";
 
 export type Side = "north" | "south" | "east" | "west";
-export interface SketchRoom { name: string; type?: string; polygon: Pt[]; unit?: string }
+export interface SketchRoom {
+  name: string; type?: string; polygon: Pt[]; unit?: string;
+  /** its walls were separated: the outline follows the floor's wall pieces (lib/plan/walls.ts refit) */
+  loose?: boolean;
+}
+/** A wall drawn as a piece of its own, centre line from a to b. Thickness and height are the standards'
+ *  when left out; a half wall stands at the half wall height. `room` remembers the room these walls
+ *  closed while its loop is open, so it comes back the same. */
+export interface SketchWall { a: Pt; b: Pt; thickness_mm?: number; height_mm?: number; half?: boolean; room?: { name: string; type?: string; unit?: string } }
 export interface SketchDoor { rooms: [string, string]; kind?: OpeningKind; width_mm?: number; height_mm?: number; at?: number; /** an outside door: which side of the house */ side?: Side }
 export interface SketchWindow { room: string; side: Side; width_mm?: number; height_mm?: number; /** bottom of the window above the floor */ sill_mm?: number; count?: number; /** where each one sits along the wall, 0 to 1 (spread evenly when left out) */ at?: number[] }
 export interface SketchFixture { kind: string; name?: string; room?: string; center: Pt; width_mm?: number; depth_mm?: number; facing?: Side | null; /** its own height, and its bottom above the floor (the catalogue's when missing) */ height_mm?: number; elevation_mm?: number }
@@ -28,6 +38,7 @@ export interface SketchFloor {
   /** drawn on top of this level: its walls show underneath as a guide and rooms snap to them (drawing only) */
   guide?: number;
   stairs?: SketchStair[];
+  walls?: SketchWall[];
 }
 /** One home in a drawing of several. A copy repeats another unit, flipped left to right when `mirror`. */
 export interface SketchUnit { name: string; copy_of?: string; mirror?: boolean; offset_mm?: Pt }
@@ -47,7 +58,7 @@ const OUTDOOR = new Set<RoomType>(["balcony", "porch", "terrace"]);
 const OUTSIDE = /^(outside|exterior|out|garden|yard|street)$/i;
 const ANGLE: Record<Side, number> = { east: 0, south: 90, west: 180, north: -90 };
 const SNAP = 150;  // edges this close are the same line (a read drawing is never exact)
-const EXT_T = 250, INT_T = 120, PARTY_T = 250;
+const PARTY_T = 250;
 
 const r10 = (v: number) => Math.round(v / 10) * 10;
 const key = (p: Pt) => `${p[0]},${p[1]}`;
@@ -97,6 +108,7 @@ function onSegment(p: Pt, a: Pt, b: Pt) {
 interface Seg { a: Pt; b: Pt; rooms: string[] }
 
 function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, notes: string[], at?: { elevation: number; height: number }): Floor {
+  const EXT_T = std("wall.exterior"), INT_T = std("wall.interior");
   // rooms, snapped onto shared lines
   const raw = sf.rooms.filter((r) => Array.isArray(r.polygon) && r.polygon.length >= 3);
   const xs = snapAxis(raw.flatMap((r) => r.polygon.map((p) => p[0])));
@@ -168,6 +180,9 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
     for (const s of runs) wallLines.set((s as Seg & { id?: string }).id ?? "", s);
   }
   wallLines.delete("");
+  // the wall pieces, on the same lines the rooms were pulled onto
+  const onLine = (p: Pt): Pt => [xs.get(p[0]) ?? r10(p[0]), ys.get(p[1]) ?? r10(p[1])];
+  walls.push(...freeWallsToPlan((sf.walls ?? []).map((w) => ({ ...w, a: onLine(w.a), b: onLine(w.b) })), walls, wallLines, code, band, at?.height ?? sf.height_mm ?? storey));
 
   // which way an outside wall of a room faces
   const faces = (w: Wall, r: Room, want: Side) => {
@@ -347,7 +362,7 @@ export function planFromSketch(sk: Sketch, src: SketchSource): { plan: Plan; not
   const storey = Math.max(2400, Math.min(4500, sk.storey_height_mm ?? std("house.storey")));
   const notes: string[] = [];
   const used = new Set<string>();
-  const floorsIn = expandUnits(sk, notes).filter((f) => f.rooms?.length).sort((a, b) => a.level - b.level);
+  const floorsIn = expandUnits(sk, notes).filter((f) => f.rooms?.length || f.walls?.length).sort((a, b) => a.level - b.level);
   // a floor with its own ceiling height is that plus the floor framing above it, floor to floor; the
   // floors above ground stack on the ones below (a basement keeps its old place)
   const framing = Math.max(0, storey - std("house.ceiling"));
@@ -355,10 +370,10 @@ export function planFromSketch(sk: Sketch, src: SketchSource): { plan: Plan; not
   const lift = (level: number) => { let y = 0; for (let k = 0; k < level; k++) y += tall(floorsIn.find((f) => f.level === k)); return y; };
   const floors = floorsIn.map((f, i) => {
     // each floor from its own top-left corner, so floors drawn side by side stack up
-    const b0 = bboxOf(f.rooms.flatMap((r) => r.polygon ?? []));
+    const b0 = bboxOf([...f.rooms.flatMap((r) => r.polygon ?? []), ...(f.walls ?? []).flatMap((w) => [w.a, w.b])]);
     const shift = (p: Pt): Pt => [p[0] - b0[0] + 1000, p[1] - b0[1] + 1000];
     wallLines.clear();
-    const moved: SketchFloor = { ...f, rooms: f.rooms.map((r) => ({ ...r, polygon: (r.polygon ?? []).map(shift) })), fixtures: (f.fixtures ?? []).map((x) => ({ ...x, center: shift(x.center) })), stairs: (f.stairs ?? []).map((st) => ({ ...st, at: shift(st.at) })) };
+    const moved: SketchFloor = { ...f, rooms: f.rooms.map((r) => ({ ...r, polygon: (r.polygon ?? []).map(shift) })), fixtures: (f.fixtures ?? []).map((x) => ({ ...x, center: shift(x.center) })), stairs: (f.stairs ?? []).map((st) => ({ ...st, at: shift(st.at) })), walls: (f.walls ?? []).map((w) => ({ ...w, a: shift(w.a), b: shift(w.b) })) };
     const built = buildFloor(moved, i, floorCode(f.level, used), storey, notes, { elevation: f.level > 0 ? lift(f.level) : i === 0 ? 0 : f.level * storey, height: tall(f) });
     // stairs coming up from the floor below cut their hole in this floor
     const lower = floorsIn.find((x) => x.level === f.level - 1);
