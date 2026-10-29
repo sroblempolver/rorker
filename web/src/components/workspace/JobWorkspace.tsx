@@ -30,6 +30,7 @@ import { TeamContext } from "@/components/team/context";
 import { ShortcutsDialog, useFeedback } from "@/components/ui/feedback";
 import { useEscape, useHotkeys } from "@/components/ui/hotkeys";
 import { useGoTo, type GoItem } from "@/components/ui/GoTo";
+import { WinBanner, type WinInfo } from "@/components/ui/Win";
 import type { WorkspaceApi, WorkspaceData } from "./api";
 import { Inspector, ProjectSummary, type AddPin } from "./Inspector";
 import { FeedPanel } from "./FeedPanel";
@@ -72,6 +73,9 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const [edits, setEdits] = useState<Record<string, ElementEdit>>(data.edits);
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
   const [view3d, setView3d] = useState(data.can3d !== false);
+  // something just got finished: a short banner over the map, like a game ticking off an objective
+  const [win, setWin] = useState<WinInfo | null>(null);
+  const endWin = useCallback(() => setWin(null), []);
   const [feedPerson, setFeedPerson] = useState<{ id: string; n: number } | null>(null);
   const [pinFilter, setPinFilter] = useState<{ kind: PinKind | "open"; n: number }>({ kind: "open", n: 0 });
   const [states, setStates] = useState(() => new Map(data.states.map((s) => [s.element_id, s.status] as [string, ElementStatus])));
@@ -334,6 +338,12 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     const e = plan ? findElement(plan.data, id) : null;
     const name = e ? elementLabel(e) : id;
     await applyStatus(id, s);
+    if (s === "done" && e) {
+      const after = new Map(states); after.set(id, "done");
+      const marked = [...after.values()].filter((x) => x !== "existing");
+      setWin({ kind: "item", head: e.kind === "room" ? "Room done" : `${name} done`, title: e.kind === "room" ? name : `${name}`, sub: e.floor.name,
+        done: marked.filter((x) => x === "done").length, total: marked.length, unit: "done in the job", n: Date.now() });
+    }
     undoable(s ? `${name}: ${STATUS_LABEL[s]}` : `${name}: status cleared`, () => applyStatus(id, prev), { announce: true });
   }, [states, plan, applyStatus, undoable]);
 
@@ -347,9 +357,14 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     if (!before) return;
     // put back exactly the fields that changed
     const back = Object.fromEntries(Object.keys(input).map((k) => [k, before[k as keyof Pin]])) as Parameters<WorkspaceApi["updatePin"]>[1];
+    if (input.status === "done" && before.status !== "done") {
+      const done = pins.filter((p) => p.status === "done" && p.id !== id).length + 1;
+      setWin({ kind: "task", head: before.kind === "material" ? "Material in" : before.kind === "issue" ? "Issue fixed" : `${before.kind[0].toUpperCase()}${before.kind.slice(1)} done`,
+        title: before.title, sub: where(view, before), done, total: pins.length, unit: "closed on this job", n: Date.now() });
+    }
     const label = input.status === "done" ? `Pin #${before.number} closed` : input.status ? `Pin #${before.number}: ${input.status === "open" ? "reopened" : "in progress"}` : `Pin #${before.number} changed`;
     undoable(label, () => applyPin(id, back), { announce: input.status === "done" });
-  }, [pins, applyPin, undoable]);
+  }, [pins, applyPin, undoable, view]);
 
   const deletePin = useCallback(async (p: Pin) => {
     setPins((l) => l.filter((x) => x.id !== p.id));
@@ -873,6 +888,13 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         onStatus={async (id, s) => {
           const before = stages.find((x) => x.id === id);
           await stageOp(() => api.setStageStatus(id, s));
+          if (before && s === "done" && before.status !== "done") {
+            const done = stages.filter((x) => x.status === "done" && x.id !== id).length + 1;
+            const next = stages.find((x) => x.status !== "done" && x.id !== id);
+            setWin(done === stages.length
+              ? { kind: "job", head: "All stages done", title: job.name, sub: "The whole job is finished", done, total: stages.length, unit: "stages", n: Date.now() }
+              : { kind: "stage", head: "Stage complete", title: before.name, sub: next ? `Next: ${next.name}` : undefined, done, total: stages.length, unit: "stages", n: Date.now() });
+          }
           if (before) undoable(`${before.name}: ${s === "active" ? "in progress" : s.replace("_", " ")}`, () => stageOp(() => api.setStageStatus(id, before.status)));
         }}
         onAdd={(n) => stageOp(() => api.addStage(n))}
@@ -997,6 +1019,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
                 setDraft(null);
               } : undefined} />
           )}
+          {win && <WinBanner win={win} onDone={endWin} />}
           {layer && plan && (
             <div className="absolute left-1/2 -translate-x-1/2 bottom-14 z-10 flex items-center gap-2 h-9 pl-3 pr-1 rounded-[4px] bg-[#17181b]/92 backdrop-blur-sm border border-accent text-[13px]" role="status">
               <span className="eyebrow !text-[11.5px]">Layer</span>
