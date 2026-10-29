@@ -359,6 +359,8 @@ export function cabinetParts(c: CabSpec, w: number, d: number, h: number): Part[
 
 /** Everything the plan needs for a sketch cabinet: the parts for 3D, the viewer's front word, its name,
  *  and the full height with the countertop. */
+/** The box height of a cabinet from its height with the countertop and crown. */
+export function cabBoxHeight(c: CabSpec, overall: number) { return overall - (c.counter ? std("cab.counter.thick") : 0) - (c.crown ? std("cab.crown") : 0); }
 export function cabinetFixture(c: CabSpec, w: number, d: number, h: number) {
   const top = c.counter ? std("cab.counter.thick") : 0;
   return { parts: cabinetParts(c, w, d, h), front: viewerFront(c), height_mm: Math.round(h + top + (c.crown ? std("cab.crown") : 0)), spec: cabCode(c, w, d, h) };

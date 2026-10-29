@@ -10,6 +10,7 @@ import { std } from "./standards";
 import "./rules"; // registers the house standards read below
 import { floorRise, stairGeom } from "./stairs";
 import { freeWallsToPlan } from "./walls";
+import { itemNumbers } from "./numbers";
 import { kindFor, specOf, topOf } from "./catalog";
 import { supportOf } from "./arrange";
 
@@ -30,7 +31,7 @@ export interface SketchWall {
 }
 export interface SketchDoor { rooms: [string, string]; kind?: OpeningKind; width_mm?: number; height_mm?: number; at?: number; /** an outside door: which side of the house */ side?: Side }
 export interface SketchWindow { room: string; side: Side; width_mm?: number; height_mm?: number; /** bottom of the window above the floor */ sill_mm?: number; count?: number; /** where each one sits along the wall, 0 to 1 (spread evenly when left out) */ at?: number[] }
-export interface SketchFixture { kind: string; name?: string; room?: string; center: Pt; width_mm?: number; depth_mm?: number; facing?: Side | null; /** its own height, and its bottom above the floor (the catalogue's when missing) */ height_mm?: number; elevation_mm?: number; /** a kitchen or bath cabinet: its family, fronts and trim (lib/plan/cabinets.ts) */ cab?: CabSpec }
+export interface SketchFixture { kind: string; /** its number in its room (lib/plan/numbers.ts) */ no?: number; name?: string; room?: string; center: Pt; width_mm?: number; depth_mm?: number; facing?: Side | null; /** its own height, and its bottom above the floor (the catalogue's when missing) */ height_mm?: number; elevation_mm?: number; /** a kitchen or bath cabinet: its family, fronts and trim (lib/plan/cabinets.ts) */ cab?: CabSpec }
 /**
  * Stairs going up from this floor to the one above (see lib/plan/stairs.ts). `at` is the middle of the
  * bottom step's front edge and `rotation` the way they go up, in degrees (0 east, 90 south). The steps,
@@ -331,9 +332,12 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
       id: `${code}-F${String(i + 1).padStart(2, "0")}`, kind, name: f.name || spec?.label || kind.replace(/_/g, " "), room_id: room?.id ?? null, center: c, bbox, rotation: 0,
       outline: [[[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]], [bbox[0], bbox[1]]]], source: "ai", source_ref: null, confidence: 0.6, facing,
       ...(f.height_mm ? { height_mm: f.height_mm } : {}), ...(f.elevation_mm ? { elevation_mm: f.elevation_mm } : {}),
-      ...(f.cab ? cabinetFixture(f.cab, w, d, f.height_mm ?? 900) : {}),
+      ...(f.cab ? { ...cabinetFixture(f.cab, w, d, f.height_mm ?? 900), cab: f.cab } : {}), ...(f.no ? { no: f.no } : {}),
     } as Fixture;
   });
+  // each item's number in its room: kept from the drawing, the next free one when it has none
+  const nums = itemNumbers(fixtures, (x) => x.room_id);
+  for (const f of fixtures) if (nums.has(f)) f.no = nums.get(f);
   // things that sit on something (a TV on its unit, a computer on the desk) stand on what's under them
   for (const f of fixtures) {
     const spec = specOf(f.kind);

@@ -16,7 +16,7 @@ export interface JobCard extends JobSummary {
   next_up?: { title: string; when: string } | null;
 }
 
-export function JobCards({ jobs }: { jobs: JobCard[] }) {
+export function JobCards({ jobs, onEditPlan }: { jobs: JobCard[]; /** open a job's plan in the drawing tool */ onEditPlan?: (id: string) => void }) {
   const [last, setLast] = useState<string | null>(null);
   useEffect(() => setLast(recall<string>("jobs.last")), []);
   // the last one opened first, then the ones with something late
@@ -37,6 +37,13 @@ export function JobCards({ jobs }: { jobs: JobCard[] }) {
               {j.id === last ? <span className="chip !text-accent !border-accent shrink-0">Last opened</span>
                 : <span className="chip shrink-0">{JOB_TYPES.find((t) => t.value === j.job_type)?.label ?? j.job_type}</span>}
             </div>
+            {onEditPlan && (
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEditPlan(j.id); }}
+                className="btn btn-sm mt-3 !h-8" title="Change the walls, doors and windows, stairs, furniture and cabinets">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3zM3 12h9M12 3v13M16 12h5" /></svg>
+                {noPlan ? "Draw the plan" : "Edit plan"}
+              </button>
+            )}
             <div className="mt-4 h-1.5 rounded-[1px] bg-panel-3 overflow-hidden"><div className="h-full bg-accent" style={{ width: `${pct}%` }} /></div>
             <div className="mt-2 flex items-center gap-3 text-[13px] text-muted">
               <span className="truncate">{j.current_stage ?? (j.stages_total ? (pct === 100 ? "All stages done" : "Not started") : "No stages")}</span>
