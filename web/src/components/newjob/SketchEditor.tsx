@@ -18,7 +18,8 @@ import { INCH, fmtArea, fmtLen, parseLength, roundLen, type Units } from "@/lib/
 import type { IntakePart } from "@/lib/intake/files";
 import { StandardsPanel } from "./StandardsPanel";
 import { CabinetEdit, CabinetPanel } from "./CabinetPanel";
-import { DEFAULT_PICK, cabinetClick, slideCabinet, type CabPick } from "@/lib/plan/cabinetLayout";
+import { DEFAULT_PICK, addHood, cabinetClick, slideCabinet, type CabPick } from "@/lib/plan/cabinetLayout";
+import { plumbingPoints } from "@/lib/plan/plumbing";
 import { cabCode, defaults } from "@/lib/plan/cabinets";
 import { Live3D, type Walls } from "./Live3D";
 import { RoofPanel } from "./RoofPanel";
@@ -835,7 +836,9 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       // against a wall when it's put near one: back flat to the wall, facing the room
       const hug = ri >= 0 && spec?.mount !== "ceiling" ? hugWall(floor.rooms[ri].polygon, c, w, dp, 600) : null;
       const fx = { kind: thing.kind, name: thing.label ?? spec?.label, room: ri >= 0 ? floor.rooms[ri].name : undefined, center: hug?.center ?? c, width_mm: w, depth_mm: dp, facing: hug?.facing ?? facingFor(c, ri), ...(thing.h ? { height_mm: thing.h } : {}) };
-      setFloor({ ...floor, fixtures: [...(floor.fixtures ?? []), fx] });
+      const h = addHood({ ...floor, fixtures: [...(floor.fixtures ?? []), fx] }, (floor.fixtures ?? []).length);
+      setFloor(h.floor);
+      if (h.added) setNote("A hood went in over it: the code wants one over a range or cooktop.");
       setSel({ t: "thing", i: (floor.fixtures ?? []).length });
       // Shift-click keeps placing the same thing; a plain click puts it down and picks it to adjust
       if (!e.shiftKey) setTool("select");
@@ -1008,6 +1011,14 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             {holeGs.map((g, i) => <StairHole key={`h${i}`} g={g} px={px} fontMm={fontMm} />)}
             {stairGs.map((g, i) => <StairSymbol key={`st${i}`} g={g} px={px} fontMm={fontMm} on={sel?.t === "stair" && sel.i === i} />)}
             {drag?.k === "stair" && <StairSymbol g={stairGeom(newStair(drag.a, stairTurn(drag)), rise)} px={px} fontMm={fontMm} on ghost />}
+            {/* where the plumber is needed: water and drain at sinks, the dishwasher, toilets, tubs, showers */}
+            {plumbingPoints(floor).map((q) => (
+              <g key={`pl${q.i}`} transform={`translate(${q.at[0]} ${q.at[1]})`}>
+                <title>{`Plumbing: ${q.what}. ${q.needs}.`}</title>
+                <circle r={7 * px} fill="#55b2ff" stroke="#17181b" strokeWidth={1.5 * px} />
+                <path d={`M0 ${-4 * px} C ${2.6 * px} ${-0.6 * px} ${3 * px} ${1 * px} ${3 * px} ${1.6 * px} A ${3 * px} ${3 * px} 0 0 1 ${-3 * px} ${1.6 * px} C ${-3 * px} ${1 * px} ${-2.6 * px} ${-0.6 * px} 0 ${-4 * px} Z`} fill="#fff" />
+              </g>
+            ))}
             {doorSpots.map((s, i) => s && <line key={`d${i}`} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "door" && sel.i === i ? "#fff" : "#ff6a1f"} strokeWidth={7 * px} strokeLinecap="butt" />)}
             {winSpots.map((list, i) => list.map((s, k) => <line key={`w${i}-${k}`} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "window" && sel.i === i ? "#fff" : "#8fd3f0"} strokeWidth={6 * px} />))}
             {room && !room.loose && room.polygon.map((q, k) => <rect key={k} x={q[0] - 5 * px} y={q[1] - 5 * px} width={10 * px} height={10 * px} fill="#ff6a1f" stroke="#fff" strokeWidth={px} />)}
@@ -1233,7 +1244,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
               onJoin={(() => { const w = floor.walls![sel.i], ri = floor.rooms.findIndex((r) => r.loose && onOutline(w, r.polygon)); return ri >= 0 ? () => { setFloor(joinRoom(floor, ri)); setSel({ t: "room", i: ri }); } : null; })()}
               onCopy={() => { const w = floor.walls![sel.i], L = dist(w.a, w.b) || 1, o = 24 * INCH, n: Pt = [-(w.b[1] - w.a[1]) / L * o, (w.b[0] - w.a[0]) / L * o]; const c = { ...w, room: undefined, a: [w.a[0] + n[0], w.a[1] + n[1]] as Pt, b: [w.b[0] + n[0], w.b[1] + n[1]] as Pt }; setWalls([...floor.walls!, c]); setSel({ t: "wall", i: floor.walls!.length }); }} />
           )}
-          {fix && sel && fix.cab && <CabinetEdit fx={fix} units={lu} onDelete={deleteSel} onChange={(nx) => setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? nx : f)) })} />}
+          {fix && sel && fix.cab && <CabinetEdit fx={fix} units={lu} onDelete={deleteSel} onChange={(nx) => { const h = addHood({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? nx : f)) }, sel.i); setFloor(h.floor); if (h.added) setNote("A hood went in over it: the code wants one over a range or cooktop."); }} />}
           {fix && sel && !fix.cab && (
             <div className="space-y-2">
               <p className="eyebrow">{CATALOG[fix.kind]?.label ?? fix.kind}</p>

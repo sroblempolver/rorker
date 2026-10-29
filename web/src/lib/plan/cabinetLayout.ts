@@ -3,6 +3,9 @@
 // with the cabinets beside it, and "Fill this wall with cabinets" lays out a whole run between the
 // corners, doors, windows and appliances: the widest even stock widths, a sink base under the window,
 // fillers at the walls, wall cabinets above but none over a window or the range, a cabinet over the fridge.
+// A wall can be filled as a plain run, a stove wall (a range in the middle with drawer bases either side
+// and a hood over it) or a sink wall (a sink base under the window with the dishwasher beside it). Any
+// range or cooktop put in gets a hood above it, as the mechanical code expects.
 import type { Pt } from "./types";
 import type { Side, SketchFixture, SketchFloor } from "./sketch";
 import { doorSpot, edgesOf, outsidePieces, pointInPoly, sameLine, windowSpots, type Seg } from "./sketchEdit";
@@ -20,6 +23,8 @@ export const PLAIN: PlainItem[] = [
   { id: "range", label: "Range", kind: "range", group: "Appliances", widths: [30, 36], size: () => ({ w: std("cab.range.width"), d: std("cab.base.depth") + I(1), h: std("cab.base.height") + std("cab.counter.thick"), z: 0 }) },
   { id: "dishwasher", label: "Dishwasher", kind: "dishwasher", group: "Appliances", widths: [18, 24], size: () => ({ w: std("cab.dw.width"), d: std("cab.base.depth"), h: std("cab.base.height"), z: 0 }) },
   { id: "fridge", label: "Fridge", kind: "fridge", group: "Appliances", widths: [30, 33, 36], size: () => ({ w: std("cab.fridge.width"), d: std("cab.fridge.depth"), h: std("cab.fridge.height"), z: 0 }) },
+  { id: "cooktop_base", label: "Cooktop over a base", kind: "cooktop", group: "Appliances", widths: [30, 36], size: () => ({ w: std("cab.range.width"), d: std("cab.base.depth"), h: std("cab.base.height") + std("cab.counter.thick"), z: 0 }) },
+  { id: "oven_base", label: "Oven under the counter", kind: "oven", group: "Appliances", widths: [30], size: () => ({ w: std("cab.range.width"), d: std("cab.base.depth"), h: std("cab.base.height"), z: 0 }) },
   { id: "range_hood", label: "Range hood", kind: "range_hood", group: "Appliances", widths: [30, 36], size: () => ({ w: std("cab.range.width"), d: I(20), h: I(18), z: std("cab.hood.bottom") }) },
   { id: "toilet", label: "Toilet", kind: "toilet", group: "Bath", widths: [], size: () => ({ w: std("bath.toilet.width"), d: std("bath.toilet.depth"), h: I(30), z: 0 }) },
   { id: "bathtub", label: "Bathtub", kind: "bathtub", group: "Bath", widths: [60, 66, 72], size: () => ({ w: std("bath.tub.length"), d: std("bath.tub.width"), h: std("bath.tub.height"), z: 0 }) },
@@ -29,8 +34,16 @@ export const plainOf = (id: string) => PLAIN.find((p) => p.id === id) ?? null;
 
 /** What a click puts down: a cabinet family (or an appliance / bath fixture) at a size picked in the
  *  catalogue tray, or, with the Cabinets tool, a whole wall filled. */
-export interface CabPick { item: string; w?: number; d?: number; h?: number; config?: string; hinge?: "L" | "R"; mode: "place" | "fill"; fillBase: boolean; fillWall: boolean }
-export const DEFAULT_PICK: CabPick = { item: "base", mode: "fill", fillBase: true, fillWall: true };
+export interface CabPick { item: string; w?: number; d?: number; h?: number; config?: string; hinge?: "L" | "R"; mode: "place" | "fill"; fillBase: boolean; fillWall: boolean; fillKind?: FillKind }
+export const DEFAULT_PICK: CabPick = { item: "base", mode: "fill", fillBase: true, fillWall: true, fillKind: "regular" };
+/** What a wall is filled as: plain cabinets, a range wall, or a sink wall. */
+export type FillKind = "regular" | "stove" | "sink";
+export const FILL_KINDS: { id: FillKind; label: string; hint: string }[] = [
+  { id: "regular", label: "Regular wall", hint: "Base and wall cabinets corner to corner" },
+  { id: "stove", label: "Stove wall", hint: "A range in the middle, drawers either side, a hood above" },
+  { id: "sink", label: "Sink wall", hint: "A sink base under the window, the dishwasher beside it" },
+];
+const COOK = new Set(["range", "cooktop"]);
 
 /** One wall of a room seen from inside: x runs left to right along the room outline's edge (as in the
  *  wall view), the run between the inside corners is [s0, s1], and the inside face is `t/2` in from it. */
@@ -122,6 +135,20 @@ function fixtureAt(f: SketchFloor, fc: Face, x: number, size: { w: number; d: nu
   return { kind, name, room: f.rooms[fc.ri].name, center: c, width_mm: Math.round(size.w * 10) / 10, depth_mm: Math.round(size.d * 10) / 10, height_mm: Math.round(size.h * 10) / 10, facing: fc.facing, ...(size.z > 0 ? { elevation_mm: Math.round(size.z) } : {}), ...(cab ? { cab } : {}) };
 }
 
+/** A hood over the range or cooktop at `i`, as wide as it, when there isn't one over it yet. */
+export function addHood(f: SketchFloor, i: number): { floor: SketchFloor; added: boolean } {
+  const x = f.fixtures?.[i];
+  if (!x || !COOK.has(x.kind)) return { floor: f, added: false };
+  const near = (f.fixtures ?? []).some((o) => o.kind === "range_hood" && Math.hypot(o.center[0] - x.center[0], o.center[1] - x.center[1]) < Math.max(x.width_mm ?? 600, x.depth_mm ?? 600));
+  if (near) return { floor: f, added: false };
+  const fc = faceNear(f, x.center, (x.depth_mm ?? 600) + 300);
+  const hood = plainOf("range_hood")!.size();
+  const w = x.width_mm ?? hood.w;
+  if (!fc) return { floor: { ...f, fixtures: [...(f.fixtures ?? []), { kind: "range_hood", name: "Range hood", room: x.room, center: x.center, width_mm: w, depth_mm: hood.d, height_mm: hood.h, facing: x.facing ?? null, elevation_mm: Math.round(hood.z) }] }, added: true };
+  const at = dot(sub(x.center, fc.A), fc.u);
+  return { floor: { ...f, fixtures: [...(f.fixtures ?? []), fixtureAt(f, fc, at, { ...hood, w }, "range_hood", "Range hood")] }, added: true };
+}
+
 /** Things on the other walls (round a corner) that reach into the strip `depth` deep in front of this
  *  face at heights [zb, zt]: their spans along it. */
 export function crossBlocks(f: SketchFloor, fc: Face, zb: number, zt: number, depth: number, skip: Set<number>): { x0: number; x1: number }[] {
@@ -179,7 +206,7 @@ export function cabinetClick(f: SketchFloor, p: Pt, pick: CabPick): { floor?: Sk
   if (pick.mode === "fill") {
     const fc = faceNear(f, p, 900);
     if (!fc) return { note: "Click inside the kitchen, close to the wall you want filled." };
-    return fillWall(f, fc.ri, fc.edge, { base: pick.fillBase, wall: pick.fillWall });
+    return fillWall(f, fc.ri, fc.edge, { base: pick.fillBase, wall: pick.fillWall, kind: pick.fillKind ?? "regular" });
   }
   const { size, kind, name, cab } = pickSize(pick);
   const fc = faceNear(f, p, Math.max(900, size.d + 600));
@@ -187,7 +214,9 @@ export function cabinetClick(f: SketchFloor, p: Pt, pick: CabPick): { floor?: Sk
   const x = slot(f, fc, dot(sub(p, fc.A), fc.u), size.w, size.z, size.h, -1, 6 * INCH, size.d);
   const fx = fixtureAt(f, fc, x, size, kind, name, cab);
   const list = f.fixtures ?? [];
-  return { floor: { ...f, fixtures: [...list, fx] }, sel: list.length };
+  const placed: SketchFloor = { ...f, fixtures: [...list, fx] };
+  const h = addHood(placed, list.length);
+  return { floor: h.floor, sel: list.length, ...(h.added ? { note: `${name} in, with a hood above it (the code wants one over a range or cooktop).` } : {}) };
 }
 
 /** A cabinet (or appliance) dragged to `c`: along the nearest wall, snapping to its neighbours. Null when
@@ -254,7 +283,8 @@ function gaps(lo: number, hi: number, blocks: Block[]): Block[] {
  * when asked. Doors, windows (by their height), appliances, tall cabinets and corner cabinets already
  * there are kept and worked around; base and wall cabinets that were there are replaced.
  */
-export function fillWall(f: SketchFloor, ri: number, edge: number, opt: { base: boolean; wall: boolean }): { floor?: SketchFloor; note?: string } {
+export function fillWall(f: SketchFloor, ri: number, edge: number, opt: { base: boolean; wall: boolean; kind?: FillKind }): { floor?: SketchFloor; note?: string } {
+  const kind = opt.kind ?? "regular";
   const fc = faceOf(f, ri, edge);
   if (!fc) return { note: "Cabinets go on straight, square walls. This one is on a slant." };
   if (!opt.base && !opt.wall) return { note: "Tick base cabinets, wall cabinets or both." };
@@ -279,13 +309,36 @@ export function fillWall(f: SketchFloor, ri: number, edge: number, opt: { base: 
   const add: SketchFixture[] = [];
   const names: string[] = [];
   let fillers = 0;
-  const put = (x0: number, w: number, fam: CabFamily, h?: number) => {
+  const make = (x0: number, w: number, fam: CabFamily, h?: number) => {
     const def = defaults(fam), hh = h ?? def.h, cab = newSpec(fam, w);
     cab.config = defaultConfig(fam, w);
     const z = famOf(fam).zone === "wall" ? bottomFor(fam, hh) : 0;
-    add.push(fixtureAt(f, fc, x0 + w / 2, { w, d: def.d, h: hh, z }, famOf(fam).kind, `${cabCode(cab, w, def.d, hh)} ${famOf(fam).label.toLowerCase()}`, cab));
-    if (fam.startsWith("filler")) fillers++; else names.push(cabCode(cab, w, def.d, hh));
+    return { fx: fixtureAt(f, fc, x0 + w / 2, { w, d: def.d, h: hh, z }, famOf(fam).kind, `${cabCode(cab, w, def.d, hh)} ${famOf(fam).label.toLowerCase()}`, cab), code: cabCode(cab, w, def.d, hh) };
   };
+  const put = (x0: number, w: number, fam: CabFamily, h?: number) => {
+    const { fx, code } = make(x0, w, fam, h);
+    add.push(fx);
+    if (fam.startsWith("filler")) fillers++; else names.push(code);
+  };
+  /** an appliance with its left end at x0 */
+  const appliance = (x0: number, id: string) => {
+    const it = plainOf(id)!, size = it.size();
+    add.push(fixtureAt(f, fc, x0 + size.w / 2, size, it.kind, it.label));
+    names.push(it.label.toLowerCase());
+    return { x0, x1: x0 + size.w };
+  };
+  const stepW = std("cab.width.step"), fe = std("cab.filler.end");
+  /** where a thing `w` wide goes in gap g near `c`, leaving a filler at a wall and whole steps either side */
+  const placeIn = (g: Block, w: number, c: number) => {
+    const lf = Math.abs(g.x0 - fc.s0) < 2 ? fe : 0, rf = Math.abs(g.x1 - fc.s1) < 2 ? fe : 0;
+    const x0 = Math.min(g.x1 - w - rf, Math.max(g.x0 + lf, c - w / 2));
+    const snapped = g.x0 + lf + Math.round((x0 - g.x0 - lf) / stepW) * stepW;
+    return Math.abs(snapped - x0) < stepW / 2 && snapped + w <= g.x1 - rf + 0.5 && snapped >= g.x0 ? snapped : x0;
+  };
+  const widest = (list: Block[]) => list.reduce<Block | null>((a, g) => (!a || g.x1 - g.x0 > a.x1 - a.x0 ? g : a), null);
+  /** ranges and cooktops on this wall, kept or just put in: no wall cabinet over them, and a hood */
+  const cooks: Block[] = [];
+  let hoods = 0;
   /** Cabinets and fillers along one free stretch; fillers go where the stretch meets a wall. */
   const fillGap = (g: Block, fam: CabFamily, filler: CabFamily) => {
     const cb = fam === "wall" ? cornerW : cornerB;
@@ -307,32 +360,59 @@ export function fillWall(f: SketchFloor, ri: number, edge: number, opt: { base: 
 
   if (opt.base) {
     const blocks: Block[] = [...doors, ...windows.filter((w) => w.sill < baseTop - 10), ...kept.filter((o) => o.bottom < baseTop - 10), ...cornerB];
-    // a sink base under the window, when the kitchen has no sink yet
-    const hasSink = (f.fixtures ?? []).some((x, i) => !replace.has(i) && (x.kind === "kitchen_sink" || x.cab?.fam === "sink") && (x.room ?? "").toLowerCase() === room.name.toLowerCase());
-    const win = windows.find((w) => w.sill >= baseTop - 10);
-    if (kitchen && !hasSink && win) {
-      const sw = std("cab.sink.width"), c = (win.x0 + win.x1) / 2;
-      const g = gaps(fc.s0, fc.s1, blocks).find((x) => x.x0 <= c && c <= x.x1 && x.x1 - x.x0 >= sw);
+    const hasSinkHere = kept.some((o) => o.f.kind === "kitchen_sink" || o.f.cab?.fam === "sink");
+    const hasCookHere = kept.some((o) => COOK.has(o.f.kind));
+    if (kind === "sink" && !hasSinkHere) {
+      // the sink under the window (or in the middle of the longest stretch), the dishwasher beside it
+      const sw = std("cab.sink.width"), dw = plainOf("dishwasher")!.size().w;
+      const win = windows.find((w) => w.sill >= baseTop - 10);
+      const free = gaps(fc.s0, fc.s1, blocks);
+      const c0 = win ? (win.x0 + win.x1) / 2 : null;
+      const g = (c0 != null && free.find((x) => x.x0 <= c0 && c0 <= x.x1 && x.x1 - x.x0 >= sw)) || widest(free.filter((x) => x.x1 - x.x0 >= sw));
       if (g) {
-        // stays under the window, but leaves room for a filler at a wall
-        const fe = std("cab.filler.end");
-        const x0 = Math.min(g.x1 - sw - (Math.abs(g.x1 - fc.s1) < 2 ? fe : 0), Math.max(g.x0 + (Math.abs(g.x0 - fc.s0) < 2 ? fe : 0), c - sw / 2));
-        // snap the sink so the cabinets either side come out in whole steps
-        const stepW = std("cab.width.step"), lf = Math.abs(g.x0 - fc.s0) < 2 ? fe : 0;
-        const snapped = g.x0 + lf + Math.round((x0 - g.x0 - lf) / stepW) * stepW;
-        const sx = Math.abs(snapped - x0) < stepW / 2 && snapped + sw <= g.x1 ? snapped : x0;
+        const sx = placeIn(g, sw, c0 != null && g.x0 <= c0 && c0 <= g.x1 ? c0 : (g.x0 + g.x1) / 2);
         put(sx, sw, "sink");
         blocks.push({ x0: sx, x1: sx + sw });
+        const rf = Math.abs(g.x1 - fc.s1) < 2 ? fe : 0, lf = Math.abs(g.x0 - fc.s0) < 2 ? fe : 0;
+        if (g.x1 - rf - (sx + sw) >= dw) blocks.push(appliance(sx + sw, "dishwasher"));
+        else if (sx - (g.x0 + lf) >= dw) blocks.push(appliance(sx - dw, "dishwasher"));
       }
     }
+    if (kind === "stove" && !hasCookHere) {
+      // the range in the middle of the longest stretch, with room for a cabinet either side
+      const rw = plainOf("range")!.size().w;
+      const g = widest(gaps(fc.s0, fc.s1, blocks).filter((x) => x.x1 - x.x0 >= rw));
+      if (g) {
+        const b = appliance(placeIn(g, rw, (g.x0 + g.x1) / 2), "range");
+        blocks.push(b);
+        cooks.push(b);
+        add.push(fixtureAt(f, fc, (b.x0 + b.x1) / 2, { ...plainOf("range_hood")!.size(), w: rw }, "range_hood", "Range hood"));
+        hoods++;
+      }
+    }
+    const before = add.length;
     for (const g of gaps(fc.s0, fc.s1, blocks)) fillGap(g, "base", "filler_base");
+    // on a stove wall the cabinets either side of the range are drawer bases, for pots and pans
+    if (kind === "stove") {
+      const cook = [...cooks, ...kept.filter((o) => COOK.has(o.f.kind))];
+      for (let k = before; k < add.length; k++) {
+        const x = add[k];
+        if (x.cab?.fam !== "base") continue;
+        const w = x.width_mm ?? 600, c = dot(sub(x.center, fc.A), fc.u), x0 = c - w / 2, x1 = c + w / 2;
+        if (!cook.some((b) => Math.abs(b.x0 - x1) < 2 || Math.abs(b.x1 - x0) < 2) || !famOf("drawer").widths.some((v) => Math.abs(v * INCH - w) < 2)) continue;
+        const m = make(x0, w, "drawer");
+        add[k] = m.fx;
+        const at = names.indexOf(cabCode(x.cab, w, x.depth_mm ?? 600, x.height_mm ?? 600));
+        if (at >= 0) names[at] = m.code; else names.push(m.code);
+      }
+    }
   }
   if (opt.wall) {
     const blocks: Block[] = [...doors, ...windows.filter((w) => w.head > wb + 10 && w.sill < wt - 10), ...cornerW];
     for (const o of kept) {
       const k = o.f.kind;
       // over the range is the hood's; over the fridge a cabinet as deep as the fridge
-      if (k === "range" || k === "cooktop") { blocks.push(o); continue; }
+      if (COOK.has(k)) { blocks.push(o); continue; }
       if (k === "fridge") {
         blocks.push(o);
         const room = wt - o.top - I(1), hs = famOf("fridge_wall").heights!.map(I).filter((h) => h <= room + 1);
@@ -341,13 +421,19 @@ export function fillWall(f: SketchFloor, ri: number, edge: number, opt: { base: 
       }
       if (inZone(wb, wt, o.bottom, o.top)) blocks.push(o);
     }
+    blocks.push(...cooks);
     for (const g of gaps(fc.s0, fc.s1, blocks)) fillGap(g, "wall", "filler_wall");
   }
   if (!add.length) return { note: "There's no free stretch on this wall for cabinets (doors, windows and appliances take it up)." };
-  const fixtures = [...(f.fixtures ?? []).filter((_, i) => !replace.has(i)), ...add];
+  let fixtures = [...(f.fixtures ?? []).filter((_, i) => !replace.has(i)), ...add];
+  // a range or cooktop already on this wall with no hood gets one
+  for (const o of kept) if (COOK.has(o.f.kind)) {
+    const at = fixtures.indexOf(o.f), r = at >= 0 ? addHood({ ...f, fixtures }, at) : null;
+    if (r?.added) { fixtures = r.floor.fixtures!; hoods++; }
+  }
   const run = fmtLen(fc.s1 - fc.s0, "ft");
   const count = (list: string[]) => [...list.reduce((m, c) => m.set(c, (m.get(c) ?? 0) + 1), new Map<string, number>())].map(([c, k]) => (k > 1 ? `${c} ×${k}` : c)).join(", ");
-  return { floor: { ...f, fixtures }, note: `Filled ${run} of the ${fc.facing === "south" ? "north" : fc.facing === "north" ? "south" : fc.facing === "east" ? "west" : "east"} wall: ${count(names)}${fillers ? `, and ${fillers} filler${fillers > 1 ? "s" : ""}` : ""}.` };
+  return { floor: { ...f, fixtures }, note: `Filled ${run} of the ${fc.facing === "south" ? "north" : fc.facing === "north" ? "south" : fc.facing === "east" ? "west" : "east"} wall: ${count(names)}${fillers ? `, and ${fillers} filler${fillers > 1 ? "s" : ""}` : ""}${hoods ? `, and a hood over the ${kind === "stove" ? "range" : "cooktop"}` : ""}.` };
 }
 
 /** Families and plain items in the order the Cabinets panel shows them. */
