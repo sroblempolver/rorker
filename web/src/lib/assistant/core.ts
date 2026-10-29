@@ -13,6 +13,7 @@ import { addedFixture, applyEdits, fixtureSize } from "@/lib/plan/edits";
 import { kindFor, OBJECT_KINDS, specOf, topOf, bottomOf, weightOf, type Part } from "@/lib/plan/catalog";
 import { naturalFacing, partnerOf, supportOf, toward } from "@/lib/plan/arrange";
 import { MARK_COLORS, type Mark } from "@/lib/plan/pointing";
+import { markFor } from "@/lib/plan/places";
 import { today } from "@/lib/dates";
 import { RULES } from "@/lib/plan/rules";
 import { inches } from "@/lib/measure";
@@ -136,7 +137,7 @@ export function instructions(me: AssistantBackend["me"], ctx: AssistantContext):
     "Something not in the kind list (a rowing machine, a pool table, a kayak rack): don't settle for a box. Work out from what you know (or look it up with web search when you can) what it really looks like, its real size and weight, then add it as kind other with its name and parts: simple boxes, cylinders and spheres at real sizes and colours that together look like the real thing. Only when you truly can't tell what it is, ask what it looks like.",
     "Sizes: always talk in feet and inches (13' 6\", a 36\" door) and square feet, never metres or millimetres. The tools work in millimetres: 1 inch is 25.4 mm and 1 foot is 304.8 mm, so turn what they say into mm for the tools and turn what the tools return into feet and inches (round to the nearest half inch) when you answer.",
     "Placing: the usual US layouts (width x depth): twin bed 38x75 in (965x1905 mm), full 54x75 in (1372x1905), queen 60x80 in (1524x2032), king 76x80 in (1930x2032), with a nightstand each side of a full or bigger; dining table 72x36 in (1830x915) for 6 or 48x30 in (1220x760) for 4 with a chair at each place; desk 48x24 in (1220x610) with an office chair; sofa facing the TV on a sideboard. Place things the way a designer would: keep about 36 in (915 mm) of walking space and never block a door or doorway. Only add what fits; leave other things as they are unless asked.",
-    "Showing places: whenever you mention a room or spot the person has to pick between or find (\"which bedroom?\"), call point_at first so a coloured dot blinks on each one, then name them by where they are and by colour (\"the bedroom on the south side, blue dot, or the east one, green dot?\"). Rooms often share a name, so tell them apart by their side of the floor (find_in_plan says where each one is). After adding or moving something it is pointed at for you. Dots blink for 10 seconds and then go, so every time you refer to a place again (later in the chat too), call point_at again so it blinks again.",
+    "Showing places: whenever you mention a room or spot the person has to pick between or find (\"which bedroom?\"), call point_at first so a coloured dot blinks on each one, then name them by where they are and by colour (\"the bedroom on the south side, blue dot, or the east one, green dot?\"). Rooms often share a name, so tell them apart by their side of the floor (find_in_plan says where each one is). After adding or moving something it is pointed at for you. Dots blink for 10 seconds and then go, so every time you refer to a place again (later in the chat too), call point_at again so it blinks again. Dots show in 2D and 3D on any floor, but the map doesn't move to them: when they're on a floor or view the person isn't looking at, the app adds a line saying where and a button to go there, so don't say you took them there.",
     // keep these two last: they change per request, and everything above them is cached
     `Today is ${today()}.`,
     ctx.jobId ? `They are looking at the job "${ctx.jobName ?? ctx.jobId}" (id ${ctx.jobId})${ctx.where ? `, at ${ctx.where}` : ""}${ctx.selected ? `, with ${ctx.selected} selected` : ""}. "This job", "here" and "this" refer to that.` : "They are on the jobs list.",
@@ -295,17 +296,6 @@ function readParts(v: unknown): Part[] {
   });
 }
 
-/** Where a place is, for a dot on the plan. */
-function markFor(plan: Plan, id: string, label: string, color: string): Mark | null {
-  const e = findElement(plan, id);
-  if (!e) return null;
-  let pt: [number, number], z = 0;
-  if (e.kind === "fixture") { pt = e.el.center; z = topOf(e.el); }
-  else if (e.kind === "opening") { pt = [(e.el.a[0] + e.el.b[0]) / 2, (e.el.a[1] + e.el.b[1]) / 2]; z = 1000; }
-  else if (e.kind === "room") pt = labelPoint(e.el.polygon);
-  else { const b = bboxOf(e.el.polygon); pt = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]; z = e.kind === "wall" ? 1200 : 0; }
-  return { floor_id: e.floor.id, x: Math.round(pt[0]), y: Math.round(pt[1]), z: Math.round(z), label, color, id };
-}
 
 const date = (v: unknown) => { const s = str(v); if (!s) return undefined; if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error("Dates are YYYY-MM-DD."); return s; };
 
@@ -698,7 +688,7 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
         const m = e ? markFor(d.plan!, id, str(q.label) || elementLabel(e), color) : null;
         if (!m || !e) { missing.push(id); return; }
         marks.push(m);
-        out.push({ id, what: elementLabel(e), dot: cname, where: partOf(e.floor, [m.x, m.y]) });
+        out.push({ id, what: elementLabel(e), dot: cname, floor: e.floor.name, where: partOf(e.floor, [m.x, m.y]) });
       });
       if (!marks.length) throw new Error(`None of ${missing.join(", ")} are in this plan. Use find_in_plan for ids.`);
       changed.marks = marks;

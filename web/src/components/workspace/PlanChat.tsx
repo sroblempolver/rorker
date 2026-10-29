@@ -8,6 +8,9 @@ import type { AssistantSend, Turn } from "@/components/assistant/Assistant";
 import type { AssistantContext } from "@/lib/assistant/core";
 import { FURNISH } from "@/lib/plan/furnish";
 import { speak, stopSpeaking, useDictation, VoiceNote } from "@/components/voice/speech";
+import { AwayButtons } from "@/components/plan/AwayButtons";
+import { awayNote } from "@/lib/plan/away";
+import { getMarks } from "@/lib/plan/marks";
 
 const HINT = "Say what to change: \"put a sofa facing the TV in the living room\", \"move the bed a foot north\", \"turn the desk to face the window\", \"rename the study to Office\".";
 
@@ -35,10 +38,15 @@ export function PlanChat({ send, context, rooms, onChanged, onFurnish }: { send:
     ctl.current = new AbortController();
     try {
       const c = ctxRef.current;
+      const n0 = getMarks().n;
       const r = await send(next.slice(-12), { ...c, where: `Build mode, changing the plan${c.where ? ` (looking at ${c.where})` : ""}` }, ctl.current.signal);
-      setTurns((t) => [...t, { role: "assistant", content: r.text }]);
+      // dots it put up out of view (another floor, the outside): say where, with a button to go
+      const mk = getMarks();
+      const note = mk.n !== n0 && !mk.follow ? awayNote(mk.marks) : "";
+      const said = note ? `${r.text} ${note}` : r.text;
+      setTurns((t) => [...t, { role: "assistant", content: said }]);
       if (r.changed) onChanged?.();
-      if (byVoice) speak(r.text);
+      if (byVoice) speak(said);
     } catch (e) {
       const cancelled = !!(e && typeof e === "object" && "code" in e && (e as { code: string }).code === "cancelled") || (e instanceof DOMException && e.name === "AbortError");
       if (!cancelled) setErr(e instanceof Error ? e.message : "Couldn't reach the assistant.");
@@ -79,9 +87,12 @@ export function PlanChat({ send, context, rooms, onChanged, onFurnish }: { send:
       <div ref={list} className="max-h-[220px] overflow-y-auto scroll-thin space-y-1.5" aria-live="polite">
         {!shown.length && !busy && !dict.listening && <p className="text-[12.5px] text-muted leading-relaxed">{HINT}</p>}
         {shown.map((t, i) => (
-          <p key={turns.length - shown.length + i} className={`text-[13.5px] leading-snug whitespace-pre-wrap ${t.role === "user" ? "text-muted" : "text-text"}`}>
-            {t.role === "user" ? <span>“{t.content}”</span> : t.content}
-          </p>
+          <div key={turns.length - shown.length + i}>
+            <p className={`text-[13.5px] leading-snug whitespace-pre-wrap ${t.role === "user" ? "text-muted" : "text-text"}`}>
+              {t.role === "user" ? <span>“{t.content}”</span> : t.content}
+            </p>
+            {t.role === "assistant" && i === shown.length - 1 && <AwayButtons className="pt-1" />}
+          </div>
         ))}
         {busy && <p className="text-[13px] text-muted inline-flex items-center gap-2"><span className="dot bg-accent animate-pulse" />Changing the plan… <button className="underline" onClick={() => ctl.current?.abort()}>Stop</button></p>}
         {err && <p className="text-[12.5px] text-amber">{err}</p>}

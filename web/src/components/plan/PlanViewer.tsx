@@ -12,6 +12,9 @@ import { ExteriorView, WallView } from "./Elevations";
 import { FloorCanvas, type ColorMode } from "./FloorCanvas";
 import { Plan3D, webglAvailable, type WallMode } from "./Plan3D";
 import { SiteView } from "./SiteView";
+import { AwayChip } from "./AwayButtons";
+import { showMarks, useMarks, type Mark } from "@/lib/plan/marks";
+import { awayFrom, awaySay, setAway, setHere, type AwayTarget } from "@/lib/plan/away";
 import { STATUS_COLOR, STATUS_LABEL, STATUS_ORDER } from "./style";
 import type { PinTarget, ScreenPoint } from "./target";
 
@@ -104,6 +107,29 @@ export function PlanViewer(p: Props) {
   useEffect(() => setGl(webglAvailable()), []);
   // a room opens as its own top view: in 3D when 3D is on, with buttons to face each wall
   const in3d = p.view3d && p.can3d && gl && (level.kind === "exterior" || level.kind === "floor" || level.kind === "room");
+  // the assistant's dots stay where they are; when some are out of view (another floor, the outside),
+  // say so and offer to go there, here on the map and under the assistant's answer
+  const { marks, n: markN, follow } = useMarks();
+  const [pending, setPending] = useState<Mark[]>([]);
+  useEffect(() => { if (marks.length) setPending(follow ? [] : marks); }, [markN]); // eslint-disable-line react-hooks/exhaustive-deps
+  const can3dHere = p.can3d && gl;
+  useEffect(() => { setHere({ plan: p.plan, view: level, in3d: !!in3d, can3d: can3dHere }); }, [p.plan, level, in3d, can3dHere]);
+  useEffect(() => () => { setHere(null); setAway(null); }, []);
+  const away = useMemo(() => awayFrom(p.plan, level, !!in3d, can3dHere, pending), [p.plan, level, in3d, can3dHere, pending]);
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+  const goAway = useCallback((t: AwayTarget) => {
+    if (t.needs3d) p.setView3d(true);
+    p.setLevel(t.go);
+    // they blink again once the map is there
+    const again = pendingRef.current;
+    setTimeout(() => showMarks(again), 60);
+  }, [p]);
+  useEffect(() => {
+    // once every dot is in view there's nothing left to offer
+    if (pending.length && !away.length) setPending([]);
+    setAway({ targets: away, say: awaySay(p.plan, level, away, pending.length), go: goAway });
+  }, [away]); // eslint-disable-line react-hooks/exhaustive-deps
   // the build stage applies to the 3D model and the 2D floor plan
   const staged = in3d || level.kind === "floor" || level.kind === "room";
   const faces = useMemo(() => (floor && room && in3d ? roomSides(floor, room) : []), [floor, room, in3d]);
@@ -350,6 +376,8 @@ export function PlanViewer(p: Props) {
           </button>
         )}
       </div>
+
+      <AwayChip glass={glass} onClose={() => setPending([])} />
 
       {/* hints and legend */}
       <div className="absolute left-3 bottom-3 flex flex-col gap-2 items-start max-w-[calc(100%-80px)] pointer-events-none">

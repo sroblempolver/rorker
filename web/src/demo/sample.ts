@@ -4,11 +4,12 @@ import { attachedToSide, roomSides, siteLayout } from "@/lib/plan/geometry";
 import type { Plan } from "@/lib/plan/types";
 import { addDays, today } from "@/lib/dates";
 
-/** The demo crew, so tagging staff on pins can be tried straight away. */
+/** The demo crew, so tagging staff on pins can be tried straight away: Marco is an employee, the
+ *  electrician and plumber are subs. */
 export const DEMO_CREW: MemberInput[] = [
   { full_name: "Marco Diaz", title: "Site lead", email: "marco@demobuilders.test", phone: "(555) 010-2041", role: "employee" },
-  { full_name: "Aisha Khan", title: "Electrician", email: "aisha@demobuilders.test", phone: "(555) 010-2042", role: "employee" },
-  { full_name: "Tom Reilly", title: "Plumber", email: "tom@demobuilders.test", phone: null, role: "employee" },
+  { full_name: "Aisha Khan", title: "Electrician", email: "aisha@demobuilders.test", phone: "(555) 010-2042", role: "employee", crew: "sub" },
+  { full_name: "Tom Reilly", title: "Plumber", email: "tom@demobuilders.test", phone: null, role: "employee", crew: "sub" },
   { full_name: "Dana Brooks", title: "Office manager", email: "dana@demobuilders.test", phone: null, role: "admin" },
 ];
 

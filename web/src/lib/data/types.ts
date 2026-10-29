@@ -1,3 +1,4 @@
+import type { PlaceTag } from "@/lib/plan/tags";
 import type { Part } from "@/lib/plan/catalog";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
 import type { BuildLook, Furnish } from "@/lib/plan/build";
@@ -16,6 +17,8 @@ export interface Job {
   id: string; company_id: string; name: string; address: string | null; client_name: string | null;
   client_email: string | null; client_phone: string | null; job_type: string; status: JobStatus;
   start_date: string | null; current_plan_id: string | null; created_at: string;
+  /** the client may add notes to the map that the contractor sees (their private notes are always allowed) */
+  client_can_add?: boolean;
 }
 export interface JobInput {
   name: string; address?: string | null; job_type: string; template_id?: string | null;
@@ -106,11 +109,40 @@ export interface ElementState { element_id: string; status: ElementStatus }
 /** Admin: everything, including the company, the team and stage templates. Employee: jobs, pins and
  *  stages only ("editor"). The owner is an admin who can't be removed or demoted. */
 export type MemberRole = "admin" | "employee";
+/** Crew who aren't admins work as one of two kinds. An employee's link shows the rest of the crew's open
+ *  work on their jobs too; a sub's shows only what's tagged to them. Neither ever sees money. */
+export type CrewKind = "employee" | "sub";
 export interface Member {
   id: string; user_id: string | null; full_name: string; email: string | null; phone: string | null;
   title: string | null; role: MemberRole; is_owner: boolean;
+  /** for role "employee": on the payroll or a subcontractor; left out, an employee */
+  crew?: CrewKind;
+  /** the job's client (the homeowner), taggable on that job's pins; not on the team */
+  client?: boolean;
 }
-export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole }
+
+/** The job's client as a person to tag: id "client:<job id>", named from the job's client contact. */
+export const clientMemberId = (jobId: string) => `client:${jobId}`;
+export function clientMember(job: Pick<Job, "id" | "client_name" | "client_email" | "client_phone">): Member | null {
+  if (!job.client_name?.trim()) return null;
+  return { id: clientMemberId(job.id), user_id: null, full_name: job.client_name.trim(), email: job.client_email, phone: job.client_phone, title: "Client", role: "employee", is_owner: false, client: true };
+}
+
+/** One message between the contractor and the job's client: their shared thread, both ways. */
+/** A note the client drops on their map. Private notes only they see; shared ones (when the job lets
+ *  them) become a note pin the contractor sees, tagged to the client. */
+export interface ClientNoteInput {
+  title: string; body: string | null; floor_id: string | null; x: number | null; y: number | null;
+  element_id: string | null; anchor: PinAnchor | null; shared: boolean;
+}
+export interface JobMessage {
+  id: string; job_id: string; from: "contractor" | "client"; author_name: string; body: string | null;
+  /** stored file paths when saved; addresses to show when handed to a page */
+  photos: string[]; created_at: string;
+  /** rooms and objects tagged in the words ("@Bedroom 1 › Bed"); a tap shows them on the map */
+  places?: PlaceTag[];
+}
+export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole; crew?: CrewKind }
 
 /** A no-sign-in link for a team member or a one-time sub. It shows the plan and only the pins that are
  *  theirs: the ones tagged to `member_id` (now and later), plus any listed in `pin_ids`. With a `job_id`
@@ -119,6 +151,8 @@ export interface MemberInput { full_name: string; email?: string | null; phone?:
 export interface ShareLink {
   id: string; job_id: string | null; company_id?: string; token: string; label: string; member_id: string | null; pin_ids: string[];
   expires_at: string | null; revoked_at: string | null; created_at: string;
+  /** who it's for: crew (the default) or the job's client (their progress and money page) */
+  audience?: "crew" | "client";
 }
 export interface ShareLinkInput { label: string; member_id?: string | null; pin_ids?: string[]; expires_at?: string | null }
 /** What a shared link shows. Built by shareView(), never straight from the database. */
@@ -134,6 +168,8 @@ export interface SharedView {
   photos: Record<string, string[]>;
   /** materials this person needs or is picking up, and the ones for these tasks */
   materials?: SharedMaterial[];
+  /** an employee's link only: the rest of the crew's open tasks on this job, to see, not to work on */
+  crew_pins?: Pin[];
 }
 /** A material line as a shared link shows it: what, for which task, and who's getting it. */
 export interface SharedMaterial {
