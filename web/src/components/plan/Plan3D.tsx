@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { JobItem, Pin, PinInput } from "@/lib/data/types";
-import { floorBBox, frontView, labelPoint, pointInPoly, roomSides, sidePoint, unionBBox, type WallSide } from "@/lib/plan/geometry";
+import { edgeDistance, floorBBox, frontView, labelPoint, pointInPoly, roomSides, sidePoint, unionBBox, type WallSide } from "@/lib/plan/geometry";
 import type { ElementStatus, Floor, Plan, Pt, Room } from "@/lib/plan/types";
 import type { ColorMode } from "./FloorCanvas";
 import { hitTest } from "./FloorCanvas";
@@ -68,16 +68,23 @@ type Pick = { type: "fixture" | "wall" | "opening" | "room" | "stair" | "item" |
 
 // --------------------------------------------------------------------------- geometry helpers
 
-function extrude(poly: Pt[], y0: number, y1: number): THREE.BufferGeometry {
+function extrude(poly: Pt[], y0: number, y1: number, holes: Pt[][] = []): THREE.BufferGeometry {
   const shape = new THREE.Shape(poly.map(([x, y]) => new THREE.Vector2(x * S, -y * S)));
+  cutHoles(shape, poly, holes);
   const geo = new THREE.ExtrudeGeometry(shape, { depth: Math.max(0.001, (y1 - y0) * S), bevelEnabled: false });
   geo.rotateX(-Math.PI / 2);
   geo.translate(0, y0 * S, 0);
   return geo;
 }
 
-function flat(poly: Pt[], y: number): THREE.BufferGeometry {
+// stair openings: a hole goes in a floor shape only when it sits wholly inside it
+function cutHoles(shape: THREE.Shape, poly: Pt[], holes: Pt[][]) {
+  for (const h of holes) if (h.length >= 3 && h.every((q) => pointInPoly(q, poly) || edgeDistance(q, poly) < 2)) shape.holes.push(new THREE.Path(h.map(([x, y]) => new THREE.Vector2(x * S, -y * S))));
+}
+
+function flat(poly: Pt[], y: number, holes: Pt[][] = []): THREE.BufferGeometry {
   const shape = new THREE.Shape(poly.map(([x, py]) => new THREE.Vector2(x * S, -py * S)));
+  cutHoles(shape, poly, holes);
   const geo = new THREE.ShapeGeometry(shape);
   geo.rotateX(-Math.PI / 2);
   geo.translate(0, y * S, 0);
@@ -272,7 +279,7 @@ function buildScene(p: Props, mt: Materials): Built {
       const rings = finish ? ex.rings[fi] ?? [] : fl.footprint.length ? fl.footprint : [[[fl.bounds[0], fl.bounds[1]], [fl.bounds[2], fl.bounds[1]], [fl.bounds[2], fl.bounds[3]], [fl.bounds[0], fl.bounds[3]]] as Pt[]];
       for (const ring of rings) {
         const m = wallMaterial(finish ? (fi === 0 ? FINISH.foundation : FINISH.trim) : "#8e877a");
-        const slab = new THREE.Mesh(extrude(ring, finish && fi === 0 ? -ex.rules.plinth : -200, 0), m);
+        const slab = new THREE.Mesh(extrude(ring, finish && fi === 0 ? -ex.rules.plinth : -200, 0, fl.holes), m);
         slab.receiveShadow = true;
         g.add(slab);
         const b = floorBBox(fl);
@@ -288,7 +295,7 @@ function buildScene(p: Props, mt: Materials): Built {
       const bare = fi === 0 ? MATERIAL_BASE.concrete : SUBFLOOR;
       const m = new THREE.MeshStandardMaterial({ color: patterned ? "#ffffff" : statusTint(r.id, finished ? MATERIAL_BASE[mat] : bare), map: patterned ? floorTexture(mat) : null, roughness: 0.85, transparent: true });
       if (p.room && r.id !== p.room.id) { m.opacity = 0.35; }
-      const mesh = new THREE.Mesh(flat(r.polygon, 2), m);
+      const mesh = new THREE.Mesh(flat(r.polygon, 2, fl.holes), m);
       mesh.receiveShadow = true;
       g.add(mesh);
       pick(mesh, { type: "room", id: r.id, floorId: fl.id });
@@ -411,7 +418,13 @@ function buildScene(p: Props, mt: Materials): Built {
     for (const st of look === "slab" ? [] : fl.stairs) {
       const b = st.polygon.reduce((a, q) => [Math.min(a[0], q[0]), Math.min(a[1], q[1]), Math.max(a[2], q[0]), Math.max(a[3], q[1])], [Infinity, Infinity, -Infinity, -Infinity]);
       const sg = new THREE.Group();
-      const n = Math.max(6, Math.round(H / 185));
+      // a drawn stair knows each step: a block up to each tread's (or the landing's) top
+      for (const s of st.steps ?? []) {
+        const step = new THREE.Mesh(extrude(s.polygon, 0, s.top_mm), mt.get("#8a6a48"));
+        step.castShadow = step.receiveShadow = true;
+        sg.add(step);
+      }
+      const n = st.steps?.length ? 0 : Math.max(6, Math.round(H / 185));
       const alongX = b[2] - b[0] > b[3] - b[1];
       const L = alongX ? b[2] - b[0] : b[3] - b[1];
       const m = mt.get("#8a6a48");

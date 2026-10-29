@@ -2,7 +2,7 @@
 // Standards: the company's own default sizes and check limits, grouped, each one typed in feet and
 // inches (or degrees, a count, square feet). A changed number shows the usual one beside it and can be
 // put back. Everything the drawing tool sizes or checks reads from here (lib/plan/standards.ts).
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { allStandards, isChanged, setStd, std, useStandards, type StdDef } from "@/lib/plan/standards";
 import { fmtLen, parseLength, type Units } from "@/lib/plan/units";
 
@@ -14,9 +14,10 @@ const read = (d: StdDef, s: string, u: Units) => {
   return Number.isFinite(n) ? n : null;
 };
 
-export function StandardsPanel({ units = "ft", onClose }: { units?: Units; onClose: () => void }) {
+export function StandardsPanel({ units = "ft", onClose, focus }: { units?: Units; onClose: () => void; /** a standard's key: open on just that one (from a check's "The rule") */ focus?: string | null }) {
   useStandards();
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(() => allStandards().find((d) => d.key === focus)?.label ?? "");
+  useEffect(() => { const d = allStandards().find((x) => x.key === focus); if (d) setQ(d.label); }, [focus]);
   const list = allStandards().filter((d) => !q || `${d.group} ${d.label}`.toLowerCase().includes(q.toLowerCase()));
   const groups = [...new Set(list.map((d) => d.group))];
   return (
@@ -31,7 +32,7 @@ export function StandardsPanel({ units = "ft", onClose }: { units?: Units; onClo
         <div key={g} className="space-y-1.5">
           <p className="label !mb-0 pt-1">{g}</p>
           {list.filter((d) => d.group === g).map((d) => (
-            <div key={d.key}>
+            <div key={d.key} className={d.key === focus ? "rounded-md ring-1 ring-accent p-1.5 -m-1.5" : undefined}>
               <div className="flex items-center gap-2">
                 <label className="flex-1 min-w-0" htmlFor={`std-${d.key}`}>{d.label}</label>
                 <input id={`std-${d.key}`} key={`${d.key}-${std(d.key)}`} className={`input !h-8 !w-28 text-right font-mono ${isChanged(d.key) ? "!border-accent" : ""}`}

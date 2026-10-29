@@ -18,6 +18,11 @@ import { tidyStroke } from "@/lib/plan/pen";
 import { INCH, fmtArea, fmtLen, parseLength, roundLen, type Units } from "@/lib/plan/units";
 import type { IntakePart } from "@/lib/intake/files";
 import { StandardsPanel } from "./StandardsPanel";
+import { StairHole, StairPanel, StairSymbol, onStair } from "./StairPlan";
+import { ChecksPanel, NUDGE_COLOR } from "./ChecksPanel";
+import { floorBelow, floorRise, newStair, stairGeom } from "@/lib/plan/stairs";
+import { runChecks, type Nudge } from "@/lib/plan/checks";
+import { useStandards } from "@/lib/plan/standards";
 
 /** A picture of the drawing to trace over. `mmPerPx` when its scale is known (an AutoCAD drawing). */
 export interface Picture { name: string; url: string; mmPerPx?: number }
@@ -46,10 +51,11 @@ const DOOR_KINDS = [["door", "Door"], ["double_door", "Double door"], ["sliding_
 const SIDES: Side[] = ["north", "east", "south", "west"];
 const OPP: Record<Side, Side> = { north: "south", south: "north", east: "west", west: "east" };
 
-type Tool = "select" | "room" | "pen" | "split" | "door" | "window" | "balcony" | "thing" | "scale" | "match" | "picture";
+type Tool = "select" | "room" | "pen" | "split" | "door" | "window" | "balcony" | "thing" | "scale" | "match" | "picture" | "stairs";
 const TOOLS: { id: Tool; label: string; key: string; help: string; menu?: boolean; picture?: boolean; more?: boolean }[] = [
   { id: "select", label: "Select", key: "v", help: "Click a room, door, window or piece of furniture to change it. Drag a room to move it, a corner to reshape it, or a wall to slide it (the room next door follows). Click a wall of the picked room to see it from the side. Arrow keys nudge. Drag empty space to look around, scroll to zoom." },
   { id: "pen", label: "Walls", key: "e", help: "Draw a room's walls with the mouse or your finger, all the way round. Wobbly lines come out straight and nearly square corners come out square; a wall drawn on a slant keeps its slant. Then type the exact sizes." },
+  { id: "stairs", label: "Stairs", key: "t", help: "Click where the stairs start and drag the way they go up. The steps come from the floor height and your standards; pick the stairs to make them an L or a U, wider, or turn them. The floor above gets the opening." },
   { id: "split", label: "Split room", key: "s", more: true, help: "Drag a line across a room to cut it in two (for two rooms read as one)." },
   { id: "door", label: "Door", key: "d", menu: true, help: "Click a wall between two rooms to put a door in it, or an outside wall for an outside door." },
   { id: "window", label: "Window", key: "w", menu: true, help: "Click an outside wall of a room to add a window there. Click again for another." },
@@ -67,7 +73,7 @@ const OPENINGS = [
   ["window", "Window"], ["balcony", "Balcony / patio door"],
 ] as const;
 
-type Sel = { t: "room" | "door" | "window" | "thing"; i: number } | null;
+type Sel = { t: "room" | "door" | "window" | "thing" | "stair"; i: number } | null;
 type Drag =
   | { k: "pan"; c: Pt; v: View }
   | { k: "newRoom"; a: Pt; b: Pt }
@@ -77,7 +83,9 @@ type Drag =
   | { k: "corner"; i: number; v: number; orig: Pt[] }
   | { k: "wall"; s: Seg; from: Pt; orig: SketchRoom[]; i: number; e: number; moved: boolean }
   | { k: "thing"; i: number; from: Pt; orig: Pt }
-  | { k: "picture"; from: Pt; orig: Pt };
+  | { k: "picture"; from: Pt; orig: Pt }
+  | { k: "stair"; a: Pt; b: Pt }
+  | { k: "stairMove"; i: number; from: Pt; orig: Pt; moved: boolean };
 interface View { x: number; y: number; w: number }
 
 const r10 = (v: number) => Math.round(v / 10) * 10;
@@ -108,6 +116,11 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   const [addingFloor, setAddingFloor] = useState(false);
   // the company's standards, open in the side panel
   const [showStd, setShowStd] = useState(false);
+  // the checks in the side panel, the one picked, and a standard opened from a check
+  const [showChecks, setShowChecks] = useState(false);
+  const [activeNudge, setActiveNudge] = useState<string | null>(null);
+  const [stdFocus, setStdFocus] = useState<string | null>(null);
+  const stdV = useStandards();
   // lengths are shown and typed in feet and inches
   const lu: Units = "ft";
   const svg = useRef<SVGSVGElement>(null);
@@ -220,7 +233,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     const lv = Math.max(...sk.floors.map((f) => f.level)) + 1;
     const name = lv < ORD.length ? `${ORD[lv]} floor` : `Level ${lv}`;
     const f: SketchFloor = copy
-      ? { ...JSON.parse(JSON.stringify(floor)), name, level: lv, fixtures: [], doors: (floor.doors ?? []).filter((d) => d.rooms[1] && !OUTSIDE.test(d.rooms[1])) }
+      ? { ...JSON.parse(JSON.stringify(floor)), name, level: lv, fixtures: [], stairs: [], doors: (floor.doors ?? []).filter((d) => d.rooms[1] && !OUTSIDE.test(d.rooms[1])) }
       : { ...blankFloor(lv), name, ...(how === "outline" ? { guide: floor.level } : {}) };
     commit({ ...sk, floors: [...sk.floors, f] });
     // the same picture underneath, lined up the same way, when copying
@@ -271,6 +284,41 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   };
   const doorSpots = useMemo(() => (floor.doors ?? []).map((d) => doorSpot(floor, d)), [floor]);
   const winSpots = useMemo(() => (floor.windows ?? []).map((w) => windowSpots(floor, w)), [floor]);
+  // stairs on this floor, and the openings cut in it by the stairs coming up from the floor below
+  const rise = floorRise(sk, floor);
+  const lower = floorBelow(sk, floor);
+  const stairGs = useMemo(() => (floor.stairs ?? []).map((st) => stairGeom(st, rise)), [floor, rise, stdV]); // eslint-disable-line react-hooks/exhaustive-deps
+  const holeGs = useMemo(() => (lower ? (lower.stairs ?? []).map((st) => stairGeom(st, floorRise(sk, lower))) : []), [lower, sk, stdV]); // eslint-disable-line react-hooks/exhaustive-deps
+  const stairAt = (p: Pt) => stairGs.findIndex((g) => onStair(g, p));
+  const stairTurn = (d: { a: Pt; b: Pt }) => {
+    // the way it was dragged is the way up, in 15° steps; a plain click goes up the page
+    if (dist(d.a, d.b) < 12 * px) return 270;
+    return (((Math.round((Math.atan2(d.b[1] - d.a[1], d.b[0] - d.a[0]) * 180) / Math.PI / 15) * 15) % 360) + 360) % 360;
+  };
+  // the real rules, run again whenever the drawing or a standard changes
+  const before = useMemo(() => (initial?.floors?.length ? flatten(initial) : null), [initial]);
+  const checks = useMemo(() => runChecks(sk, before), [sk, before, stdV]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fly = (to: Pt, floorIdx: number) => {
+    const from = floorIdx === fi ? v : null;
+    const w = Math.min(Math.max(from?.w ?? 9000, 4000), 9000), h = (w * box.h) / box.w;
+    const target: View = { x: to[0] - w / 2, y: to[1] - h / 2, w };
+    if (!from) { fitted.current = floorIdx; setView(target); return; }
+    const t0 = performance.now();
+    const step = (t: number) => {
+      const k = Math.min(1, (t - t0) / 350), e = 1 - (1 - k) ** 3;
+      setView({ x: from.x + (target.x - from.x) * e, y: from.y + (target.y - from.y) * e, w: from.w + (target.w - from.w) * e });
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  };
+  const pickNudge = (n: Nudge) => {
+    setActiveNudge(n.id); setShowChecks(true); setShowStd(false);
+    if (n.floor !== fi) { setFi(n.floor); setClicks([]); setWall(null); }
+    setSel(n.el ? { t: n.el.t, i: n.el.i } : null);
+    fly(n.at, n.floor);
+  };
+  const ignoreNudge = (id: string, on: boolean) => { const cur = sk.ignored_checks ?? []; commit({ ...sk, ignored_checks: on ? [...new Set([...cur, id])] : cur.filter((x) => x !== id) }); };
+  const openStd = (key: string) => { setStdFocus(key); setShowStd(true); };
 
   const renameRoom = (f: SketchFloor, from: string, to: string): SketchFloor => {
     const same = (n?: string) => !!n && n.trim().toLowerCase() === from.trim().toLowerCase();
@@ -299,6 +347,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       setWall(null);
     } else if (sel.t === "door") setFloor({ ...floor, doors: (floor.doors ?? []).filter((_, i) => i !== sel.i) });
     else if (sel.t === "window") setFloor({ ...floor, windows: (floor.windows ?? []).filter((_, i) => i !== sel.i) });
+    else if (sel.t === "stair") setFloor({ ...floor, stairs: (floor.stairs ?? []).filter((_, i) => i !== sel.i) });
     else setFloor({ ...floor, fixtures: (floor.fixtures ?? []).filter((_, i) => i !== sel.i) });
     setSel(null);
   };
@@ -343,7 +392,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         const ei = es.findIndex((s) => nearSeg(p, s).d < 7 * px && nearSeg(p, s).t > 0.08 && nearSeg(p, s).t < 0.92);
         if (ei >= 0) { setDrag({ k: "wall", s: es[ei], from: p, orig: floor.rooms, i: sel.i, e: ei, moved: false }); return; }
       }
-      const ti = thingAt(p);
+      const ti = thingAt(p), si = ti < 0 ? stairAt(p) : -1;
+      if (si >= 0) { setSel({ t: "stair", i: si }); setDrag({ k: "stairMove", i: si, from: p, orig: floor.stairs![si].at, moved: false }); return; }
       if (ti >= 0) { setSel({ t: "thing", i: ti }); past.current.push(sk); setDrag({ k: "thing", i: ti, from: p, orig: floor.fixtures![ti].center }); return; }
       const di = doorSpots.findIndex((s) => s && nearSeg(p, s).d < 9 * px);
       if (di >= 0) { setSel({ t: "door", i: di }); return; }
@@ -360,6 +410,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       setDrag({ k: "pen", pts: [p] });
     } else if (tool === "split") {
       setDrag({ k: "split", a: p, b: p });
+    } else if (tool === "stairs") {
+      setDrag({ k: "stair", a: [r10(p[0]), r10(p[1])], b: p });
     } else if (tool === "picture") {
       if (bg) setDrag({ k: "picture", from: p, orig: bg.at });
     }
@@ -403,6 +455,11 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       // slides along a wall it's dragged near, back to the wall
       const hug = f0 && ri >= 0 && CATALOG[f0.kind]?.mount !== "ceiling" ? hugWall(floor.rooms[ri].polygon, c, f0.width_mm ?? 600, f0.depth_mm ?? 600, 250) : null;
       setFloor({ ...floor, fixtures: (floor.fixtures ?? []).map((f, i) => (i === drag.i ? { ...f, center: hug?.center ?? c, ...(hug ? { facing: hug.facing } : {}), room: ri >= 0 ? floor.rooms[ri].name : f.room } : f)) }, false);
+    } else if (drag.k === "stair") setDrag({ ...drag, b: p });
+    else if (drag.k === "stairMove") {
+      if (!drag.moved && dist(p, drag.from) < 4 * px) return;
+      if (!drag.moved) { past.current.push(sk); setDrag({ ...drag, moved: true }); }
+      setFloor({ ...floor, stairs: floor.stairs!.map((x, i) => (i === drag.i ? { ...x, at: [r10(drag.orig[0] + p[0] - drag.from[0]), r10(drag.orig[1] + p[1] - drag.from[1])] as Pt } : x)) }, false);
     } else if (drag.k === "picture" && bg) {
       setBgs({ ...bgs, [fi]: { ...bg, at: [drag.orig[0] + p[0] - drag.from[0], drag.orig[1] + p[1] - drag.from[1]] } });
     }
@@ -432,6 +489,12 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       setFloor({ ...floor, rooms: [...floor.rooms, { name, type: "other", polygon: fit }] });
       setSel({ t: "room", i: floor.rooms.length });
       setNote(null);
+      setTool("select");
+      return;
+    }
+    if (d?.k === "stair") {
+      setFloor({ ...floor, stairs: [...(floor.stairs ?? []), newStair(d.a, stairTurn(d))] });
+      setSel({ t: "stair", i: (floor.stairs ?? []).length });
       setTool("select");
       return;
     }
@@ -537,6 +600,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   const door = sel?.t === "door" ? floor.doors?.[sel.i] : null;
   const win = sel?.t === "window" ? floor.windows?.[sel.i] : null;
   const fix = sel?.t === "thing" ? floor.fixtures?.[sel.i] : null;
+  const stair = sel?.t === "stair" ? floor.stairs?.[sel.i] : null;
   const units = [...new Set(sk.floors.flatMap((f) => f.rooms.map((r) => r.unit).filter(Boolean) as string[]))];
   const fontMm = Math.max(120, 12 * px);
   const seen = wall && floor.rooms[wall.room] && wall.edge < floor.rooms[wall.room].polygon.length ? wall : null;
@@ -584,7 +648,10 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(0.75)} aria-label="Zoom in">+</button>
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(1.33)} aria-label="Zoom out">−</button>
         <button className="btn btn-sm btn-ghost" onClick={() => setView(fitView())}>Fit</button>
-        <button className={`btn btn-sm ml-auto ${showStd ? "btn-primary" : "btn-ghost"}`} onClick={() => setShowStd((x) => !x)} title="Your default sizes and the limits the checks use">Standards</button>
+        <button className={`btn btn-sm ml-auto ${showChecks && !showStd ? "btn-primary" : "btn-ghost"}`} onClick={() => { setShowChecks(!(showChecks && !showStd)); setShowStd(false); }} title="Building code and good practice, checked as you draw">
+          {checks.open.length ? <><span className="inline-block h-2 w-2 rounded-full mr-1.5" style={{ background: NUDGE_COLOR[checks.open.some((n) => n.severity === "warn") ? "warn" : "info"] }} />{checks.open.length} to look at</> : "Checks"}
+        </button>
+        <button className={`btn btn-sm ${showStd ? "btn-primary" : "btn-ghost"}`} onClick={() => { setShowStd((x) => !x); setStdFocus(null); }} title="Your default sizes and the limits the checks use">Standards</button>
       </div>
       <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 border-b border-line text-[13px]">
         {sk.floors.map((f, i) => (
@@ -645,6 +712,9 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
                 </g>
               );
             })}
+            {holeGs.map((g, i) => <StairHole key={`h${i}`} g={g} px={px} fontMm={fontMm} />)}
+            {stairGs.map((g, i) => <StairSymbol key={`st${i}`} g={g} px={px} fontMm={fontMm} on={sel?.t === "stair" && sel.i === i} />)}
+            {drag?.k === "stair" && <StairSymbol g={stairGeom(newStair(drag.a, stairTurn(drag)), rise)} px={px} fontMm={fontMm} on ghost />}
             {doorSpots.map((s, i) => s && <line key={`d${i}`} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "door" && sel.i === i ? "#fff" : "#ff6a1f"} strokeWidth={7 * px} strokeLinecap="butt" />)}
             {winSpots.map((list, i) => list.map((s, k) => <line key={`w${i}-${k}`} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "window" && sel.i === i ? "#fff" : "#8fd3f0"} strokeWidth={6 * px} />))}
             {room && room.polygon.map((q, k) => <rect key={k} x={q[0] - 5 * px} y={q[1] - 5 * px} width={10 * px} height={10 * px} fill="#ff6a1f" stroke="#fff" strokeWidth={px} />)}
@@ -662,6 +732,19 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
               return <text key={`len${k}`} x={mx + ((c[0] - mx) / d) * off} y={my + ((c[1] - my) / d) * off} fontSize={fontMm * 0.8} textAnchor="middle" dominantBaseline="middle" fill="#ff6a1f" stroke="#000" strokeWidth={fontMm * 0.12} paintOrder="stroke" style={{ pointerEvents: "none" }}>{fmtLen(Math.hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]), lu, true)}</text>;
             })}
             {seen && (() => { const [a, b] = edgesOf(floor.rooms[seen.room].polygon)[seen.edge]; return <line x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="#ff6a1f" strokeWidth={6 * px} strokeOpacity={0.8} style={{ pointerEvents: "none" }} />; })()}
+            {/* a marker at each check on this floor */}
+            {checks.open.filter((n) => n.floor === fi).map((n) => {
+              // off the room's name when it would sit on it
+              const onLabel = floor.rooms.some((r) => dist(centroid(r.polygon), n.at) < fontMm * 1.5);
+              const at: Pt = onLabel ? [n.at[0], n.at[1] - fontMm * 1.6] : n.at;
+              return (
+              <g key={n.id} className="cursor-pointer" onPointerDown={(e) => { e.stopPropagation(); pickNudge(n); }} onPointerUp={(e) => e.stopPropagation()}>
+                <title>{n.title}</title>
+                <circle cx={at[0]} cy={at[1]} r={(activeNudge === n.id ? 11 : 8) * px} fill={NUDGE_COLOR[n.severity]} stroke="#17181b" strokeWidth={2 * px} />
+                <text x={at[0]} y={at[1]} fontSize={11 * px} fontWeight={800} textAnchor="middle" dominantBaseline="central" fill="#17181b" style={{ pointerEvents: "none" }}>{n.severity === "warn" ? "!" : "i"}</text>
+              </g>
+              );
+            })}
           </svg>
           {!floor.rooms.length && !bg && (
             <p className="absolute inset-x-0 top-1/3 text-center text-muted text-[14px] pointer-events-none px-6">Pick Walls and draw around the first room. Rooms that touch share a wall.</p>
@@ -671,7 +754,10 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         </div>
 
         <aside className="border-t lg:border-t-0 lg:border-l border-line p-3 space-y-3 text-[13.5px] max-h-[62vh] overflow-y-auto scroll-thin">
-          {showStd ? <StandardsPanel units={lu} onClose={() => setShowStd(false)} /> : <>
+          {showStd ? <StandardsPanel units={lu} focus={stdFocus} onClose={() => { setShowStd(false); setStdFocus(null); }} /> : showChecks ? (
+            <ChecksPanel sk={sk} open={checks.open} ignored={checks.ignored} active={activeNudge} onPick={pickNudge} onStd={openStd} onClose={() => setShowChecks(false)}
+              onIgnore={(n) => ignoreNudge(n.id, true)} onUnignore={(n) => ignoreNudge(n.id, false)} />
+          ) : <>
           <p className="text-muted leading-snug">{TOOLS.find((t) => t.id === tool)?.help}</p>
           {note && <p className="text-amber">{note}</p>}
 
@@ -761,6 +847,10 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
               </div>
               <button className="btn btn-sm btn-ghost text-red" onClick={deleteSel}>Delete windows</button>
             </div>
+          )}
+          {stair && sel && (
+            <StairPanel key={sel.i} st={stair} rise={rise} units={lu} onStart={() => past.current.push(sk)} onDelete={deleteSel} onStd={openStd}
+              onChange={(x, h) => setFloor({ ...floor, stairs: floor.stairs!.map((y, i) => (i === sel.i ? x : y)) }, h ?? true)} />
           )}
           {fix && sel && (
             <div className="space-y-2">
