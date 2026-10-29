@@ -17,7 +17,7 @@ export function Loading({ text = "Opening Rorker…" }: { text?: string }) {
   return <div className="h-full grid place-items-center text-muted" style={BG}><p className="flex items-center gap-3"><Logo size={20} /><span>{text}</span></p></div>;
 }
 
-function Problem({ title, body }: { title: string; body: string }) {
+export function Problem({ title, body }: { title: string; body: string }) {
   return (
     <div className="h-full grid place-items-center p-6 text-center" style={BG}>
       <div className="card p-8 max-w-sm">
