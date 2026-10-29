@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import type { Pt } from "@/lib/plan/types";
 import type { Side, Sketch, SketchDoor, SketchFloor } from "@/lib/plan/sketch";
-import { OUTSIDE, doorSpot, hugWall, outsidePieces, edgesOf, flatten, moveCorner, nearSeg, pointInPoly, roomArea, sideOf, snapTo, splitPoly, wallAt, windowSpots, type Seg } from "@/lib/plan/sketchEdit";
+import { OUTSIDE, doorSpot, hugWall, trimOverlap, outsidePieces, edgesOf, flatten, moveCorner, nearSeg, pointInPoly, roomArea, sideOf, snapTo, splitPoly, wallAt, windowSpots, type Seg } from "@/lib/plan/sketchEdit";
 import { bboxOf, centroid } from "@/lib/plan/geometry";
 import { CATALOG } from "@/lib/plan/catalog";
 import { RULES } from "@/lib/plan/rules";
@@ -48,22 +48,23 @@ const SIDES: Side[] = ["north", "east", "south", "west"];
 const OPP: Record<Side, Side> = { north: "south", south: "north", east: "west", west: "east" };
 
 type Tool = "select" | "room" | "pen" | "corners" | "split" | "door" | "window" | "balcony" | "thing" | "eyedrop" | "remove" | "scale" | "match" | "picture";
-const TOOLS: { id: Tool; label: string; key: string; help: string; menu?: boolean; picture?: boolean }[] = [
+const TOOLS: { id: Tool; label: string; key: string; help: string; menu?: boolean; picture?: boolean; more?: boolean }[] = [
   { id: "select", label: "Select", key: "v", help: "Click a room, door, window or piece of furniture to change it. Drag a room to move it with everything in it, a corner to reshape it, or an arrow on a wall to push or pull that wall (the room next door and the furniture against it follow). Q turns the picked room or thing a quarter turn (Shift+Q the other way). Click a wall of the picked room to see it from the side. Arrow keys nudge. Drag empty space to look around, scroll to zoom." },
-  { id: "pen", label: "Draw", key: "e", help: "Draw a room's outline with the mouse or your finger, all the way round. Wobbly lines come out straight and nearly square corners come out square; a wall drawn on a slant keeps its slant. Then type the exact sizes." },
-  { id: "corners", label: "Corners", key: "c", help: "Click each corner of the room in turn. Walls turn in steady steps and lock onto other rooms' corners and walls. Type a length (like 12'6) and press Enter to make the wall that long. Click the first corner, double-click or press Enter to finish; Backspace takes back a corner, Esc stops." },
-  { id: "split", label: "Split room", key: "s", help: "Drag a line across a room to cut it in two (for two rooms read as one)." },
+  { id: "pen", label: "Walls", key: "e", help: "Draw a room's walls with the mouse or your finger, all the way round. Wobbly lines come out straight and nearly square corners come out square; a wall drawn on a slant keeps its slant. Then type the exact sizes." },
+  { id: "split", label: "Split room", key: "s", more: true, help: "Drag a line across a room to cut it in two (for two rooms read as one)." },
   { id: "door", label: "Door", key: "d", menu: true, help: "Click a wall between two rooms to put a door in it, or an outside wall for an outside door." },
   { id: "window", label: "Window", key: "w", menu: true, help: "Click an outside wall of a room to add a window there. Click again for another." },
   { id: "balcony", label: "Balcony", key: "b", menu: true, help: "Click an outside wall of a room. Upstairs that adds a balcony with a patio door onto it; on the ground floor, a patio door out to the garden." },
   { id: "thing", label: "Furniture", key: "f", help: "Cabinets, sinks, toilets, beds, appliances. Pick one in the tray under the plan, then click where it goes. Near a wall it backs onto the wall and faces the room. Shift-click to keep placing the same thing." },
-  { id: "eyedrop", label: "Copy", key: "i", help: "Click a piece of furniture to pick up another one just like it, same size, then click where it goes. Or click a room to copy its kind (kitchen, bedroom), then click the rooms that should be the same." },
-  { id: "remove", label: "Remove", key: "x", help: "Click a room, door, window or piece of furniture to take it out. Undo brings it back." },
-  { id: "scale", label: "Set scale", key: "k", picture: true, help: "Make the drawing underneath the right size: click both ends of something you know the length of (a wall, a dimension line), then type how long it is." },
-  { id: "match", label: "Line up", key: "l", picture: true, help: "Lines the drawing up with the rooms: click a corner on the picture, then the room corner it should sit on. Do it for two corners far apart." },
-  { id: "picture", label: "Move picture", key: "p", picture: true, help: "Drag the picture underneath to move it." },
-  { id: "room", label: "Box room", key: "r", help: "Drag out a rectangular room, corner to corner. Edges snap to the rooms beside it so they share the wall." },
+  { id: "corners", label: "Corners", key: "c", more: true, help: "Click each corner of the room in turn. Walls turn in steady steps and lock onto other rooms' corners and walls. Type a length (like 12'6) and press Enter to make the wall that long. Click the first corner, double-click or press Enter to finish; Backspace takes back a corner, Esc stops." },
+  { id: "eyedrop", label: "Copy", key: "i", more: true, help: "Click a piece of furniture to pick up another one just like it, same size, then click where it goes. Or click a room to copy its kind (kitchen, bedroom), then click the rooms that should be the same." },
+  { id: "remove", label: "Remove", key: "x", more: true, help: "Click a room, door, window or piece of furniture to take it out. Undo brings it back." },
+  { id: "scale", label: "Set scale", key: "k", picture: true, more: true, help: "Make the drawing underneath the right size: click both ends of something you know the length of (a wall, a dimension line), then type how long it is." },
+  { id: "match", label: "Line up", key: "l", picture: true, more: true, help: "Lines the drawing up with the rooms: click a corner on the picture, then the room corner it should sit on. Do it for two corners far apart." },
+  { id: "picture", label: "Move picture", key: "p", picture: true, more: true, help: "Drag the picture underneath to move it." },
+  { id: "room", label: "Box room", key: "r", more: true, help: "Drag out a rectangular room, corner to corner. Edges snap to the rooms beside it so they share the wall." },
 ];
+const DRAFT = "rorker-drawing-draft";
 // what the Doors & windows menu puts in a wall
 const OPENINGS = [
   ["door", "Door"], ["double_door", "Double door"], ["sliding_door", "Patio / sliding door"], ["garage_door", "Garage door"], ["opening", "Opening (no door)"],
@@ -199,12 +200,28 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   const zoom = (k: number) => setView({ x: v.x + v.w / 2 - (v.w * k) / 2, y: v.y + vh / 2 - (vh * k) / 2, w: v.w * k });
 
   // changing the sketch, with undo
-  const commit = (next: Sketch) => { past.current.push(sk); if (past.current.length > 80) past.current.shift(); setSk(next); };
+  const future = useRef<Sketch[]>([]);
+  const commit = (next: Sketch) => { past.current.push(sk); if (past.current.length > 80) past.current.shift(); future.current = []; setSk(next); };
   const setFloor = (f: SketchFloor, keepHistory = true) => {
     const next = { ...sk, floors: sk.floors.map((x, i) => (i === fi ? f : x)) };
     if (keepHistory) commit(next); else setSk(next);
   };
-  const undo = () => { const p = past.current.pop(); if (p) { setSk(p); setSel(null); } };
+  const undo = () => { const p = past.current.pop(); if (p) { future.current.push(sk); setSk(p); setSel(null); } };
+  const redo = () => { const n = future.current.pop(); if (n) { past.current.push(sk); setSk(n); setSel(null); } };
+
+  // kept in this browser as you go, so a crash or a closed tab doesn't lose the drawing
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [draft, setDraft] = useState<{ sk: Sketch; at: string } | null>(() => {
+    try { const d = JSON.parse(localStorage.getItem(DRAFT) ?? "null"); return d?.sk?.floors?.some((f: SketchFloor) => f.rooms.length) ? d : null; } catch { return null; }
+  });
+  const saveNow = () => {
+    try { localStorage.setItem(DRAFT, JSON.stringify({ sk, at: new Date().toISOString() })); setSavedAt(new Date()); } catch { /* storage full or blocked */ }
+  };
+  useEffect(() => {
+    if (draft || !sk.floors.some((f) => f.rooms.length)) return;
+    const t = setTimeout(saveNow, 800);
+    return () => clearTimeout(t);
+  }, [sk]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // a new floor: empty, or a copy of the one you're on (rooms, inside doors and windows; no furniture)
   const ORD = ["Ground", "First", "Second", "Third", "Fourth", "Fifth"];
@@ -337,7 +354,10 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     setTyped("");
     if (poly.length < 3 || roomArea({ name: "", polygon: poly }) < 0.3) { setNote("A room needs at least three corners around some floor."); return; }
     const name = uniqueName(`Room ${floor.rooms.length + 1}`);
-    setFloor({ ...floor, rooms: [...floor.rooms, { name, type: "other", polygon: poly }] });
+    // rooms never overlap: where it runs into a neighbour it stops at the neighbour's wall
+    const fit = trimOverlap(poly, floor.rooms.map((r) => r.polygon));
+    if (!fit) { setNote("That's on top of another room. Draw it next to it (or use Split room to divide a room)."); return; }
+    setFloor({ ...floor, rooms: [...floor.rooms, { name, type: "other", polygon: fit }] });
     setSel({ t: "room", i: floor.rooms.length });
   };
   const addCorner = (q: Pt) => {
@@ -351,6 +371,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.target instanceof Element && editable(e.target)) return;
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { e.preventDefault(); redo(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); return; }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       // corner by corner: type a wall's length, Enter puts it down (or finishes), Backspace takes back
@@ -481,7 +502,9 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       const [x0, x1] = [Math.min(d.a[0], d.b[0]), Math.max(d.a[0], d.b[0])], [y0, y1] = [Math.min(d.a[1], d.b[1]), Math.max(d.a[1], d.b[1])];
       if (x1 - x0 < 400 || y1 - y0 < 400) { setNote("Drag out a bigger box to make a room."); return; }
       const name = uniqueName(`Room ${floor.rooms.length + 1}`);
-      setFloor({ ...floor, rooms: [...floor.rooms, { name, type: "other", polygon: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] }] });
+      const fit = trimOverlap([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], floor.rooms.map((r) => r.polygon));
+      if (!fit) { setNote("That's on top of another room. Draw it next to it (or use Split room to divide a room)."); return; }
+      setFloor({ ...floor, rooms: [...floor.rooms, { name, type: "other", polygon: fit }] });
       setSel({ t: "room", i: floor.rooms.length });
       return;
     }
@@ -489,7 +512,10 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       const poly = tidyStroke(d.pts, px < 8 ? INCH : 6 * INCH);
       if (!poly) { setNote("Draw the room's outline all the way round, like drawing a box on paper."); return; }
       const name = uniqueName(`Room ${floor.rooms.length + 1}`);
-      setFloor({ ...floor, rooms: [...floor.rooms, { name, type: "other", polygon: poly.map((q) => snapCorner(snapPt(q))) }] });
+      // rooms never overlap: where it runs into a neighbour it stops at the neighbour's wall
+      const fit = trimOverlap(poly.map((q) => snapCorner(snapPt(q))), floor.rooms.map((r) => r.polygon));
+      if (!fit) { setNote("That's on top of another room. Draw it next to it (or use Split room to divide a room)."); return; }
+      setFloor({ ...floor, rooms: [...floor.rooms, { name, type: "other", polygon: fit }] });
       setSel({ t: "room", i: floor.rooms.length });
       setNote(null);
       setTool("select");
@@ -631,17 +657,25 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
 
   const done = () => {
     const units = [...new Set(sk.floors.flatMap((f) => f.rooms.map((r) => r.unit).filter(Boolean) as string[]))];
+    try { localStorage.removeItem(DRAFT); } catch { /* nothing kept */ }
     onDone({ ...sk, units: units.length > 1 ? units.map((name) => ({ name })) : undefined }, bgs);
   };
 
   return (
     <section className="card overflow-hidden" aria-label="Draw the plan">
+      {draft && (
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-line bg-panel text-[13px]">
+          <span>You have a drawing from {new Date(draft.at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })} that wasn&apos;t finished.</span>
+          <button className="btn btn-sm btn-primary" onClick={() => { commit(draft.sk); setFi(0); setDraft(null); setTool("select"); setView(null); }}>Pick up where I left off</button>
+          <button className="btn btn-sm btn-ghost" onClick={() => { try { localStorage.removeItem(DRAFT); } catch { /* nothing kept */ } setDraft(null); }}>Start fresh</button>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b border-line bg-panel">
-        {TOOLS.filter((t) => !t.menu && t.id !== "room" && (pictures.length || !t.picture)).flatMap((t) => [
-          <button key={t.id} onClick={() => { setTool(t.id); setClicks([]); }} title={`${t.label} (${t.key.toUpperCase()})`}
+        {TOOLS.filter((t) => !t.menu && !t.more).flatMap((t) => [
+          <button key={t.id} onClick={() => pickTool(t.id)} title={`${t.label} (${t.key.toUpperCase()})`}
             className={`btn btn-sm ${tool === t.id ? "btn-primary" : "btn-ghost"}`}>{t.label}</button>,
           // doors, windows and balconies in one menu, after Split room
-          ...(t.id === "split" ? [
+          ...(t.id === "pen" ? [
             <select key="openings" aria-label="Doors and windows" title="Pick one, then click a wall"
               className={`btn btn-sm !pr-2 ${TOOLS.find((x) => x.id === tool)?.menu ? "btn-primary" : "btn-ghost"}`}
               value={tool === "door" ? doorKind : tool === "window" || tool === "balcony" ? tool : ""}
@@ -651,8 +685,15 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             </select>,
           ] : []),
         ])}
+        <select aria-label="More tools" className={`btn btn-sm !pr-2 ${TOOLS.find((x) => x.id === tool)?.more ? "btn-primary" : "btn-ghost"}`}
+          value={TOOLS.find((x) => x.id === tool)?.more ? tool : ""} onChange={(e) => pickTool(e.target.value as Tool)}>
+          <option value="" disabled>More</option>
+          {TOOLS.filter((t) => t.more && (pictures.length || !t.picture)).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+        </select>
         <span className="mx-1 h-5 w-px bg-line" />
         <button className="btn btn-sm btn-ghost" onClick={undo} disabled={!past.current.length} title="Undo (Ctrl+Z)">Undo</button>
+        <button className="btn btn-sm btn-ghost" onClick={redo} disabled={!future.current.length} title="Redo (Ctrl+Shift+Z)">Redo</button>
+        <button className="btn btn-sm btn-ghost" onClick={saveNow} title="Saved in this browser as you go">{savedAt ? `Saved ${savedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Save"}</button>
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(0.75)} aria-label="Zoom in">+</button>
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(1.33)} aria-label="Zoom out">−</button>
         <button className="btn btn-sm btn-ghost" onClick={() => setView(fitView())}>Fit</button>
@@ -792,7 +833,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             })()}
           </svg>
           {!floor.rooms.length && !bg && (
-            <p className="absolute inset-x-0 top-1/3 text-center text-muted text-[14px] pointer-events-none px-6">Pick Draw and draw the outline of the first room. Rooms that touch share a wall.</p>
+            <p className="absolute inset-x-0 top-1/3 text-center text-muted text-[14px] pointer-events-none px-6">Pick Walls and draw around the first room. Rooms that touch share a wall.</p>
           )}
         </div>
         {tool === "thing" && <CatalogTray armed={thing} units={lu} startRoom={tabForRoom((sel?.t === "room" ? floor.rooms[sel.i] : hover ? floor.rooms[roomAt(hover)] : undefined)?.type)} onPick={(it) => { setThing(it); setNote(null); }} />}
