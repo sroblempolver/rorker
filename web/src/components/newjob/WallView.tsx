@@ -2,7 +2,7 @@
 // One wall of a room seen from the side, standing in the room and facing it: its doors and windows at
 // their real size and height, and the furniture standing against it, dragged along the wall to where they
 // really are. Doors and windows can be added and resized here. Everything is written back to the sketch, so the plan above moves with it.
-import { useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import type { Pt } from "@/lib/plan/types";
 import type { SketchDoor, SketchFixture, SketchFloor, SketchWindow } from "@/lib/plan/sketch";
 import { CATALOG, bottomOf, topOf } from "@/lib/plan/catalog";
@@ -11,7 +11,7 @@ import { doorSpot, doorWall, doorWidth, edgesOf, outsidePieces, param, pointInPo
 
 // standard sizes: what a new door or window starts as, and what one without its own numbers is drawn at
 const WIN = { width: 1200, height: 1200, sill: 900 };
-const DOOR_W: Record<string, number> = { door: 820, double_door: 1500, sliding_door: 1800, opening: 1200, garage_door: 2400 };
+export const DOOR_W: Record<string, number> = { door: 820, double_door: 1500, sliding_door: 1800, opening: 1200, garage_door: 2400 };
 const DOOR_H: Record<string, number> = { opening: 2400, garage_door: 2300 };
 const doorH = (d: SketchDoor) => d.height_mm ?? DOOR_H[d.kind ?? "door"] ?? 2100;
 const BALCONY_DEPTH = 1500;
@@ -33,8 +33,10 @@ export function wallFromInside(poly: Pt[], e: number): Seg {
   return ux * rx + uy * ry >= 0 ? [a, b] : [b, a];
 }
 
-export function WallView({ floor, room, edge, height = 2700, units = "ft", onChange, onClose, onEdge }: {
+export function WallView({ floor, room, edge, height = 2700, units = "ft", addOnOpen, onAdded, onChange, onClose, onEdge }: {
   floor: SketchFloor; room: number; edge: number; height?: number; units?: Units;
+  /** add this as soon as the wall opens (picked from the plan's Doors & windows menu) */
+  addOnOpen?: "balcony" | null; onAdded?: () => void;
   /** `history`: false while dragging (the change before the drag was already kept for undo) */
   onChange: (f: SketchFloor, history?: boolean) => void; onClose: () => void; onEdge: (e: number) => void;
 }) {
@@ -183,6 +185,11 @@ export function WallView({ floor, room, edge, height = 2700, units = "ft", onCha
     onChange({ ...floor, doors: [...(floor.doors ?? []), door] });
     setSel({ t: "door", i: (floor.doors ?? []).length, x0: 0, x1: 0 });
   };
+  useEffect(() => {
+    if (!addOnOpen) return;
+    add(addOnOpen);
+    onAdded?.();
+  }, [addOnOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   const remove = () => {
     if (!sel) return;
     if (sel.t === "thing") { onChange({ ...floor, fixtures: floor.fixtures!.filter((_, i) => i !== sel.i) }); setSel(null); return; }
