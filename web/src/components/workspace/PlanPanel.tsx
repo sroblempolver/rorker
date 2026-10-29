@@ -88,14 +88,15 @@ export function QuestionsCard({ plan, onAnswer, onShow }: { plan: PlanRow; onAns
   );
 }
 
-export function PlanPanel({ plan, runs, aiAvailable, onUpload, onAnswer, onShow }: {
+export function PlanPanel({ plan, runs, aiAvailable, onUpload, onAnswer, onShow, title = "Plan" }: {
   plan: PlanRow | null; runs: PlanRun[]; aiAvailable: boolean; onUpload: (f: File) => Promise<void>; onAnswer: (a: Record<string, string>) => Promise<void>; onShow: (ids: string[], q?: Q) => void;
+  title?: string;
 }) {
   const s = plan?.data.source;
   const unidentified = plan ? plan.data.floors.reduce((n, f) => n + ((plan.data.stats[f.id] as { unidentified?: number } | undefined)?.unidentified ?? 0), 0) : 0;
   return (
     <div className="p-4 space-y-4">
-      <h2 className="font-display text-[25px] font-extrabold uppercase leading-none">Plan</h2>
+      <h2 className="font-display text-[25px] font-extrabold uppercase leading-none">{title}</h2>
       {plan && <QuestionsCard key={plan.id} plan={plan} onAnswer={onAnswer} onShow={onShow} />}
       {plan && s && (
         <div className="card p-4 space-y-1 text-[14px]">

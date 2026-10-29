@@ -90,6 +90,12 @@ When a read is wrong, New project's review has **Fix it by drawing** (and the st
 myself**): rooms dragged out over the uploaded drawing, split, reshaped by corner or wall, doors, windows,
 things, scale from one known length, and "Line up" to sit the picture under the rooms.
 
+Inside a job, **Build** (the button over Pin on the map, or `B`) changes the house where it stands: put a
+door or window in a wall, slide or resize one (US standard sizes in `web/src/lib/plan/standard.ts`), move
+a wall (the room next door follows), or split a room. Changes are edits on top of the drawing
+(`web/src/lib/plan/house.ts`), so Undo and "Put back as drawn" work and pins keep their ids. The plan's
+questions, a new drawing and talking to the plan live there too (they used to be the Plan tab).
+
 ## Deploy (Railway + Supabase)
 
 Everything is new for this project: a new GitHub repo, Supabase project, Railway project and API key.

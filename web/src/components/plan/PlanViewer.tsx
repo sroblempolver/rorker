@@ -62,6 +62,10 @@ interface Props {
   onFurnish?: (f: Furnish) => void;
   /** how far the house is built: set by the stage picked in Stages, finished when none is */
   look?: BuildLook;
+  /** Build mode (change the house): the button that turns it on and off; left out, no button */
+  build?: { on: boolean; toggle: () => void };
+  /** what a click does while the map is waiting for one (a build tool), instead of dropping a pin */
+  placeHint?: string;
 }
 
 const DEPTH: Level["kind"][] = ["site", "exterior", "floor", "room", "wall"];
@@ -136,7 +140,7 @@ export function PlanViewer(p: Props) {
     const t = setTimeout(() => setHintOn(false), 6000);
     return () => clearTimeout(t);
   }, [level.kind, in3d]);
-  const hint = p.pinMode ? "Click anywhere to drop the pin · Esc to cancel" :
+  const hint = p.pinMode ? p.placeHint ?? "Click anywhere to drop the pin · Esc to cancel" :
     in3d && level.kind === "exterior" ? "Drag to look around · zoom in to open the building, keep zooming to step into a floor · right-click or Pin to flag the roof or a wall" :
     in3d && p.readOnly ? "Drag to look around · right-drag to slide · click a flag to see the task" :
     in3d && level.kind === "room" ? "Click an object to select it, then drag it to move · drag anywhere else to look around · Face a wall at the top · right-click to pin" :
@@ -287,7 +291,14 @@ export function PlanViewer(p: Props) {
 
       {/* tools */}
       <div className="absolute right-3 bottom-3 flex flex-col items-end gap-1.5">
-        {!p.readOnly && <button onClick={() => p.setPinMode(!p.pinMode)} title="Pick up a pin: your cursor becomes a pin, click anywhere to drop it (right-click or press and hold works too)" aria-pressed={p.pinMode}
+        {!p.readOnly && p.build && (
+          <button onClick={p.build.toggle} aria-pressed={p.build.on} title={p.build.on ? "Done changing the house (B)" : "Build mode: add doors and windows, move walls, split rooms (B)"}
+            className={`self-end h-10 rounded-[4px] border inline-flex items-center gap-1.5 px-3 font-display font-bold tracking-[0.08em] uppercase text-[13px] ${p.build.on ? "bg-accent border-accent text-accent-ink" : `${glass} text-text hover:bg-panel-3`}`}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 4l6 6-3 3-6-6z" /><path d="M11 7L3 15l3 3 8-8" /><path d="M3 21h8" /></svg>
+            {p.build.on ? "Done" : "Build"}
+          </button>
+        )}
+        {!p.readOnly && !p.build?.on && <button onClick={() => p.setPinMode(!p.pinMode)} title="Pick up a pin: your cursor becomes a pin, click anywhere to drop it (right-click or press and hold works too)" aria-pressed={p.pinMode}
           className={`self-end h-10 rounded-[4px] border inline-flex items-center gap-1.5 px-3 font-display font-bold tracking-[0.08em] uppercase text-[13px] ${p.pinMode ? "bg-accent border-accent text-accent-ink" : `${glass} text-text hover:bg-panel-3`}`}>
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M6 22V3" /><path d="M6 3h12l-3 4 3 4H6" fill="currentColor" /></svg>
           {p.pinMode ? "Cancel" : "Pin"}

@@ -1,5 +1,5 @@
 "use client";
-// Talk to the plan: in the Plan tab, say what to change ("put a sofa facing the TV in the living room",
+// Talk to the plan: in Build mode, say what to change ("put a sofa facing the TV in the living room",
 // "move the bed 30 cm north", "rename the study to Office") and the assistant changes the plan. The mic
 // is the main button; the keyboard button opens a line to type. Quick buttons furnish a room or the
 // whole house in one tap.
@@ -35,7 +35,7 @@ export function PlanChat({ send, context, rooms, onChanged, onFurnish }: { send:
     ctl.current = new AbortController();
     try {
       const c = ctxRef.current;
-      const r = await send(next.slice(-12), { ...c, where: `the Plan tab, changing the plan${c.where ? ` (looking at ${c.where})` : ""}` }, ctl.current.signal);
+      const r = await send(next.slice(-12), { ...c, where: `Build mode, changing the plan${c.where ? ` (looking at ${c.where})` : ""}` }, ctl.current.signal);
       setTurns((t) => [...t, { role: "assistant", content: r.text }]);
       if (r.changed) onChanged?.();
       if (byVoice) speak(r.text);
