@@ -2,7 +2,7 @@
 // the sample house). At the top a cursor works it for 30 seconds (explainer.ts); the visitor can take
 // the controls at any time. Further down, each section sets what the house shows, and its buttons,
 // sliders and cards change the house live. Features come from features.ts.
-import { StrictMode, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { StrictMode, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { Vector3 } from "three";
 import { webglAvailable } from "@/components/plan/Plan3D";
@@ -19,6 +19,10 @@ import { CHAPTERS, CREW, EMPTY_HUD, explainer, type Ctx, type Hud, type Note, ty
 import { FEATURES, type Feature, type ScenePreset } from "./features";
 
 const APP = "https://build.rorker.com/";
+// early-access sign-ups land in the early_access table (supabase/migrations/20261029000001_early_access.sql);
+// the publishable key can only add a row, never read the list
+const SIGNUP_URL = "https://uofdydjfwdsvaribvsfy.supabase.co/rest/v1/early_access";
+const SIGNUP_KEY = "sb_publishable_WJumqpPot9tvGyBPbpYhcg_pdJYhm7F";
 const S = 0.001;
 type V3 = [number, number, number];
 
@@ -495,7 +499,7 @@ function Header() {
         <a href="#how">How it works</a>
         <a href="#features">Features</a>
         <a href="#new">What&apos;s new</a>
-        <a href={APP} className="btn btn-solid btn-sm">Open the app</a>
+        <a href="#early" className="btn btn-solid btn-sm">Get early access</a>
       </nav>
     </header>
   );
@@ -506,7 +510,7 @@ function Footer() {
     <footer className="foot">
       <span className="foot-mark" dangerouslySetInnerHTML={{ __html: symbolSvg }} />
       <span>Rorker. Job software for contractors.</span>
-      <a href={APP}>build.rorker.com</a>
+      <a href="#early">Get early access</a>
       <span className="mono">© 2026</span>
     </footer>
   );
@@ -531,7 +535,7 @@ function HeroSection(p: {
           {p.driving
             ? <button className="btn btn-solid" onClick={p.onReplay}>Play the demo again</button>
             : <button className="btn btn-solid" onClick={p.onTake} disabled={!p.gl}>Take the controls</button>}
-          <a className="btn btn-line" href={APP} data-hud="open-app">Open the app</a>
+          <a className="btn btn-line" href="#early" data-hud="open-app">Get early access</a>
         </div>
       </div>
 
@@ -836,12 +840,53 @@ function EndSection({ onReplay }: { onReplay: () => void }) {
           <li>Your crew gets a link, not another app.</li>
           <li>The assistant does the typing.</li>
         </ul>
-        <div className="row center">
-          <a className="btn btn-solid" href={APP}>Open the app</a>
-          <button className="btn btn-line" onClick={onReplay}>Watch the 30 seconds again</button>
-        </div>
+        <EarlyAccess />
+        <button className="btn btn-line" onClick={onReplay}>Watch the 30 seconds again</button>
       </div>
     </section>
+  );
+}
+
+const TRADES = ["General contractor", "Remodeler", "Builder", "Electrician", "Plumber", "HVAC", "Painter", "Flooring", "Other"];
+const CREWS = ["Just me", "2 to 5", "6 to 20", "21 to 50", "More than 50"];
+
+function EarlyAccess() {
+  const [state, setState] = useState<"open" | "sending" | "in" | "already" | "failed">("open");
+  const send = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const val = (k: string) => String(f.get(k) ?? "").trim() || null;
+    setState("sending");
+    try {
+      const r = await fetch(SIGNUP_URL, {
+        method: "POST",
+        headers: { apikey: SIGNUP_KEY, "content-type": "application/json", prefer: "return=minimal" },
+        body: JSON.stringify({ email: val("email"), name: val("name"), company: val("company"), trade: val("trade"), crew_size: val("crew"), source: "rorker.com" }),
+      });
+      setState(r.ok ? "in" : r.status === 409 ? "already" : "failed");
+    } catch { setState("failed"); }
+  };
+  if (state === "in" || state === "already") {
+    return (
+      <div className="early done" id="early">
+        <b>{state === "in" ? "You're on the list." : "You're already on the list."}</b>
+        <span>We&apos;ll email you when your spot opens. Early crews use it free while we build.</span>
+      </div>
+    );
+  }
+  return (
+    <form className="early" id="early" onSubmit={send}>
+      <div className="early-head"><b>Get early access</b><span>Rorker opens to a few crews at a time. Early crews use it free while we build.</span></div>
+      <div className="early-grid">
+        <input name="email" type="email" required maxLength={254} placeholder="Work email" aria-label="Work email" autoComplete="email" />
+        <input name="name" maxLength={120} placeholder="Your name" aria-label="Your name" autoComplete="name" />
+        <input name="company" maxLength={160} placeholder="Company" aria-label="Company" autoComplete="organization" />
+        <select name="trade" aria-label="Trade" defaultValue=""><option value="" disabled>Trade</option>{TRADES.map((t) => <option key={t}>{t}</option>)}</select>
+        <select name="crew" aria-label="Crew size" defaultValue=""><option value="" disabled>Crew size</option>{CREWS.map((t) => <option key={t}>{t}</option>)}</select>
+        <button className="btn btn-solid" disabled={state === "sending"}>{state === "sending" ? "Sending" : "Save my spot"}</button>
+      </div>
+      {state === "failed" && <p className="early-err">That didn&apos;t go through. Check the email and try again.</p>}
+    </form>
   );
 }
 

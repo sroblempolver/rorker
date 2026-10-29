@@ -65,7 +65,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 
 /* ---------------------------------------------------------------- the top: live explainer HUD */
 main { position: relative; z-index: 2; pointer-events: none; }
-main .card, main button, main a, main input, main .grid, main .feat, main .end-in, .hero > * { pointer-events: auto; }
+main .card, main button, main a, main input, main select, main form, main .grid, main .feat, main .end-in, .hero > * { pointer-events: auto; }
 .hero { position: relative; height: 100vh; height: 100svh; min-height: 640px; }
 .hero > .scroll-cue, .hero > .log, .hero > .banner, .hero > .endcard, .hero > .answer, .hero > .hud-top { pointer-events: none; }
 .hero-copy { position: absolute; left: 28px; top: 96px; max-width: 520px; }
@@ -315,3 +315,17 @@ kbd { font: 600 10px/1 var(--mono); padding: 3px 4px; border: 1px solid currentC
   *, *::before, *::after { animation: none !important; transition: none !important; }
   html { scroll-behavior: auto; }
 }
+
+/* early access */
+.early { width: 100%; max-width: 680px; margin: 34px 0 22px; padding: 22px; background: rgba(23,24,27,0.94); border: 1px solid var(--line-2); border-top: 3px solid var(--orange); border-radius: 3px; text-align: left; }
+.early-head { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.early-head b, .early.done b { font: 900 30px/1 var(--stencil); text-transform: uppercase; }
+.early-head span, .early.done span { color: #cfcabf; font-size: 15px; }
+.early.done { display: flex; flex-direction: column; gap: 8px; border-top-color: var(--green, #3fb46a); }
+.early-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.early-grid input, .early-grid select { height: 46px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 2px; color: var(--text); padding: 0 12px; font: 500 16px/1 var(--body); outline: none; width: 100%; }
+.early-grid input:first-child { grid-column: 1 / -1; }
+.early-grid input:focus, .early-grid select:focus { border-color: var(--chalk); }
+.early-grid .btn { height: 46px; justify-content: center; grid-column: 1 / -1; }
+.early-err { margin: 10px 0 0; color: #ff8a8d; font-size: 14px; }
+@media (max-width: 560px) { .early-grid { grid-template-columns: 1fr; } }
