@@ -146,6 +146,18 @@ export interface JobMessage {
   /** rooms and objects tagged in the words ("@Bedroom 1 › Bed"); a tap shows them on the map */
   places?: PlaceTag[];
 }
+/** The team board: the office writes to everyone or to picked people, and each crew member answers the
+ *  office. A member sees what's to everyone, what's to them, and their own answers. */
+export interface TeamMessage {
+  id: string; from: "office" | "crew"; author_name: string;
+  /** the crew member who wrote it (an answer); null from the office */
+  member_id: string | null;
+  /** who it's for: everyone (null) or these members; an answer goes to the office */
+  to: string[] | null;
+  body: string | null;
+  /** stored file paths when saved; addresses to show when handed to a page */
+  photos: string[]; created_at: string;
+}
 export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole; crew?: CrewKind }
 
 /** A no-sign-in link for a team member or a one-time sub. It shows the plan and only the pins that are

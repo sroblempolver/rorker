@@ -10,10 +10,12 @@
 //   note    a client drops a note on their map: private, or shared with the contractor if the job allows
 //   unnote  a client takes one of their own notes off
 //   got     a client ticks off something on their shopping list
+//   team    a crew member's link reads the team board: what's to everyone, to them, and their answers
+//   teammsg a crew member answers the office on the team board (words and a photo)
 // The rules for what a link shows and what a client may change are in core.js, built from the page's own
 // code (web/preview/build-links.mjs), so both sides agree.
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
-import { cleanPlaces, clientBilling, clientBuys, clientNote, clientPinIds, clientView, companyOf, crewPinIds, crewWork, findLink, forClient, fromRecords, linkLive } from "./core.js";
+import { cleanPlaces, clientBilling, clientBuys, clientNote, clientPinIds, clientView, companyOf, crewPinIds, crewWork, findLink, forClient, fromRecords, linkLive, teamFor } from "./core.js";
 
 const ORIGINS = [/^https:\/\/([a-z0-9-]+\.)?rorker\.com$/, /^https:\/\/[a-z0-9-]+\.github\.io$/, /^https?:\/\/localhost(:\d+)?$/, /^https?:\/\/127\.0\.0\.1(:\d+)?$/];
 const extra = (Deno.env.get("ALLOWED_ORIGINS") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -129,7 +131,7 @@ Deno.serve(async (req) => {
       }
       const pins = new Set(saved.jobs.flatMap((d: { pins: { id: string }[] }) => d.pins.map((p) => p.id)));
       const work = crewWork(link, company, saved, await photosByPin(saved.comments, pins));
-      return work ? json({ kind: "crew", work }) : json({ error: "This link was turned off." }, 404);
+      return work ? json({ kind: "crew", work, person: !!link.member_id }) : json({ error: "This link was turned off." }, 404);
     }
 
     if (action === "photo" || action === "done") {
@@ -198,6 +200,34 @@ Deno.serve(async (req) => {
       const { error } = await db.from("records").insert({ account_id: accountId, kind: "message", id: m.id, job_id: job.job.id, data: m });
       if (error) throw error;
       return json({ messages: await thread([...saved.messages, m], job.job.id) });
+    }
+
+    if (action === "team" || action === "teammsg") {
+      if (link.audience === "client" || !link.member_id) return json({ error: "Not on this link." }, 403);
+      const me = saved.members.find((m: { id: string }) => m.id === link.member_id) as { id: string; full_name: string } | undefined;
+      if (!me) return json({ error: "You're not on this team any more." }, 403);
+      const board = async (list: { photos: string[] }[]) => {
+        const mine = teamFor(list, me.id);
+        const urls = await sign(mine.flatMap((m: { photos: string[] }) => m.photos));
+        return mine.map((m: { photos: string[] }) => ({ ...m, photos: m.photos.map((p) => urls.get(p)).filter(Boolean) }));
+      };
+      if (action === "team") return json({ messages: await board(saved.team) });
+      if (limited(`team:${token}`, 60)) return json({ error: "That's a lot of messages at once. Give it a minute." }, 429);
+      const text = str(body.body, 4000);
+      const photos: string[] = [];
+      if (body.data) {
+        const f = await photo(body);
+        if ("error" in f) return json({ error: f.error }, 400);
+        const path = `${accountId}/team/messages/${uid()}.${f.ext}`;
+        const up = await db.storage.from(BUCKET).upload(path, f.bytes, { contentType: f.type });
+        if (up.error) throw up.error;
+        photos.push(path);
+      }
+      if (!text && !photos.length) return json({ error: "Write something or add a photo." }, 400);
+      const m = { id: uid(), from: "crew", author_name: me.full_name, member_id: me.id, to: null, body: text || null, photos, created_at: new Date().toISOString() };
+      const { error } = await db.from("records").insert({ account_id: accountId, kind: "team", id: m.id, job_id: null, data: m });
+      if (error) throw error;
+      return json({ messages: await board([...saved.team, m]) });
     }
 
     if (action === "note" || action === "unnote" || action === "got") {

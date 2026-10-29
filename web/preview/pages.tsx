@@ -7,7 +7,8 @@ import { SharedWorkView } from "@/components/share/SharedJob";
 import { ClientPage, type ClientApi } from "@/components/share/ClientPage";
 import type { ClientStart } from "@/components/billing/MoneyPanel";
 import type { Billing } from "@/lib/billing/types";
-import type { JobMessage, Pin, SharedWork } from "@/lib/data/types";
+import type { JobMessage, Pin, SharedWork, TeamMessage } from "@/lib/data/types";
+import type { TeamInboxApi } from "@/components/team/TeamBoard";
 import type { ClientView } from "@/lib/cloud/links";
 import * as cloud from "./cloud";
 
@@ -85,8 +86,13 @@ function useLink<T>(token: string) {
 
 /** What a crew member (employee or sub) opens from their link. No sign-in. */
 export function CrewLinkPage({ token, pin }: { token: string; pin: string | null }) {
-  const { data, error } = useLink<{ kind: "crew"; work: SharedWork } | { kind: "client" }>(token);
+  const { data, error } = useLink<{ kind: "crew"; work: SharedWork; person?: boolean } | { kind: "client" }>(token);
   useEffect(() => { document.title = data?.kind === "crew" ? `${data.work.label} · ${data.work.company.name}` : "Rorker"; }, [data]);
+  // the team board, on a person's own link
+  const inbox = useMemo<TeamInboxApi>(() => ({
+    list: async () => (await cloud.call<{ messages: TeamMessage[] }>("team", { token })).messages,
+    send: async (body, file) => (await cloud.call<{ messages: TeamMessage[] }>("teammsg", { token, body, ...(file ? await cloud.photoData(file) : {}) })).messages,
+  }), [token]);
   if (error) return <Problem title="This link doesn't open" body={error} />;
   if (!data) return <Loading text="Opening your tasks…" />;
   if (data.kind === "client") { location.hash = `#/c/${token}`; return null; }
@@ -94,7 +100,7 @@ export function CrewLinkPage({ token, pin }: { token: string; pin: string | null
     <div className="h-full flex flex-col lg:overflow-hidden overflow-y-auto">
       <SharedWorkView work={data.work} pin={pin}
         send={async (pinId, file) => (await cloud.call<{ photos: string[] }>("photo", { token, pin: pinId, ...(await cloud.photoData(file)) })).photos}
-        done={async (pinId) => { await cloud.call("done", { token, pin: pinId }); }} />
+        done={async (pinId) => { await cloud.call("done", { token, pin: pinId }); }} inbox={data.person ? inbox : undefined} />
     </div>
   );
 }

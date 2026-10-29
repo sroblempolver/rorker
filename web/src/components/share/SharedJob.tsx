@@ -7,6 +7,7 @@
 // A person's own link covers every job they have tasks on, with a row of jobs to
 // switch between, and a link copied from one task opens on that task.
 import { useMemo, useRef, useState, type ReactNode } from "react";
+import { TeamInbox, type TeamInboxApi } from "@/components/team/TeamBoard";
 import type { Member, SharedMaterial, SharedView, SharedWork } from "@/lib/data/types";
 import { STATUS_COLOR, STATUS_LABEL, qtyText, type Unit } from "@/lib/materials/types";
 import type { ElementStatus } from "@/lib/plan/types";
@@ -37,8 +38,10 @@ export const postPhoto = (token: string): SendPhoto => async (pinId, file) => {
 /** Mark one of their own tasks done. */
 export type MarkDone = (pinId: string) => Promise<void>;
 
-export function SharedWorkView({ work, pin, token, send: sendProp, done, onBack }: { work: SharedWork; /** open on this task (from a link copied off it) */ pin?: string | null;
-  /** the link's token, for sending photos; or `send` to handle them another way (the preview) */ token?: string; send?: SendPhoto; done?: MarkDone; onBack?: () => void }) {
+export function SharedWorkView({ work, pin, token, send: sendProp, done, onBack, inbox }: { work: SharedWork; /** open on this task (from a link copied off it) */ pin?: string | null;
+  /** the link's token, for sending photos; or `send` to handle them another way (the preview) */ token?: string; send?: SendPhoto; done?: MarkDone; onBack?: () => void;
+  /** the team board, on a person's own link: messages from the office, and their answers */
+  inbox?: TeamInboxApi }) {
   const send = sendProp ?? (token ? postPhoto(token) : undefined);
   const start = work.jobs.find((v) => v.pins.some((p) => p.id === pin)) ?? work.jobs[0];
   const [jobId, setJobId] = useState(start?.job.id ?? null);
@@ -63,10 +66,11 @@ export function SharedWorkView({ work, pin, token, send: sendProp, done, onBack 
       ))}
     </nav>
   ) : null;
-  return <SharedJob key={view.job.id} view={view} pin={view.job.id === start?.job.id ? pin : null} switcher={switcher} send={send} done={done} onBack={onBack} />;
+  return <SharedJob key={view.job.id} view={view} pin={view.job.id === start?.job.id ? pin : null} switcher={switcher} send={send} done={done} onBack={onBack} inbox={inbox} />;
 }
 
-export function SharedJob({ view: given, pin: firstPin, switcher, send, done: markDone, onBack }: { view: SharedView; pin?: string | null; switcher?: ReactNode; send?: SendPhoto; done?: MarkDone; /** the preview's way back to the full app */ onBack?: () => void }) {
+export function SharedJob({ view: given, pin: firstPin, switcher, send, done: markDone, onBack, inbox }: { view: SharedView; pin?: string | null; switcher?: ReactNode; send?: SendPhoto; done?: MarkDone; /** the preview's way back to the full app */ onBack?: () => void; inbox?: TeamInboxApi }) {
+  const [side, setSide] = useState<"work" | "messages">("work");
   const [photos, setPhotos] = useState(given.photos);
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
   const [closing, setClosing] = useState(false);
@@ -125,6 +129,19 @@ export function SharedJob({ view: given, pin: firstPin, switcher, send, done: ma
             ) : <div className="h-full grid place-items-center text-muted p-6 text-center">The plan for this job isn&apos;t ready yet.</div>}
           </div>
           <aside className="lg:w-[380px] shrink-0 flex flex-col min-h-0 bg-panel">
+            {inbox && (
+              <div className="shrink-0 flex border-b border-line" role="tablist" aria-label="Your link">
+                {(["work", "messages"] as const).map((k) => (
+                  <button key={k} role="tab" aria-selected={side === k} onClick={() => setSide(k)}
+                    className={`flex-1 h-11 text-[13px] font-display font-bold tracking-[0.08em] uppercase border-b-2 ${side === k ? "border-accent text-text" : "border-transparent text-muted hover:text-text"}`}>
+                    {k === "work" ? "Your tasks" : "Messages"}
+                  </button>
+                ))}
+              </div>
+            )}
+            {inbox && side === "messages" ? (
+              <div className="flex-1 min-h-[420px] lg:min-h-0 p-3"><TeamInbox api={inbox} company={view.company.name} /></div>
+            ) : (
             <div className="flex-1 min-h-0 overflow-y-auto scroll-thin p-4 space-y-3">
               {pin ? (
                 <div className="space-y-3">
@@ -194,6 +211,7 @@ export function SharedJob({ view: given, pin: firstPin, switcher, send, done: ma
                 </>
               )}
             </div>
+            )}
             <p className="shrink-0 border-t border-line px-4 py-2 text-[11.5px] text-muted">Shared by {view.company.name} with Rorker. This link shows only what&apos;s yours{view.expires_at ? ` and works until ${view.expires_at.slice(0, 10)}` : ""}.</p>
           </aside>
         </div>
