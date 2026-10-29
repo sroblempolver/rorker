@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Sign in · Rorker</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: #17181b; --panel: #202125; --line: #34363c; --text: #ecebe7; --muted: #9a9ca3; --orange: #ff6a1f; --bad: #ff8a80; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--ink); color: var(--text); font: 16px/1.45 "Instrument Sans", system-ui, sans-serif; }
+  main { width: 100%; max-width: 380px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 28px 24px; }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .brand svg { width: 36px; height: 36px; }
+  h1 { font: 800 28px/1 "Big Shoulders Display", sans-serif; letter-spacing: .02em; margin: 0; text-transform: uppercase; }
+  p { color: var(--muted); margin: 0 0 18px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 6px; }
+  input { width: 100%; padding: 11px 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--ink); color: var(--text); font: inherit; }
+  input:focus { outline: 2px solid var(--orange); outline-offset: 1px; border-color: transparent; }
+  button { width: 100%; margin-top: 18px; padding: 12px; border: 0; border-radius: 9px; background: var(--orange); color: var(--ink); font: 600 16px "Instrument Sans", sans-serif; cursor: pointer; }
+  button[disabled] { opacity: .6; cursor: wait; }
+  button.plain { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  .msg { min-height: 1.4em; margin-top: 12px; font-size: 14px; color: var(--bad); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">
+    <svg viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" rx="40" fill="#ff6a1f"/><g transform="translate(26 22) scale(0.8)" fill="#17181b"><path d="M28 32H228V84H200V60H56V170H200V140H228V200H108L64 244V200H28Z"/></g></svg>
+    <h1>Rorker</h1>
+  </div>
+
+  <div id="wait"><p>Checking your sign-in…</p></div>
+
+  <form id="form" hidden>
+    <p>Sign in to open the build site.</p>
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="email" required>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required>
+    <button id="go" type="submit">Sign in</button>
+    <div class="msg" id="msg" role="alert"></div>
+  </form>
+
+  <div id="denied" hidden>
+    <p>You're signed in as <strong id="who"></strong>, but this account doesn't have access to the build site.</p>
+    <button class="plain" id="out" type="button">Sign in with another account</button>
+  </div>
+</main>
+
+<script src="/signin/supabase.js"></script>
+<script>
+  const sb = supabase.createClient("https://uofdydjfwdsvaribvsfy.supabase.co", "sb_publishable_WJumqpPot9tvGyBPbpYhcg_pdJYhm7F",
+    { auth: { storageKey: "rorker-build-auth", persistSession: true, autoRefreshToken: true } });
+  const q = new URLSearchParams(location.search);
+  // Only ever go back to a page on this site.
+  const raw = q.get("next") || "/";
+  const next = raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/signin") ? raw : "/";
+  const $ = (id) => document.getElementById(id);
+
+  function enter(session) {
+    // If the site keeps sending us back here, stop and ask to sign in again instead of looping.
+    const hops = JSON.parse(sessionStorage.getItem("rk_hops") || "[]").filter((t) => t > Date.now() - 30000);
+    if (hops.length >= 3) { sessionStorage.removeItem("rk_hops"); show("form"); $("msg").textContent = "Please sign in again."; return; }
+    sessionStorage.setItem("rk_hops", JSON.stringify([...hops, Date.now()]));
+    const age = Math.max(60, session.expires_at - Math.floor(Date.now() / 1000));
+    document.cookie = `rk_session=${encodeURIComponent(session.access_token)}; Path=/; Max-Age=${age}; Secure; SameSite=Lax`;
+    location.replace(next + location.hash);
+  }
+  function show(id) { for (const k of ["wait", "form", "denied"]) $(k).hidden = k !== id; }
+
+  (async () => {
+    const { data: { session } } = await sb.auth.getSession(); // refreshes an expired session on its own
+    if (session && q.get("denied")) { $("who").textContent = session.user.email; return show("denied"); }
+    if (session) return enter(session);
+    show("form");
+    $("email").focus();
+  })();
+
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("go").disabled = true; $("msg").textContent = "";
+    const { data, error } = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
+    $("go").disabled = false;
+    if (error) { $("msg").textContent = "That email and password don't match an account."; return; }
+    enter(data.session);
+  });
+
+  $("out").addEventListener("click", async () => {
+    await sb.auth.signOut();
+    document.cookie = "rk_session=; Path=/; Max-Age=0; Secure; SameSite=Lax";
+    location.replace("/signin/?next=" + encodeURIComponent(next));
+  });
+</script>
+</body>
+</html>
