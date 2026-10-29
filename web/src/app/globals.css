@@ -119,5 +119,12 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M6 31V3' stroke='%23141310' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='M6 31V3' stroke='%23f4efe6' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M7 3h19l-4.5 6 4.5 6H7z' fill='%23ff6a1f' stroke='%23141310' stroke-width='1.5' stroke-linejoin='round'/%3E%3Ccircle cx='6' cy='30' r='2.2' fill='%23ff6a1f' stroke='%23141310'/%3E%3C/svg%3E") 6 30, crosshair !important;
 }
 
+/* Build mode: the cursor is a hammer (its head is the spot a click lands on). With a tool that places
+   something (door, window, a room split), the hammer is the cursor everywhere on the map. */
+.build-cursor [role="application"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cg transform='rotate(-40 16 16)'%3E%3Crect x='14.2' y='10' width='3.6' height='20' rx='1.6' fill='%23f4efe6' stroke='%23141310' stroke-width='1.5'/%3E%3Cpath d='M6 4.5h17l3 2.5-3 2.5H6z' fill='%23ff6a1f' stroke='%23141310' stroke-width='1.5' stroke-linejoin='round'/%3E%3Crect x='3.5' y='3.5' width='3.5' height='7' rx='1' fill='%23ff6a1f' stroke='%23141310' stroke-width='1.5'/%3E%3C/g%3E%3C/svg%3E") 2 16, crosshair; }
+.build-cursor.build-place [role="application"], .build-cursor.build-place [role="application"] *, .build-cursor.build-place canvas { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cg transform='rotate(-40 16 16)'%3E%3Crect x='14.2' y='10' width='3.6' height='20' rx='1.6' fill='%23f4efe6' stroke='%23141310' stroke-width='1.5'/%3E%3Cpath d='M6 4.5h17l3 2.5-3 2.5H6z' fill='%23ff6a1f' stroke='%23141310' stroke-width='1.5' stroke-linejoin='round'/%3E%3Crect x='3.5' y='3.5' width='3.5' height='7' rx='1' fill='%23ff6a1f' stroke='%23141310' stroke-width='1.5'/%3E%3C/g%3E%3C/svg%3E") 2 16, crosshair !important; }
+/* a wall you can grab lights up under the pointer */
+.build-wall:hover .build-wall-line { stroke-opacity: .85; }
+
 /* late money gets a hazard edge */
 .overdue-edge { border-left: 6px solid transparent; border-image: repeating-linear-gradient(-45deg, var(--red) 0 6px, #2a0d0d 6px 12px) 6; }

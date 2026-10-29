@@ -13,7 +13,7 @@ import { PlanChat } from "./PlanChat";
 import { applyEdits, turnedFacing } from "@/lib/plan/edits";
 import { JOB_KEY, furnishWhere, jobSettings, stageLook } from "@/lib/plan/build";
 import { elementLabel, findElement, pointInPoly, roomOf } from "@/lib/plan/geometry";
-import { moveFor, newOpening, sideAt, sideMid, sideNear, splitGuess } from "@/lib/plan/house";
+import { cutAt, cutKeyAt, endDrag, moveFor, newOpening, sideAt, sideMid, sideNear, splitGuess, type BuildSide } from "@/lib/plan/house";
 import { splitPoly } from "@/lib/plan/sketchEdit";
 import { BUILD_TOOLS, BuildPanel, type BuildTool } from "./BuildPanel";
 import { recall, remember } from "@/lib/remember";
@@ -492,7 +492,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     }
   }, [build, view, level, setLevel]);
   // a tool other than Pick waits for a click on the map (the same click a pin uses)
-  useEffect(() => { if (build) setPinMode(tool !== "pick"); }, [build, tool, level]);
+  // (walls are grabbed on the map itself, with Pick or Move wall)
+  useEffect(() => { if (build) setPinMode(tool !== "pick" && tool !== "wall"); }, [build, tool, level]);
 
   /** The wall being moved, as it stands now. */
   const side = useMemo(() => {
@@ -544,6 +545,61 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     setSelected(id);
     undoable("Joined the room back", () => putEdit(id, before), { announce: true });
   }, [edits, putEdit, undoable]);
+
+  /** A wall (or a piece of one) picked on the map: the Move wall card for it. */
+  const pickWall = useCallback((room: Room, s: BuildSide) => {
+    if (!buildFloor) return;
+    const m = moveFor(edits, buildFloor, room.id, s), prev = m.edit?.move;
+    setToolRaw("wall");
+    setSelected(room.id);
+    setSideSel({ key: m.key, roomId: room.id, heading: s.heading, at: prev?.at ?? sideMid(s), by: prev?.by ?? 0, t: prev?.t ?? Date.now() });
+  }, [buildFloor, edits]);
+  /** A wall dragged out (by > 0) or in on the map. */
+  const moveWall = useCallback((room: Room, s: BuildSide, by: number) => {
+    if (!buildFloor) return;
+    const m = moveFor(edits, buildFloor, room.id, s), prev = m.edit?.move, before = edits[m.key] ?? null;
+    const sel: SideSel = { key: m.key, roomId: room.id, heading: s.heading, at: prev?.at ?? sideMid(s), by: Math.round((prev?.by ?? 0) + by), t: prev?.t ?? Date.now() };
+    setToolRaw("wall");
+    setSelected(room.id);
+    setSideSel(sel);
+    void putEdit(sel.key, sel.by ? { move: { room_id: sel.roomId, heading: sel.heading, at: sel.at, by: sel.by, t: sel.t } } : null);
+    undoable(`Moved the ${s.label.toLowerCase()} of the ${room.name.toLowerCase()}`, () => { setSideSel((x) => (x?.key === sel.key ? { ...x, by: prev?.by ?? 0 } : x)); return putEdit(sel.key, before); });
+  }, [buildFloor, edits, putEdit, undoable]);
+  /** The end of the picked wall dragged: the wall it meets there moves, or the cut slides along. */
+  const moveWallEnd = useCallback((room: Room, s: BuildSide, end: "a" | "b", by: number) => {
+    if (!buildFloor) return;
+    const r = endDrag(buildFloor, room, s, end, by);
+    if (!r) return say("That end can't move: there's no straight wall there to push");
+    if ("side" in r) { moveWall(room, r.side, r.by); return pickWall(room, s); }
+    const key = cutKeyAt(edits, buildFloor, r.cut), before = key ? edits[key] : null;
+    if (!key || !before?.cut) return;
+    void putEdit(key, { cut: { ...before.cut, at: r.to } });
+    undoable("Moved where the wall comes apart", () => putEdit(key, before));
+  }, [buildFloor, edits, moveWall, pickWall, putEdit, say, undoable]);
+  /** Right-click on a wall: cut it in two there, so each piece moves on its own. */
+  const cutWall = useCallback((p: Pt) => {
+    if (!buildFloor) return;
+    const c = cutAt(buildFloor, p);
+    if (typeof c === "string") return say(c);
+    void putEdit(c.key, c.edit);
+    setSideSel(null);
+    undoable(`Cut the ${c.side.label.toLowerCase()} of the ${c.room.name.toLowerCase()} in two: drag either piece`, () => putEdit(c.key, null), { announce: true });
+  }, [buildFloor, putEdit, say, undoable]);
+  /** Put the pieces of a cut wall back together (only while neither piece has moved). */
+  const joinWall = useCallback((s: BuildSide) => {
+    if (!buildFloor) return;
+    const keys = [s.cutA ? cutKeyAt(edits, buildFloor, s.a) : null, s.cutB ? cutKeyAt(edits, buildFloor, s.b) : null].filter((k): k is string => !!k);
+    if (!keys.length) return;
+    const before = keys.map((k) => [k, edits[k]] as const);
+    for (const k of keys) void putEdit(k, null);
+    setSideSel(null);
+    undoable("Joined the wall back together", async () => { for (const [k, e] of before) await putEdit(k, e); }, { announce: true });
+  }, [buildFloor, edits, putEdit, undoable]);
+  const buildMap = useMemo(() => ({
+    walls: tool === "pick" || tool === "wall",
+    picked: tool === "wall" && side ? { roomId: side.room.id, key: side.side.key } : null,
+    onPick: pickWall, onMove: moveWall, onEnd: moveWallEnd, onCut: cutWall,
+  }), [tool, side, pickWall, moveWall, moveWallEnd, cutWall]);
 
   const removeOpening = useCallback((o: Opening) => {
     const before = edits[o.id] ?? null;
@@ -763,7 +819,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     if (build && view) return (
       <BuildPanel plan={view} floor={buildFloor} tool={tool} setTool={setTool} doorKind={doorKind} setDoorKind={setDoorKind} selected={selected} edits={edits} side={side}
         onSave={(id, patch) => void saveEdit(id, patch)} onRemove={removeOpening} onNudge={(d) => setSideBy((side?.by ?? 0) + d)} onSetBy={setSideBy}
-        onSplit={(r) => splitAt(r)} onJoin={joinBack} onDone={toggleBuild}>{planSection}</BuildPanel>
+        onSplit={(r) => splitAt(r)} onJoin={joinBack} onJoinWall={joinWall} onDone={toggleBuild}>{planSection}</BuildPanel>
     );
     if (tab === "pins") {
       if (draft && !draft.at) return <PinForm key={`${draft.elementId}${draft.anchor?.x}${draft.preset?.title}`} plan={view} draft={draft} preset={{ kind: "task", title: "", stage: layerStage?.id ?? null, ...draft.preset }} stages={stages} onCancel={() => setDraft(null)} onCreate={async (input) => { await createPin(input); }} />;
@@ -819,7 +875,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       edits={edits} onSaveEdit={saveEdit} items={items} selectedItem={selectedItem} onSelectItem={selectItem}
       onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind}
       buy={api.materials ? { lines: mlines.filter((l) => l.job_id === job.id && l.status !== "returned"), onQuick: quickBuy, onAll: quickBuyAll, onMore: (t) => openBuy(t), onOpen: openLine, onTick: (id) => { const l = mlines.find((x) => x.id === id); if (l) void updateMaterial(id, { status: NEXT_STATUS[l.status] }); } } : undefined} />;
-  }, [build, buildFloor, tool, setTool, doorKind, side, removeOpening, setSideBy, splitAt, joinBack, toggleBuild, planSection, tab, feedPerson, buyDraft, buyFocus, mlines, mjobs, lastBuyer, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, level, selected, states, api, data.canShare, say, showPin, updatePin, deletePin, undoable, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
+  }, [build, buildFloor, tool, setTool, doorKind, side, removeOpening, setSideBy, splitAt, joinBack, joinWall, toggleBuild, planSection, tab, feedPerson, buyDraft, buyFocus, mlines, mjobs, lastBuyer, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, level, selected, states, api, data.canShare, say, showPin, updatePin, deletePin, undoable, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
     edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, billing, payouts, moneyKey, data.brand, job, guard, layer, layerPins, layerStage, inLayer, stageCounts, pickLayer, settings]);
 
   // where the quick card sits inside the map, kept on screen
@@ -889,7 +945,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
               view3d={view3d} setView3d={setView3d} can3d={data.can3d !== false}
               furnish={settings.furnish} onFurnish={(furnish) => void saveEdit(JOB_KEY, { furnish })}
               look={look}
-              build={{ on: build, toggle: toggleBuild }} placeHint={build && tool !== "pick" ? `${BUILD_TOOLS.find((t) => t.id === tool)!.help} · Esc to put the tool down` : undefined}
+              build={{ on: build, toggle: toggleBuild, map: buildMap, place: tool === "door" || tool === "window" || tool === "split" }} placeHint={build && tool !== "pick" ? `${BUILD_TOOLS.find((t) => t.id === tool)!.help} · Esc to put the tool down` : undefined}
               hud={<div className="w-[300px] bg-[#17181b]/92 backdrop-blur-sm border border-line border-l-[3px] border-l-accent rounded-[4px] p-3"><ProjectSummary compact plan={view} pins={pins} states={states} stages={stages} setLevel={setLevel} onPinKind={showPinKind} /></div>} />
           ) : (
             <div className="h-full grid place-items-center p-6 bg-ink">

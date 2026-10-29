@@ -58,6 +58,8 @@ export interface ElementEdit {
   opening?: AddedOpening;
   /** a room cut in two by a new wall across it, at x (axis "x") or y (axis "y") on the plan */
   split?: { axis: "x" | "y"; at: number; name?: string; t?: number };
+  /** a straight wall separated into two pieces at this point, so each moves on its own */
+  cut?: { floor_id: string; at: [number, number]; t: number };
 }
 export type Heading = "north" | "east" | "south" | "west";
 /** A door or window put in a wall in Build mode: the side of the room it's on (which way that wall

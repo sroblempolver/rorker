@@ -7,6 +7,7 @@ import type { JobItem, Pin, PinInput } from "@/lib/data/types";
 import { roomSides } from "@/lib/plan/geometry";
 import { furnishPlaces, furnishedSet, stagedPlan, type BuildLook, type Furnish } from "@/lib/plan/build";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
+import type { BuildMap } from "./BuildLayer";
 import { ExteriorView, WallView } from "./Elevations";
 import { FloorCanvas, type ColorMode } from "./FloorCanvas";
 import { Plan3D, webglAvailable, type WallMode } from "./Plan3D";
@@ -63,7 +64,7 @@ interface Props {
   /** how far the house is built: set by the stage picked in Stages, finished when none is */
   look?: BuildLook;
   /** Build mode (change the house): the button that turns it on and off; left out, no button */
-  build?: { on: boolean; toggle: () => void };
+  build?: { on: boolean; toggle: () => void; map?: BuildMap; place?: boolean };
   /** what a click does while the map is waiting for one (a build tool), instead of dropping a pin */
   placeHint?: string;
 }
@@ -152,7 +153,7 @@ export function PlanViewer(p: Props) {
     "Click a cabinet or object to select it, then drag it to move · zoom out to go back";
 
   return (
-    <div className={`relative w-full h-full overflow-hidden bg-ink ${p.pinMode ? "pin-cursor" : ""}`}>
+    <div className={`relative w-full h-full overflow-hidden bg-ink ${p.build?.on ? `build-cursor ${p.build.place ? "build-place" : ""}` : p.pinMode ? "pin-cursor" : ""}`}>
       {level.kind === "site" && (
         <SiteView plan={plan} jobName={p.jobName} pins={p.pins} states={p.states} colorMode={p.colorMode} selectedPin={p.selectedPin} pinMode={p.pinMode} draft={p.draft}
           controls={controls} onOpenBuilding={() => p.setLevel({ kind: "exterior" })} onSelectPin={p.onSelectPin} onPlacePin={p.onPlacePin} onLimitOut={p.onAllJobs} />
@@ -179,6 +180,7 @@ export function PlanViewer(p: Props) {
           onPlacePin={p.onPlacePin}
           items={p.items} showItems={showItems} selectedItem={p.selectedItem} onSelectItem={p.onSelectItem} onMovePin={p.onMovePin}
           onMoveFixture={(id, dx, dy) => p.onMoveFixture(id, dx, dy, 0)} locked={p.readOnly} look={look}
+          build={p.build?.on ? p.build.map : undefined}
         />
       )}
       {floor && room && side && level.kind === "wall" && (

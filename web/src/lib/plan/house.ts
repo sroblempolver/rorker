@@ -35,15 +35,43 @@ export function wallDepth(f: Floor, side: WallSide, at?: number): { out: number;
   return { out, inn };
 }
 
+/** A room side as Build mode sees it: cut where the wall was separated, each piece its own side.
+ *  cutA / cutB: that end is a cut, not a corner. */
+export type BuildSide = WallSide & { cutA?: boolean; cutB?: boolean };
+/** How close to a corner a wall can be cut, so both pieces stay long enough to grab. */
+export const CUT_MARGIN = 300;
+
+export function sidesOf(f: Floor, room: Room): BuildSide[] {
+  const sides = roomSides(f, room);
+  if (!f.joints?.length) return sides;
+  return sides.flatMap((s) => {
+    const u = dirOf(s);
+    const cuts = f.joints!
+      .filter((j) => segDist(j, s.a, s.b) < 25)
+      .map((j) => dot(sub(j, s.a), u))
+      .filter((t) => t > CUT_MARGIN - 50 && t < s.length - CUT_MARGIN + 50)
+      .sort((x, y) => x - y);
+    if (!cuts.length) return [s];
+    const at = [0, ...cuts, s.length];
+    return at.slice(1).map((t1, i): BuildSide => {
+      const t0 = at[i];
+      return {
+        ...s, key: `${s.key}.${i}`, a: add(s.a, u, t0), b: add(s.a, u, t1), length: t1 - t0, cutA: i > 0, cutB: i < at.length - 2,
+        segments: s.segments.filter((g) => g.to > t0 && g.from < t1).map((g) => ({ ...g, from: Math.max(0, g.from - t0), to: Math.min(t1 - t0, g.to - t0) })),
+      };
+    });
+  });
+}
+
 /** The side of a room facing `heading` nearest a point (each room can have two north walls, say). */
-export function sideNear(f: Floor, room: Room, heading: Heading, at: Pt): WallSide | null {
-  return roomSides(f, room).filter((s) => s.heading === heading).sort((x, y) => segDist(at, x.a, x.b) - segDist(at, y.a, y.b))[0] ?? null;
+export function sideNear(f: Floor, room: Room, heading: Heading, at: Pt): BuildSide | null {
+  return sidesOf(f, room).filter((s) => s.heading === heading).sort((x, y) => segDist(at, x.a, x.b) - segDist(at, y.a, y.b))[0] ?? null;
 }
 
 /** The room side nearest a point on the floor, and how far along it that is. */
-export function sideAt(f: Floor, p: Pt, reach = 700): { room: Room; side: WallSide; along: number } | null {
-  let best: { room: Room; side: WallSide; d: number } | null = null;
-  for (const r of f.rooms) for (const s of roomSides(f, r)) {
+export function sideAt(f: Floor, p: Pt, reach = 700): { room: Room; side: BuildSide; along: number } | null {
+  let best: { room: Room; side: BuildSide; d: number } | null = null;
+  for (const r of f.rooms) for (const s of sidesOf(f, r)) {
     const d = segDist(p, s.a, s.b);
     if (d < reach && (!best || d < best.d)) best = { room: r, side: s, d };
   }
@@ -160,10 +188,10 @@ function outer(mp: Poly[]): Pt[] | null {
  * room on the other side of the wall gives up or gets the strip, and the wall (its doors and windows
  * too) goes with it. Where the wall carried on past the room, it now steps, like a real wall would.
  */
-export function moveSide(f: Floor, side: WallSide, by: number): Floor {
+export function moveSide(f: Floor, side: BuildSide, by: number): Floor {
   const u = dirOf(side), o: Pt = [-side.inward[0], -side.inward[1]], mv: Pt = [o[0] * by, o[1] * by];
   const d = wallDepth(f, side);
-  const L = side.length;
+  const L = side.length, T = d.out + d.inn, cA = !!side.cutA, cB = !!side.cutB;
   /** a box on the plan, given along the side (from a) and across it (out of the room) */
   const box = (s0: number, s1: number, t0: number, t1: number): Poly =>
     ring([add(add(side.a, u, s0), o, t0), add(add(side.a, u, s1), o, t0), add(add(side.a, u, s1), o, t1), add(add(side.a, u, s0), o, t1)]);
@@ -173,12 +201,23 @@ export function moveSide(f: Floor, side: WallSide, by: number): Floor {
   const reachEnd = (from: Pt, dir: Pt) => { let k = 0; while (k < 800 && solid(add(from, dir, k + 15))) k += 15; return k ? k + 15 : 0; };
   const back: Pt = [-u[0], -u[1]];
   // past each end, and (on a plan drawn on centre lines) the half of the meeting wall inside the span
-  const eA = reachEnd(add(side.a, o, mid), back), eB = reachEnd(add(side.b, o, mid), u);
+  // (a cut end has no wall meeting it: the rest of the same wall carries straight on)
+  // where the wall carries straight on past a corner, only the corner itself (the thickness of the
+  // wall meeting it, felt just inside the room's face) is lifted, not the wall beyond
+  const endReach = (p: Pt, dir: Pt) => { const c = reachEnd(add(p, o, mid), dir), i = reachEnd(add(p, o, -d.inn - 20), dir); return i ? Math.min(c, i) : c; };
+  const eA = cA ? 0 : endReach(side.a, back), eB = cB ? 0 : endReach(side.b, u);
   const fA = Math.max(reachEnd(add(side.a, o, d.out + 20), u), reachEnd(add(side.a, o, -d.inn - 20), u));
   const fB = Math.max(reachEnd(add(side.b, o, d.out + 20), back), reachEnd(add(side.b, o, -d.inn - 20), back));
-  const oldStrip = box(-eA, L + eB, -d.inn, d.out);
+  // (a hair wider than the wall as felt, so no thread of the old wall is left to close a room off)
+  const oldStrip = box(-eA, L + eB, -d.inn - 3, d.out + 3);
   // pushed out, the walls meeting it at each end stretch across the gap to keep meeting it
   const endBoxes = by > 0 ? [...(eA ? [box(-eA, Math.min(fA, L / 2), -d.inn, d.out + by)] : []), ...(eB ? [box(L - Math.min(fB, L / 2), L + eB, -d.inn, d.out + by)] : [])] : [];
+  // at a cut, a short new wall closes the step between the piece that moved and the rest: just past
+  // the piece when it goes out, just inside it when it comes in
+  if (cA) endBoxes.push(by > 0 ? box(-T, 0, -d.inn, d.out + by) : box(0, T, by - d.inn, d.out));
+  if (cB) endBoxes.push(by > 0 ? box(L, L + T, -d.inn, d.out + by) : box(L - T, L, by - d.inn, d.out));
+  // how far along the room on the other side changes: past those short walls too
+  const tA = cA ? (by > 0 ? -T : T) : by > 0 ? -eA : 0, tB = cB ? (by > 0 ? L + T : L - T) : by > 0 ? L + eB : L;
   // the walls: the stretch along this side lifted out and put back moved, the walls meeting it stretched
   const walls: Wall[] = [];
   for (const w of f.walls) {
@@ -188,17 +227,20 @@ export function moveSide(f: Floor, side: WallSide, by: number): Floor {
     const ends = endBoxes.filter((b) => clip.intersection(ring(w.polygon), b).length);
     const rest = real(clip.difference(ring(w.polygon), oldStrip));
     const next = clip.union(rest.length ? rest : [], ...moved, ...ends);
-    const out = outer(next);
-    if (!out) continue;
-    const length_mm = out.length === 4 ? Math.round(Math.max(Math.hypot(out[1][0] - out[0][0], out[1][1] - out[0][1]), Math.hypot(out[2][0] - out[1][0], out[2][1] - out[1][1]))) : w.length_mm;
-    walls.push({ ...w, polygon: out, length_mm });
+    // a wall can come apart into pieces (the stretch that moved took the corner holding them together):
+    // the biggest keeps the wall's id, the others become walls of their own
+    const pieces = real(next).map((pg) => outer([pg])).filter((r): r is Pt[] => !!r).sort((a, b) => polyArea(b) - polyArea(a));
+    pieces.forEach((out, i) => {
+      const length_mm = out.length === 4 ? Math.round(Math.max(Math.hypot(out[1][0] - out[0][0], out[1][1] - out[0][1]), Math.hypot(out[2][0] - out[1][0], out[2][1] - out[1][1]))) : w.length_mm;
+      walls.push({ ...w, id: i ? `${w.id}.${i}` : w.id, polygon: out, length_mm });
+    });
   }
   // the rooms: this one along its side, and whatever is on the other side of the wall
   // where the room on the other side starts: past the wall, or on the same line when the plan is
   // drawn on the walls' centre lines
   const nf = Math.max(0, d.out - d.inn);
   const grow = by > 0 ? box(0, L, 0, by) : null, shrink = by < 0 ? box(0, L, by, 0) : null;
-  const theirs = by > 0 ? box(0, L, 0, nf + by) : box(0, L, nf + by, nf);
+  const theirs = by > 0 ? box(tA, tB, 0, nf + by) : box(tA, tB, nf + by, nf + 5);
   const other = across(f, side, L / 2, d.out);
   const rooms = f.rooms.map((r) => {
     let poly: Poly[] | null = null;
@@ -217,7 +259,7 @@ export function moveSide(f: Floor, side: WallSide, by: number): Floor {
   let footprint = f.footprint;
   if (!other && f.footprint.length) {
     const fp = f.footprint.map((r) => ring(r));
-    const next = by > 0 ? clip.union(fp[0], ...fp.slice(1), box(-eA, L + eB, 0, d.out + by)) : clip.difference(clip.union(fp[0], ...fp.slice(1)), box(0, L, d.out + by, d.out + 10));
+    const next = by > 0 ? clip.union(fp[0], ...fp.slice(1), box(Math.min(-eA, tA), Math.max(L + eB, tB), 0, d.out + by)) : clip.difference(clip.union(fp[0], ...fp.slice(1)), box(tA, tB, d.out + by, d.out + 10));
     const rings = next.map((pg) => pg[0].slice(0, -1).map((q) => [Math.round(q[0]), Math.round(q[1])] as Pt)).filter((r) => r.length >= 3);
     if (rings.length) footprint = rings;
   }
@@ -266,7 +308,7 @@ function relist(f: Floor): Floor {
 export function applyHouseEdits(plan: Plan, edits: Record<string, ElementEdit>): Plan {
   const all = Object.entries(edits).sort(([a], [b]) => (a < b ? -1 : 1));
   // walls moved and rooms cut, in the order they were done
-  const ops = all.filter(([, e]) => e.move?.by || e.split).sort(([, a], [, b]) => ((a.move ?? a.split)!.t ?? 0) - ((b.move ?? b.split)!.t ?? 0));
+  const ops = all.filter(([, e]) => e.move?.by || e.split || e.cut).sort(([, a], [, b]) => ((a.move ?? a.split ?? a.cut)!.t ?? 0) - ((b.move ?? b.split ?? b.cut)!.t ?? 0));
   const added = all.filter(([, e]) => e.opening);
   const changed = all.filter(([, e]) => e.slide || e.width || e.kind || e.removed || e.sill_mm != null || e.height_mm || e.name);
   if (!ops.length && !added.length && !changed.length) return plan;
@@ -275,7 +317,9 @@ export function applyHouseEdits(plan: Plan, edits: Record<string, ElementEdit>):
     floors: plan.floors.map((f0) => {
       let f = f0;
       for (const [id, e] of ops) {
-        if (e.move) {
+        if (e.cut) {
+          if (e.cut.floor_id === f.id) f = { ...f, joints: [...(f.joints ?? []), e.cut.at] };
+        } else if (e.move) {
           const r = f.rooms.find((x) => x.id === e.move!.room_id);
           const s = r ? sideNear(f, r, e.move.heading, e.move.at) : null;
           if (s) f = moveSide(f, s, e.move.by);
@@ -319,11 +363,13 @@ export function splitGuess(r: Room): { axis: "x" | "y"; at: number } {
 
 /** The side of a room a wall move was saved for, as the plan stands now: an existing move of that
  *  side (so nudges add up under one key), or a new key. */
-export function moveFor(edits: Record<string, ElementEdit>, f: Floor, roomId: string, side: WallSide): { key: string; edit: ElementEdit | null } {
+export function moveFor(edits: Record<string, ElementEdit>, f: Floor, roomId: string, side: BuildSide): { key: string; edit: ElementEdit | null } {
   const o: Pt = [-side.inward[0], -side.inward[1]], u = dirOf(side);
+  // a move saved before the wall was cut moved the whole wall: a piece gets a move of its own
+  const lastCut = Math.max(0, ...Object.values(edits).filter((e) => e.cut?.floor_id === f.id).map((e) => e.cut!.t));
   for (const [key, e] of Object.entries(edits)) {
     const m = e.move;
-    if (!m || m.room_id !== roomId || m.heading !== side.heading || !f.rooms.some((r) => r.id === roomId)) continue;
+    if (!m || (m.t ?? 0) < lastCut || m.room_id !== roomId || m.heading !== side.heading || !f.rooms.some((r) => r.id === roomId)) continue;
     // where that move left the side: its drawn point pushed out by `by`
     const p = add(m.at, o, m.by), s = dot(sub(p, side.a), u);
     if (s >= -10 && s <= side.length + 10 && Math.abs(dot(sub(p, side.a), o)) < 30) return { key, edit: e };
@@ -333,3 +379,31 @@ export function moveFor(edits: Record<string, ElementEdit>, f: Floor, roomId: st
 
 /** A point in the middle of a side, where a move of it is saved from. */
 export const sideMid = (s: WallSide): [number, number] => [r10((s.a[0] + s.b[0]) / 2), r10((s.a[1] + s.b[1]) / 2)];
+
+/** Cut a wall into two pieces where it was right-clicked, so each can be moved on its own. */
+export function cutAt(f: Floor, p: Pt): { key: string; edit: ElementEdit; room: Room; side: BuildSide } | string {
+  const hit = sideAt(f, p);
+  if (!hit) return "Right-click right on a wall";
+  if (hit.along < CUT_MARGIN || hit.along > hit.side.length - CUT_MARGIN) return "Too close to the corner: cut it further along";
+  const q = add(hit.side.a, dirOf(hit.side), hit.along);
+  const t = Date.now();
+  return { key: `${f.id}~cut~${t.toString(36)}`, edit: { cut: { floor_id: f.id, at: [r10(q[0]), r10(q[1])], t } }, room: hit.room, side: hit.side };
+}
+
+/** The cut at one end of a piece of wall (its key), when that end is a cut. */
+export function cutKeyAt(edits: Record<string, ElementEdit>, f: Floor, p: Pt): string | null {
+  return Object.entries(edits).find(([, e]) => e.cut?.floor_id === f.id && Math.hypot(e.cut.at[0] - p[0], e.cut.at[1] - p[1]) < 30)?.[0] ?? null;
+}
+
+/** Dragging the end of a wall: the wall it meets there moves (so this one gets longer or shorter), or,
+ *  at a cut, the cut slides along. `by` > 0 makes this side longer. */
+export function endDrag(f: Floor, room: Room, side: BuildSide, end: "a" | "b", by: number): { side: BuildSide; by: number } | { cut: Pt; to: Pt } | null {
+  const p = end === "a" ? side.a : side.b, u = dirOf(side), out: Pt = end === "b" ? u : [-u[0], -u[1]];
+  if (end === "a" ? side.cutA : side.cutB) return { cut: p, to: add(p, out, by).map(r10) as Pt };
+  const near = (q: Pt) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 30;
+  const other = sidesOf(f, room).find((s) => s.key !== side.key && (near(s.a) || near(s.b)));
+  if (!other) return null;
+  // that wall's outward way, against the way this end is pulled
+  const k = dot([-other.inward[0], -other.inward[1]], out);
+  return Math.abs(k) > 0.9 ? { side: other, by: by * Math.sign(k) } : null;
+}

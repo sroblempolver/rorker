@@ -5,17 +5,17 @@
 // plan's own things: the reader's questions, a new drawing, and talking to the plan.
 import type { ElementEdit } from "@/lib/data/types";
 import type { Floor, Opening, Plan, Room } from "@/lib/plan/types";
-import type { WallSide } from "@/lib/plan/geometry";
+import type { BuildSide } from "@/lib/plan/house";
 import { DOOR_KINDS, WIDTHS, WIN, doorHeight } from "@/lib/plan/standard";
 import { fmtLen, type Units } from "@/lib/plan/units";
 import { Len } from "@/components/newjob/WallView";
 
 export type BuildTool = "pick" | "door" | "window" | "wall" | "split";
 export const BUILD_TOOLS: { id: BuildTool; label: string; key: string; help: string }[] = [
-  { id: "pick", label: "Pick", key: "v", help: "Click a door, window or room to change it." },
+  { id: "pick", label: "Pick", key: "v", help: "Click a door, window or room to change it. Drag any wall to move it." },
   { id: "door", label: "Door", key: "d", help: "Click a wall to put a door in it." },
   { id: "window", label: "Window", key: "w", help: "Click an outside wall to put a window in it." },
-  { id: "wall", label: "Move wall", key: "m", help: "Click a wall, then push it out or in. The room next door follows." },
+  { id: "wall", label: "Move wall", key: "m", help: "Drag a wall out or in, or drag its ends. Right-click a wall to cut it in two." },
   { id: "split", label: "Split room", key: "s", help: "Click in a room where the new wall goes. It runs straight across." },
 ];
 /** how far one tap of a nudge button goes: 6 inches */
@@ -31,9 +31,9 @@ function Icon({ tool }: { tool: BuildTool }) {
   return <svg {...p}><rect x="3" y="5" width="18" height="14" /><path d="M12 5v14" strokeDasharray="2 2.5" /></svg>;
 }
 
-export interface SidePick { room: Room; side: WallSide; by: number }
+export interface SidePick { room: Room; side: BuildSide; by: number }
 
-export function BuildPanel({ plan, floor, tool, setTool, doorKind, setDoorKind, selected, edits, side, onSave, onRemove, onNudge, onSetBy, onSplit, onJoin, onDone, children }: {
+export function BuildPanel({ plan, floor, tool, setTool, doorKind, setDoorKind, selected, edits, side, onSave, onRemove, onNudge, onSetBy, onSplit, onJoin, onJoinWall, onDone, children }: {
   plan: Plan; floor: Floor | null; tool: BuildTool; setTool: (t: BuildTool) => void;
   doorKind: string; setDoorKind: (k: string) => void;
   selected: string | null; edits: Record<string, ElementEdit>;
@@ -43,6 +43,8 @@ export function BuildPanel({ plan, floor, tool, setTool, doorKind, setDoorKind, 
   onRemove: (o: Opening) => void;
   onNudge: (by: number) => void; onSetBy: (by: number) => void;
   onSplit: (room: Room) => void; onJoin: (room: Room) => void;
+  /** put the pieces of a cut wall back together */
+  onJoinWall: (side: BuildSide) => void;
   onDone: () => void;
   children?: React.ReactNode;
 }) {
@@ -92,7 +94,7 @@ export function BuildPanel({ plan, floor, tool, setTool, doorKind, setDoorKind, 
           <div>
             <p className="eyebrow">Move wall</p>
             <p className="font-display text-[19px] font-bold uppercase leading-tight">{side.side.label} · {side.room.name}</p>
-            <p className="text-[13px] text-muted">{m(side.side.length)} long. Push it out to make the {side.room.name.toLowerCase()} bigger, in to make it smaller.</p>
+            <p className="text-[13px] text-muted">{m(side.side.length)} long. Drag it on the map, or push it out to make the {side.room.name.toLowerCase()} bigger, in to make it smaller. Drag its ends to make it longer or shorter.</p>
           </div>
           <div className="flex items-center gap-2">
             <button className="btn flex-1" onClick={() => onNudge(-STEP)} title="Move it into the room">‹ In</button>
@@ -104,6 +106,14 @@ export function BuildPanel({ plan, floor, tool, setTool, doorKind, setDoorKind, 
             {side.by !== 0 && <button className="btn btn-ghost btn-sm ml-auto" onClick={() => onSetBy(0)}>Put back</button>}
           </div>
           <p className="text-[12px] text-muted">The {side.room.name.toLowerCase()} is {fmtArea(side.room.area_m2)} now{side.by ? ", and the room next door changed with it" : ""}.</p>
+          {side.side.cutA || side.side.cutB ? (
+            <div className="flex items-center gap-2 border-t border-line pt-3">
+              <p className="text-[12.5px] text-muted flex-1">This is a piece of a longer wall, cut so it moves on its own.</p>
+              {!side.by && <button className="btn btn-ghost btn-sm" onClick={() => onJoinWall(side.side)}>Join it back</button>}
+            </div>
+          ) : (
+            <p className="text-[12.5px] text-muted border-t border-line pt-3">Only want part of it to move? Right-click the wall where it should come apart.</p>
+          )}
         </div>
       )}
 

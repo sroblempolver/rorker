@@ -49,7 +49,7 @@ export async function setElementState(jobId: string, elementId: string, status: 
 const EDIT_NUM = ["dx", "dy", "dz", "width", "depth", "height_mm", "facing", "sill_mm", "slide"] as const;
 // whole objects kept as they come (an added object, a door or window added or a wall moved in Build
 // mode, a room cut in two, the furnishing), as long as they're plain data of a sensible size
-const EDIT_OBJ = ["added", "opening", "move", "split", "furnish", "stage_looks"] as const;
+const EDIT_OBJ = ["added", "opening", "move", "split", "cut", "furnish", "stage_looks"] as const;
 const EDIT_STR = ["name", "kind", "type", "spec", "product_name", "product_url", "notes"] as const;
 
 /** Save the whole set of app-side changes for one element (null clears them). */

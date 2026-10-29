@@ -15,6 +15,7 @@ import { HIDDEN_KINDS, TOP_FILL, fixtureBottom, fixtureTop, isWallMounted } from
 import { ITEM_ICON } from "./items";
 import type { Controls, PinTarget, ScreenPoint } from "./target";
 import { usePanZoom } from "./usePanZoom";
+import { BuildLayer, type BuildMap } from "./BuildLayer";
 
 export type ColorMode = "type" | "progress";
 
@@ -49,6 +50,8 @@ interface Props {
   locked?: boolean;
   /** the build stage to show: slab, framing, sheetrock or finished (the default) */
   look?: BuildLook;
+  /** Build mode: walls can be grabbed and dragged */
+  build?: BuildMap;
 }
 
 /** Fixtures that can't be picked or moved in the top view: linework of something else, and things up
@@ -130,12 +133,15 @@ export function FloorCanvas(props: Props) {
   });
   const { view, px, setHome, animateTo, zoomBy } = pz;
 
-  // fly the camera when the level or floor changes
+  // fly the camera when the level or floor changes, not when something on it moves (a cabinet, a wall)
   const first = useRef(true);
+  const homeRef = useRef(homeBox);
+  homeRef.current = homeBox;
   useEffect(() => {
-    setHome(homeBox, !first.current, room ? 0.3 : 0.06);
+    setHome(homeRef.current, !first.current, room ? 0.3 : 0.06);
     first.current = false;
-  }, [homeBox, room, setHome]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floor.id, room?.id, setHome]);
 
   // fly to an element picked from a list
   useEffect(() => {
@@ -215,7 +221,9 @@ export function FloorCanvas(props: Props) {
   const hov = (id: string | null) => () => setHover(id);
 
   // press and hold (touch) or right-click anywhere drops a note right there
-  const handlers = useHoldToPin(pz.handlers, (e) => place(e));
+  // (in Build mode a right-click is for cutting a wall, not for a pin)
+  const holdPin = useHoldToPin(pz.handlers, (e) => place(e));
+  const handlers = props.build ? { ...holdPin, onContextMenu: (e: React.MouseEvent) => e.preventDefault() } : holdPin;
 
   const lw = px; // one screen pixel in world units
   const fs = 13 * px;
@@ -359,6 +367,8 @@ export function FloorCanvas(props: Props) {
           );
         })}
       </g>
+
+      {props.build && <BuildLayer floor={floor} room={room} lw={px} map={props.build} drag={drag} start={start} toWorld={pz.toWorld} />}
 
       {/* openings: glass for windows, timber leaves and swing arcs for doors */}
       <g>
