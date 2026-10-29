@@ -15,6 +15,9 @@ import { furnishWhere, type Furnish } from "@/lib/plan/build";
 import { MicButton, speak, stopSpeaking, useDictation } from "@/components/voice/speech";
 import { useFeedback } from "@/components/ui/feedback";
 import { useEscape } from "@/components/ui/hotkeys";
+import { SketchEditor, picturesFrom, type Backdrop } from "./SketchEditor";
+import { BuildQuestions, SpecStageList, useStagePlay } from "./BuildQuestions";
+import { nextQuestion, outsideAt, specSummary, stagesFromSpec, type BuildSpec } from "@/lib/plan/buildSpec";
 
 export interface NewProjectResult {
   job: { name: string; address: string | null; job_type: string; start_date: string | null; client_name: string | null; client_email: string | null; client_phone: string | null };
@@ -22,6 +25,10 @@ export interface NewProjectResult {
   summary: string;
   /** which floors to furnish; left unset, the job asks when the plan first opens */
   furnish?: Furnish;
+  /** how the house is built (the build questions), and the stages worked out from it; without
+   *  them the job takes its stages from the company template */
+  build?: BuildSpec;
+  stages?: { name: string; description: string }[];
 }
 
 const READING = ["Reading your files…", "Finding the rooms…", "Measuring walls…", "Placing doors and windows…", "Working out the kitchen and baths…", "Almost there…"];
@@ -33,7 +40,10 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
   const [files, setFiles] = useState<File[]>([]);
   const { confirm } = useFeedback();
   const [text, setText] = useState("");
-  const [stage, setStage] = useState<"start" | "working" | "questions" | "message" | "review">("start");
+  const [stage, setStage] = useState<"start" | "working" | "questions" | "message" | "review" | "draw">("start");
+  // drawing by hand: from scratch (no read, or instead of one) or to fix what was read
+  const [drawFrom, setDrawFrom] = useState<"start" | "review">("start");
+  const [backdrops, setBackdrops] = useState<Record<number, Backdrop>>({});
   const [err, setErr] = useState<string | null>(null);
   const [prep, setPrep] = useState<Prepared | null>(null);
   const [step, setStep] = useState<IntakeStep | null>(null);
@@ -52,6 +62,9 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
   const [talking, setTalking] = useState(false);
   // a read plan starts empty: the review asks whether to furnish all of it or pick floors
   const [furnish, setFurnish] = useState<Furnish | undefined>(undefined);
+  // how the house is built: asked on the first page beside the drawings, and in the drawing tool, and
+  // kept through the read, the drawing and the review
+  const [spec, setSpec] = useState<BuildSpec>({});
   const built = useMemo(() => {
     if (!project?.sketch?.floors?.length) return null;
     try { return planFromSketch(project.sketch, prep?.source?.filename ? prep.source : { kind: "notes", filename: "notes" }); } catch { return null; }
@@ -107,6 +120,27 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
     await run((c, s) => c.next(undefined, s));
   };
 
+  const drawMyself = async () => {
+    setErr(null);
+    let p = prep;
+    if (files.length && !p) { setStage("working"); p = await prepareFiles(files); setPrep(p); }
+    setDrawFrom("start");
+    setStage("draw");
+  };
+  const drawn = (sketch: NonNullable<IntakeProject["sketch"]>, b: Record<number, Backdrop>) => {
+    setBackdrops(b);
+    if (drawFrom === "review" && project) {
+      setProject({ ...project, sketch });
+      chat.current?.handDrawn(sketch);
+      setTalk((t) => [...t, { who: "ai", text: "Got your drawing. Tell me anything else to change, or create the project." }]);
+    } else {
+      setProject({ summary: "You drew the plan by hand.", job: { name: text.trim().split(/[.\n]/)[0].slice(0, 60) || "New job", job_type: "renovation" }, sketch });
+      setTalk([]);
+    }
+    setStage("review");
+  };
+  const pictures = useMemo(() => picturesFrom(prep?.parts ?? []), [prep]);
+
   // copy the list now: the input is cleared right after, which empties it
   const addFiles = (list: FileList | null) => { const got = list ? Array.from(list) : []; if (got.length) setFiles((f) => [...f, ...got].slice(0, 8)); };
 
@@ -128,7 +162,7 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className={`px-4 sm:px-6 py-8 w-full mx-auto space-y-5 ${stage === "review" ? "max-w-[1500px]" : "max-w-3xl"}`}>
+      <div className={`px-4 sm:px-6 py-8 w-full mx-auto space-y-5 ${stage === "review" || stage === "draw" ? "max-w-[1500px]" : "max-w-3xl"}`}>
         <div className="relative pr-10">
           <button onClick={() => void leave()} aria-label="Close" title="Close (Esc)" className="absolute right-0 top-0 w-9 h-9 grid place-items-center text-muted hover:text-text rounded-[3px] hover:bg-panel-2">✕</button>
           <p className="eyebrow">New project</p>
@@ -168,9 +202,11 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
                 placeholder={"e.g. Kitchen and two bathrooms for Sam and Priya Okafor at 14 Hadley Road, starting next month."} />
               {dict.listening && <p className="text-[12.5px] text-accent mt-1">Listening… {dict.interim}</p>}
             </div>
+            <BuildQuestions spec={spec} onSpec={setSpec} intro="While you're here, a few quick ones about how the house goes together, from the outside of the wall in. They lay out your stages and color the walls in 3D. Skip any, or answer later." />
             {err && <p className="text-[13px] text-red">{err}</p>}
             <div className="flex gap-2">
               <button className="btn btn-primary flex-1" onClick={start}>Start</button>
+              <button className="btn" onClick={() => void drawMyself()} title="Trace the plan yourself instead of having it read">Draw it myself</button>
               <button className="btn btn-ghost" onClick={() => void leave()}>Cancel</button>
             </div>
           </section>
@@ -202,9 +238,14 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
           </section>
         )}
 
+        {stage === "draw" && (
+          <SketchEditor initial={drawFrom === "review" ? project?.sketch ?? null : null} pictures={pictures} initialBackdrops={drawFrom === "review" ? backdrops : undefined}
+            build={spec} onBuild={setSpec} onDone={drawn} onCancel={() => setStage(drawFrom === "review" && project ? "review" : "start")} />
+        )}
+
         {stage === "review" && project && (
-          <Review project={project} built={built} furnish={furnish} setFurnish={setFurnish} onCreate={onCreate} onRestart={() => { setStage("start"); setStep(null); setProject(null); setTalk([]); setTalkQs(null); setErr(null); setFurnish(undefined); }}
-            check={<Check onFurnish={(room) => { if (built) setFurnish((f) => furnishWhere(built.plan, f, room)); }} lines={talk} busy={talking} questions={talkQs} plan={project.sketch?.questions ?? []} rooms={(project.sketch?.floors ?? []).flatMap((f) => f.rooms.map((r) => r.name))} err={err} onSend={discuss} onStop={() => ctl.current?.abort()} />} />
+          <Review project={project} spec={spec} setSpec={setSpec} onDraw={() => { setDrawFrom("review"); setStage("draw"); }} built={built} furnish={furnish} setFurnish={setFurnish} onCreate={onCreate} onRestart={() => { setStage("start"); setStep(null); setProject(null); setTalk([]); setTalkQs(null); setErr(null); setFurnish(undefined); setSpec({}); }}
+            check={chat.current && <Check onFurnish={(room) => { if (built) setFurnish((f) => furnishWhere(built.plan, f, room)); }} lines={talk} busy={talking} questions={talkQs} plan={project.sketch?.questions ?? []} rooms={(project.sketch?.floors ?? []).flatMap((f) => f.rooms.map((r) => r.name))} err={err} onSend={discuss} onStop={() => ctl.current?.abort()} />} />
         )}
       </div>
     </div>
@@ -232,8 +273,10 @@ function Questions({ step, answers, setAnswers, onSend, onSkip, err }: { step: E
   );
 }
 
-function Review({ project, built, furnish, setFurnish, onCreate, onRestart, check }: {
-  project: IntakeProject; built: { plan: Plan } | null; furnish: Furnish | undefined; setFurnish: (f: Furnish) => void;
+function Review({ project, built, furnish, setFurnish, onCreate, onRestart, check, onDraw, spec, setSpec }: {
+  project: IntakeProject; onDraw: () => void;
+  /** how the house is built, answered so far (the questions still open show here too) */
+  spec: BuildSpec; setSpec: (s: BuildSpec) => void; built: { plan: Plan } | null; furnish: Furnish | undefined; setFurnish: (f: Furnish) => void;
   onCreate: (r: NewProjectResult) => void; onRestart: () => void; check: ReactNode;
 }) {
   const [job, setJob] = useState({
@@ -251,6 +294,15 @@ function Review({ project, built, furnish, setFurnish, onCreate, onRestart, chec
 
   const [view3d, setView3d] = useState(false);
   const states = useMemo(() => new Map(), []);
+  // the stages the build answers make, each one a look at the house in 3D
+  const specStages = useMemo(() => stagesFromSpec(spec), [spec]);
+  const names = useMemo(() => specStages.map((s) => s.name), [specStages]);
+  const play = useStagePlay(names.length);
+  const shownStage = play.i >= 0 ? specStages[play.i] ?? null : null;
+  const outside = useMemo(() => outsideAt(spec, names, play.i), [spec, names, play.i]);
+  const qsDone = !nextQuestion(spec);
+  // a stage picked shows the whole house in 3D
+  useEffect(() => { if (play.i >= 0) { setView3d(true); setLevel({ kind: "exterior" }); } }, [play.i]);
   const field = (k: keyof typeof job, label: string, type = "text") => (
     <div><label className="label" htmlFor={`np-${k}`}>{label}</label><input id={`np-${k}`} type={type} className="input" value={job[k]} onChange={(e) => setJob({ ...job, [k]: e.target.value })} /></div>
   );
@@ -263,6 +315,10 @@ function Review({ project, built, furnish, setFurnish, onCreate, onRestart, chec
         <p className="eyebrow">Here&apos;s what I made</p>
         <p className="text-[15px] leading-relaxed">{project.summary}</p>
         {plan && <p className="text-[13px] text-muted">{units > 1 ? `${units} homes, ` : ""}{plan.floors.length} floor{plan.floors.length === 1 ? "" : "s"}, {rooms} rooms. You can fix anything later in the job.</p>}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <button className="btn btn-sm" onClick={onDraw}>{plan ? "Fix it by drawing" : "Draw the plan"}</button>
+          <span className="text-[12.5px] text-muted">{plan ? "Wrong rooms or walls? Trace over the drawing yourself." : "Trace the rooms over your drawing."}</span>
+        </div>
       </section>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px] items-start">
         {plan ? (
@@ -271,11 +327,17 @@ function Review({ project, built, furnish, setFurnish, onCreate, onRestart, chec
               <PlanViewer plan={plan} level={level} setLevel={setLevel} selected={null} onSelect={nothing} selectedPin={null} onSelectPin={nothing}
                 states={states} pins={[]} colorMode={colorMode} setColorMode={setColorMode} pinMode={false} setPinMode={nothing} onPlacePin={nothing} draft={null}
                 flyTo={null} onAllJobs={nothing} jobName={job.name} items={[]} selectedItem={null} onSelectItem={nothing} onMoveItem={nothing}
-                onMovePin={nothing} onMoveFixture={nothing} view3d={view3d} setView3d={setView3d} can3d readOnly furnish={furnish} onFurnish={setFurnish} />
+                onMovePin={nothing} onMoveFixture={nothing} view3d={view3d} setView3d={setView3d} can3d readOnly furnish={furnish} onFurnish={setFurnish}
+                look={shownStage?.look} outside={outside} />
+              {shownStage && <p className="absolute left-2 bottom-2 px-2.5 py-1.5 rounded-[4px] bg-[#17181b]/90 border border-line text-[13px] font-display font-bold tracking-[0.06em] uppercase pointer-events-none" aria-live="polite">{play.i + 1}. {shownStage.name}</p>}
             </div>
           </section>
         ) : <section className="card p-5 text-[14px] text-muted">No plan yet: there wasn&apos;t a drawing to read. You can add one to the job later, or tell me about the rooms here.</section>}
-        {check}
+        <div className="space-y-3 xl:sticky xl:top-4">
+          {check}
+          {!qsDone && <BuildQuestions spec={spec} onSpec={setSpec} />}
+          {Object.keys(spec).length > 0 && <SpecStageList names={names} hints={specStages.map((s) => s.description)} play={play} />}
+        </div>
       </div>
       <section className="card p-5 space-y-3">
         <p className="eyebrow">Job</p>
@@ -292,11 +354,13 @@ function Review({ project, built, furnish, setFurnish, onCreate, onRestart, chec
         {field("client_name", "Name")}
         <div className="grid sm:grid-cols-2 gap-3">{field("client_phone", "Phone", "tel")}{field("client_email", "Email", "email")}</div>
       </section>
+      {Object.keys(spec).length > 0 && <p className="text-[13px] text-muted">Built with: {specSummary(spec)}</p>}
       <div className="flex gap-2">
         <button className="btn btn-primary flex-1" onClick={() => onCreate({
-          job: { name: job.name.trim() || "New job", address: job.address.trim() || null, job_type: job.job_type, start_date: job.start_date || null, client_name: job.client_name.trim() || null, client_email: job.client_email.trim() || null, client_phone: job.client_phone.trim() || null },
-          plan, summary: project.summary, furnish,
-        })}>Create the project</button>
+            job: { name: job.name.trim() || "New job", address: job.address.trim() || null, job_type: job.job_type, start_date: job.start_date || null, client_name: job.client_name.trim() || null, client_email: job.client_email.trim() || null, client_phone: job.client_phone.trim() || null },
+            plan, summary: project.summary, furnish,
+            ...(Object.keys(spec).length ? { build: spec, stages: specStages.map((s) => ({ name: s.name, description: s.description })) } : {}),
+          })}>Create the project</button>
         <button className="btn btn-ghost" onClick={onRestart}>Start over</button>
       </div>
     </>

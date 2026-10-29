@@ -1,0 +1,465 @@
+// Accounts and links for the build site (build.rorker.com). The page talks to the database itself for
+// the contractor (row-level security lets admins in), and comes here for the rest:
+//   signup  make a contractor's sign-in (confirmed straight away, so there's no email to wait for)
+//   link    open a crew or client link: only what that link may show, never the tables
+//   photo   a crew member sends a photo onto one of their own tasks
+//   done    a crew member marks one of their own tasks done
+//   client  a client signs, declines or pays on their money page (prices and lines can't change)
+//   message a client writes to the contractor (words, a photo, rooms or objects tagged) on the job's thread
+//   messages the job's thread again, for a client page that's open
+//   note    a client drops a note on their map: private, or shared with the contractor if the job allows
+//   unnote  a client takes one of their own notes off
+//   got     a client ticks off something on their shopping list
+//   team    a crew member's link reads the team board: what's to everyone, to them, and their answers
+//   teammsg a crew member answers the office on the team board (words and a photo)
+//   save    a signed-in person keeps a link they were sent in their own account ("Shared with you")
+//   shared  a signed-in person's saved links: whose they are and what's on them
+//   unsave  a signed-in person takes one off their list (the link itself still works)
+//   adopt   a contractor, signed in, takes on a homeowner's project from the homeowner's link: the job is
+//           copied into the contractor's account, the homeowner gets its client page in "Shared with
+//           you", and the contractor's account records who referred them
+//   upload  crew or a client adds a photo to a job's Photos, tagged with a room (clients get back the
+//           job's photos they see)
+// The rules for what a link shows and what a client may change are in core.js, built from the page's own
+// code (web/preview/build-links.mjs), so both sides agree.
+import { createClient } from "npm:@supabase/supabase-js@2.118.0";
+import { cleanPlaces, clientBilling, clientBuys, clientNote, clientPhotos, clientPinIds, clientView, companyOf, crewPinIds, crewWork, findLink, forClient, fromRecords, linkLive, linkPhoto, teamFor } from "./core.js";
+
+const ORIGINS = [/^https:\/\/([a-z0-9-]+\.)?rorker\.com$/, /^https:\/\/[a-z0-9-]+\.github\.io$/, /^https?:\/\/localhost(:\d+)?$/, /^https?:\/\/127\.0\.0\.1(:\d+)?$/];
+const extra = (Deno.env.get("ALLOWED_ORIGINS") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+const allowed = (o: string | null) => !!o && (extra.includes(o) || ORIGINS.some((r) => r.test(o)));
+
+const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+const BUCKET = "build-files";
+const MAX_PHOTO = 12 * 1024 * 1024;
+const WEEK = 7 * 24 * 3600;
+
+const hits = new Map<string, number[]>();
+function limited(key: string, max: number, windowMs = 10 * 60_000) {
+  const now = Date.now();
+  const list = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
+  list.push(now);
+  hits.set(key, list);
+  return list.length > max;
+}
+
+type Row = { account_id: string; kind: string; id: string; job_id: string | null; data: Record<string, unknown> };
+const str = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(0, n) : "");
+const uid = () => crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+
+/** The link with this token, its account, and that account's rows. */
+async function open(token: string) {
+  if (!/^[A-Za-z0-9_-]{16,64}$/.test(token)) return null;
+  const { data: hit } = await db.from("records").select("account_id, data").eq("kind", "share").eq("data->>token", token).maybeSingle();
+  if (!hit || !linkLive(hit.data)) return null;
+  const q = db.from("records").select("account_id, kind, id, job_id, data").eq("account_id", hit.account_id);
+  const [{ data: rows, error }, { data: acct }] = await Promise.all([q.limit(20000), db.from("accounts").select("name").eq("id", hit.account_id).single()]);
+  if (error) throw error;
+  const saved = fromRecords(rows as Row[]);
+  const link = findLink(saved, token);
+  if (!link) return null;
+  return { accountId: hit.account_id as string, saved, link, company: companyOf(hit.account_id, acct?.name ?? "Your contractor", saved.settings) };
+}
+
+/** Who's signed in, from the page's sign-in (none for a plain link). */
+async function signedIn(req: Request) {
+  const jwt = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  if (jwt.split(".").length !== 3) return null;
+  const { data, error } = await db.auth.getUser(jwt);
+  return error || !data.user ? null : data.user;
+}
+const accessId = (shareId: string, userId: string) => `${shareId}:${userId}`;
+
+/** The links someone saved to their account, with whose they are and whether they still open. */
+async function savedBy(userId: string) {
+  const { data: mine, error } = await db.from("records").select("account_id, id, data").eq("kind", "access").eq("data->>user_id", userId).limit(500);
+  if (error) throw error;
+  if (!mine?.length) return [];
+  const accounts = [...new Set(mine.map((r) => r.account_id as string))];
+  const shareIds = [...new Set(mine.map((r) => (r.data as { share_id: string }).share_id))];
+  const [{ data: shares }, { data: accts }, { data: settings }] = await Promise.all([
+    db.from("records").select("account_id, id, data").eq("kind", "share").in("account_id", accounts).in("id", shareIds),
+    db.from("accounts").select("id, name").in("id", accounts),
+    db.from("records").select("account_id, data").eq("kind", "settings").in("account_id", accounts),
+  ]);
+  const jobIds = [...new Set((shares ?? []).map((r) => (r.data as { job_id: string | null }).job_id).filter(Boolean))] as string[];
+  const { data: jobs } = jobIds.length ? await db.from("records").select("account_id, id, data").eq("kind", "job").in("account_id", accounts).in("id", jobIds) : { data: [] };
+  const out = [];
+  for (const r of mine) {
+    const a = r.data as { share_id: string; saved_at: string };
+    const l = (shares ?? []).find((x) => x.account_id === r.account_id && x.id === a.share_id)?.data as { token: string; label: string; job_id: string | null; audience?: string; member_id: string | null } | undefined;
+    if (!l) continue;
+    const set = (settings ?? []).find((x) => x.account_id === r.account_id)?.data as { brand?: { name?: string } } | undefined;
+    const job = l.job_id ? ((jobs ?? []).find((x) => x.account_id === r.account_id && x.id === l.job_id)?.data as { job?: { name: string; address: string | null } } | undefined)?.job : null;
+    out.push({
+      id: r.id, token: l.token, kind: l.audience === "client" ? "c" : "s", label: l.label, live: linkLive(l),
+      company: set?.brand?.name || (accts ?? []).find((x) => x.id === r.account_id)?.name || "A contractor",
+      job: job ? { name: job.name, address: job.address } : null, saved_at: a.saved_at,
+    });
+  }
+  return out.sort((x, y) => Number(y.live) - Number(x.live) || y.saved_at.localeCompare(x.saved_at));
+}
+
+/** Every string in a saved thing, rewritten (ids, file paths), keys kept. */
+function mapStrings(v: unknown, f: (s: string, key: string) => string, key = ""): unknown {
+  if (typeof v === "string") return f(v, key);
+  if (Array.isArray(v)) return v.map((x) => mapStrings(x, f, key));
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, mapStrings(x, f, k)]));
+  return v;
+}
+// the kinds that make up one job, and the fields in them that point at another of the job's things
+const JOB_KINDS = ["job", "plan", "stage", "pin", "item", "run", "edits", "states", "billing", "material", "comment", "message", "photo"];
+const REF_KEYS = new Set(["job_id", "pin_id", "stage_id", "task_id", "current_plan_id", "plan_id", "run_id"]);
+// the people on the homeowner's side mean nothing in the contractor's team (the client stays the client)
+const PEOPLE_KEYS = new Set(["buyer", "installer", "author_id", "assignee", "member_id"]);
+
+/** A homeowner's job, copied into a contractor's account: new ids, its files copied over, the
+ *  homeowner set as the client, and a client link the homeowner already has in their account. */
+async function adoptJob(from: string, jobId: string, to: string, homeowner: { id: string; email: string | null; name: string | null }) {
+  const { data: rows, error } = await db.from("records").select("kind, id, job_id, data").eq("account_id", from).eq("job_id", jobId).in("kind", JOB_KINDS).limit(20000);
+  if (error) throw error;
+  if (!rows?.some((r) => r.kind === "job")) return null;
+  const pre = `h${uid().slice(0, 6)}_`;
+  const newJob = pre + jobId;
+  const ids = new Set(rows.map((r) => r.id as string));
+  const files = new Map<string, string>();
+  const one = (s: string, key: string) => {
+    if (s.startsWith(`${from}/`)) { const n = `${to}/${s.slice(from.length + 1)}`; files.set(s, n); return n; }
+    if (s === jobId && REF_KEYS.has(key)) return newJob;
+    if (s === `client:${jobId}`) return `client:${newJob}`;
+    if (REF_KEYS.has(key) && ids.has(s)) return pre + s;
+    if (PEOPLE_KEYS.has(key)) return "";
+    return s;
+  };
+  const out = rows.map((r) => {
+    // a plan's drawing, the job's edits, items and money keep the ids inside them (walls, rooms,
+    // quotes); only their files and their job move
+    const deep = ["plan", "edits", "states", "item", "billing"].includes(r.kind);
+    const data = (deep ? mapStrings(r.data, (s, k) => (s.startsWith(`${from}/`) || (k === "job_id" && s === jobId) ? one(s, k) : s)) : mapStrings(r.data, one)) as Record<string, unknown>;
+    const own = ["job", "edits", "states", "billing"].includes(r.kind);
+    if (!own && data && data.id === r.id) data.id = pre + r.id;
+    if (r.kind === "pin") { const p = data as { tagged?: string[] }; p.tagged = (p.tagged ?? []).filter((t) => t.startsWith("client:")); }
+    if (r.kind === "job") {
+      const j = (data as { job: Record<string, unknown> }).job;
+      j.id = newJob;
+      j.client_name = j.client_name || homeowner.name || "Homeowner";
+      j.client_email = j.client_email || homeowner.email;
+    }
+    for (const k of PEOPLE_KEYS) if (data && data[k] === "") data[k] = null;
+    const id = own ? newJob : pre + r.id;
+    return { account_id: to, kind: r.kind, id, job_id: newJob, data };
+  });
+  for (const [a, b] of files) { const c = await db.storage.from(BUCKET).copy(a, b); if (c.error && !/exist/i.test(c.error.message)) console.error("copy", a, c.error.message); }
+  for (let i = 0; i < out.length; i += 100) {
+    const { error: e } = await db.from("records").insert(out.slice(i, i + 100));
+    if (e) throw e;
+  }
+  // the homeowner keeps the project as its client: a client link, already in their account
+  const at = new Date().toISOString();
+  const share = { id: uid(), job_id: newJob, token: `${uid()}${uid()}`, label: homeowner.name || "Client", member_id: null, pin_ids: [], expires_at: null, revoked_at: null, created_at: at, audience: "client" };
+  const access = { id: accessId(share.id, homeowner.id), share_id: share.id, user_id: homeowner.id, email: homeowner.email, name: homeowner.name, saved_at: at };
+  const { error: e2 } = await db.from("records").insert([
+    { account_id: to, kind: "share", id: share.id, job_id: newJob, data: share },
+    { account_id: to, kind: "access", id: access.id, job_id: newJob, data: access },
+  ]);
+  if (e2) throw e2;
+  return { job: newJob, token: share.token };
+}
+
+/** Signed addresses for stored photos (a comment holds file paths). */
+async function sign(paths: string[]): Promise<Map<string, string>> {
+  const files = [...new Set(paths.filter((p) => p && !/^(https?:|blob:|data:)/.test(p)))];
+  const out = new Map<string, string>(paths.filter((p) => /^(https?:|data:)/.test(p)).map((p) => [p, p]));
+  if (!files.length) return out;
+  const { data } = await db.storage.from(BUCKET).createSignedUrls(files, WEEK);
+  for (const s of data ?? []) if (s.path && s.signedUrl) out.set(s.path, s.signedUrl);
+  return out;
+}
+async function photosByPin(comments: { pin_id: string; photos: string[] }[], pins: Set<string>) {
+  const mine = comments.filter((c) => pins.has(c.pin_id));
+  const urls = await sign(mine.flatMap((c) => c.photos));
+  const by: Record<string, string[]> = {};
+  for (const c of mine) for (const p of c.photos) { const u = urls.get(p); if (u) (by[c.pin_id] ??= []).push(u); }
+  return by;
+}
+
+type Msg = { id: string; job_id: string; photos: string[] };
+/** A job's thread with addresses to show its photos. */
+async function thread(messages: Msg[], jobId: string) {
+  const mine = messages.filter((m) => m.job_id === jobId);
+  const urls = await sign(mine.flatMap((m) => m.photos));
+  return mine.map((m) => ({ ...m, photos: m.photos.map((p) => urls.get(p)).filter(Boolean) }));
+}
+/** The job's photos a client sees, with addresses to show. */
+async function photosForClient(list: { src: string }[]) {
+  const urls = await sign(list.map((p) => p.src));
+  return list.flatMap((p) => (urls.get(p.src) ? [{ ...p, src: urls.get(p.src) }] : []));
+}
+async function photo(body: Record<string, unknown>) {
+  const type = str(body.type, 40) || "image/jpeg";
+  if (!/^image\/(jpeg|png|webp|heic|heif|gif)$/.test(type)) return { error: "Send a photo (JPG, PNG or HEIC)." };
+  const b64 = typeof body.data === "string" ? body.data : "";
+  if (!b64 || b64.length > MAX_PHOTO * 1.37) return { error: "That photo is too big. Try a smaller one." };
+  return { type, bytes: Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)), ext: type.split("/")[1].replace("jpeg", "jpg") };
+}
+
+Deno.serve(async (req) => {
+  const origin = req.headers.get("origin");
+  const cors: Record<string, string> = {
+    "Access-Control-Allow-Origin": allowed(origin) ? origin! : "null",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "content-type, authorization, apikey, x-client-info",
+    "Vary": "Origin",
+  };
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+  if (req.method !== "POST") return json({ error: "Not found." }, 404);
+  if (!allowed(origin)) return json({ error: "Not allowed from this page." }, 403);
+  const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
+  if (limited(ip, 300)) return json({ error: "Too many requests. Give it a minute." }, 429);
+
+  let body: Record<string, unknown>;
+  try { body = await req.json(); } catch { return json({ error: "Bad request." }, 400); }
+  const action = str(body.action, 20);
+
+  try {
+    if (action === "signup") {
+      if (limited(`signup:${ip}`, 10)) return json({ error: "Too many new accounts from here. Try again later." }, 429);
+      const email = str(body.email, 200).toLowerCase(), password = typeof body.password === "string" ? body.password : "";
+      const name = str(body.name, 80), company = str(body.company, 120);
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: "That email doesn't look right." }, 400);
+      if (password.length < 8 || password.length > 72) return json({ error: "Use a password of at least 8 characters." }, 400);
+      const { error } = await db.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { full_name: name || null, company: company || null } });
+      if (error) {
+        if (/already|registered|exists/i.test(error.message)) return json({ error: "That email already has an account. Sign in instead." }, 409);
+        throw error;
+      }
+      return json({ ok: true });
+    }
+
+    if (action === "shared" || action === "unsave") {
+      const user = await signedIn(req);
+      if (!user) return json({ error: "Sign in first." }, 401);
+      if (action === "shared") return json({ shared: await savedBy(user.id) });
+      const id = str(body.id, 120);
+      const { error } = await db.from("records").delete().eq("kind", "access").eq("id", id).eq("data->>user_id", user.id);
+      if (error) throw error;
+      return json({ ok: true });
+    }
+
+    const token = str(body.token, 64);
+    const o = await open(token);
+    if (!o) return json({ error: "This link was turned off or has run out. Ask the contractor for a new one." }, 404);
+    const { saved, link, company, accountId } = o;
+
+    // a homeowner's "send to my contractor" link: only to see what it is and to take it on
+    if (link.audience === "contractor" && action !== "link" && action !== "adopt") return json({ error: "Not on this link." }, 403);
+    if (action === "adopt") {
+      if (link.audience !== "contractor" || !link.job_id) return json({ error: "Not on this link." }, 403);
+      const user = await signedIn(req);
+      if (!user) return json({ error: "Sign in first." }, 401);
+      const { data: mine } = await db.from("account_users").select("account_id").eq("user_id", user.id).eq("role", "admin").order("created_at").limit(1).maybeSingle();
+      if (!mine) return json({ error: "Open your Rorker account first, then try the link again." }, 409);
+      const to = mine.account_id as string;
+      if (to === accountId) return json({ error: "That's your own project. Send the link to your contractor." }, 400);
+      const hid = `${link.id}:${to}`;
+      const { data: done } = await db.from("records").select("data").eq("account_id", accountId).eq("kind", "handoff").eq("id", hid).maybeSingle();
+      if (done) return json({ ok: true, job: (done.data as { job: string }).job, again: true });
+      if (limited(`adopt:${user.id}`, 20)) return json({ error: "That's a lot at once. Give it a minute." }, 429);
+      const { data: acct } = await db.from("accounts").select("created_by").eq("id", accountId).single();
+      const { data: owner } = await db.auth.admin.getUserById(acct!.created_by as string);
+      const ou = owner?.user;
+      const homeowner = { id: acct!.created_by as string, email: ou?.email ?? null, name: (ou?.user_metadata?.full_name as string | undefined) ?? null };
+      const r = await adoptJob(accountId, link.job_id, to, homeowner);
+      if (!r) return json({ error: "This project isn't there any more." }, 404);
+      const at = new Date().toISOString();
+      const { data: them } = await db.from("accounts").select("name").eq("id", to).single();
+      const { error } = await db.from("records").insert([
+        // who referred this contractor, for the credits
+        { account_id: to, kind: "referral", id: `${accountId}:${r.job}`, job_id: r.job, data: { by_account: accountId, by_user: homeowner.id, by_email: homeowner.email, by_name: homeowner.name, job_id: r.job, from_job: link.job_id, at } },
+        // and on the homeowner's side, who took it on
+        { account_id: accountId, kind: "handoff", id: hid, job_id: link.job_id, data: { id: hid, share_id: link.id, account: to, company: them?.name ?? "Your contractor", user_id: user.id, email: user.email ?? null, job: r.job, at } },
+      ]);
+      if (error) throw error;
+      return json({ ok: true, job: r.job });
+    }
+
+    if (action === "save") {
+      const user = await signedIn(req);
+      if (!user) return json({ error: "Sign in first." }, 401);
+      const id = accessId(link.id, user.id);
+      const access = { id, share_id: link.id, user_id: user.id, email: user.email ?? null, name: (user.user_metadata?.full_name as string | undefined) ?? null, saved_at: new Date().toISOString() };
+      // saving it again keeps the first date
+      const { error } = await db.from("records").upsert({ account_id: accountId, kind: "access", id, job_id: link.job_id, data: access }, { onConflict: "account_id,kind,id", ignoreDuplicates: true });
+      if (error) throw error;
+      return json({ ok: true, id });
+    }
+
+    if (action === "link" && link.audience === "contractor") {
+      const d = saved.jobs.find((x: { job: { id: string } }) => x.job.id === link.job_id);
+      if (!d) return json({ error: "This project isn't there any more." }, 404);
+      const user = req.headers.get("authorization") ? await signedIn(req) : null;
+      return json({ kind: "handoff", from: link.label, job: { name: d.job.name, address: d.job.address }, rooms: (d.plan?.data?.floors ?? []).reduce((n: number, f: { rooms: unknown[] }) => n + f.rooms.length, 0), tasks: d.pins.length, signedIn: !!user });
+    }
+
+    if (action === "link") {
+      // a signed-in person: whether this link is already in their account
+      const user = req.headers.get("authorization") ? await signedIn(req) : null;
+      const saved_ = user ? !!(await db.from("records").select("id").eq("account_id", accountId).eq("kind", "access").eq("id", accessId(link.id, user.id)).maybeSingle()).data : false;
+      const mine = user ? { signedIn: true, saved: saved_ } : { signedIn: false, saved: false };
+      if (link.audience === "client") {
+        const view = clientView(link, company, saved, await photosByPin(saved.comments, clientPinIds(link, saved)), await thread(saved.messages, link.job_id), await photosForClient(clientPhotos(link, saved)));
+        return view ? json({ kind: "client", view, ...mine }) : json({ error: "This job isn't there any more." }, 404);
+      }
+      const pins = new Set(saved.jobs.flatMap((d: { pins: { id: string }[] }) => d.pins.map((p) => p.id)));
+      const work = crewWork(link, company, saved, await photosByPin(saved.comments, pins));
+      return work ? json({ kind: "crew", work, person: !!link.member_id, ...mine }) : json({ error: "This link was turned off." }, 404);
+    }
+
+    if (action === "photo" || action === "done") {
+      if (link.audience === "client") return json({ error: "Not on this link." }, 403);
+      const pinId = str(body.pin, 80);
+      if (!crewPinIds(link, saved).has(pinId)) return json({ error: "That task isn't on your link." }, 403);
+      const job = saved.jobs.find((d: { pins: { id: string }[] }) => d.pins.some((p) => p.id === pinId));
+      const pin = job.pins.find((p: { id: string }) => p.id === pinId);
+      const pinComments = saved.comments.filter((c: { pin_id: string }) => c.pin_id === pinId);
+
+      if (action === "done") {
+        if (pin.close_requirement === "photo" && !pinComments.some((c: { photos: string[] }) => c.photos.length)) return json({ error: "This one needs a photo before it's done. Take the photo first." }, 400);
+        const { comment_count: _, ...rest } = pin;
+        void _;
+        const next = { ...rest, status: "done", closed_at: new Date().toISOString() };
+        const { error } = await db.from("records").update({ data: next, updated_at: new Date().toISOString() }).eq("account_id", accountId).eq("kind", "pin").eq("id", pinId);
+        if (error) throw error;
+        return json({ ok: true });
+      }
+
+      if (limited(`photo:${token}`, 60)) return json({ error: "That's a lot of photos at once. Give it a minute." }, 429);
+      const f = await photo(body);
+      if ("error" in f) return json({ error: f.error }, 400);
+      const path = `${accountId}/${job.job.id}/pins/${pinId}/${uid()}.${f.ext}`;
+      const up = await db.storage.from(BUCKET).upload(path, f.bytes, { contentType: f.type });
+      if (up.error) throw up.error;
+      const comment = { id: uid(), pin_id: pinId, author_id: null, author_name: link.label, body: `Photo from ${link.label}`, photos: [path], created_at: new Date().toISOString() };
+      const { error } = await db.from("records").insert({ account_id: accountId, kind: "comment", id: comment.id, job_id: job.job.id, data: comment });
+      if (error) throw error;
+      const by = await photosByPin([...pinComments, comment], new Set([pinId]));
+      return json({ photos: by[pinId] ?? [] });
+    }
+
+    if (action === "upload") {
+      if (limited(`upload:${token}`, 60)) return json({ error: "That's a lot of photos at once. Give it a minute." }, 429);
+      const jobId = link.audience === "client" ? link.job_id : str(body.job, 80);
+      const f = await photo(body);
+      if ("error" in f) return json({ error: f.error }, 400);
+      const id = uid();
+      const p = linkPhoto(link, saved, jobId, body.input, id, `${accountId}/${jobId}/photos/${id}.${f.ext}`, new Date().toISOString());
+      if (!p) return json({ error: "You can't add photos to that job from this link." }, 403);
+      const up = await db.storage.from(BUCKET).upload(p.src, f.bytes, { contentType: f.type });
+      if (up.error) throw up.error;
+      const { error } = await db.from("records").insert({ account_id: accountId, kind: "photo", id: p.id, job_id: jobId, data: p });
+      if (error) throw error;
+      if (link.audience !== "client") return json({ ok: true });
+      return json({ photos: await photosForClient(clientPhotos(link, { ...saved, photos: [...saved.photos, p] })) });
+    }
+
+    if (action === "client") {
+      if (link.audience !== "client" || !link.job_id) return json({ error: "Not on this link." }, 403);
+      const job = saved.jobs.find((d: { job: { id: string } }) => d.job.id === link.job_id);
+      if (!job) return json({ error: "This job isn't there any more." }, 404);
+      const sent = body.billing as { quotes?: unknown[] } | undefined;
+      if (!sent || !Array.isArray(sent.quotes)) return json({ error: "Bad request." }, 400);
+      const r = clientBilling(job.billing ?? { quotes: [], invoices: [], payments: [] }, sent);
+      if ("error" in r) return json({ error: r.error }, 400);
+      const { error } = await db.from("records").upsert({ account_id: accountId, kind: "billing", id: job.job.id, job_id: job.job.id, data: r.billing, updated_at: new Date().toISOString() });
+      if (error) throw error;
+      return json({ billing: forClient(r.billing) });
+    }
+
+    if (action === "message" || action === "messages") {
+      if (link.audience !== "client" || !link.job_id) return json({ error: "Not on this link." }, 403);
+      const job = saved.jobs.find((d: { job: { id: string } }) => d.job.id === link.job_id);
+      if (!job) return json({ error: "This job isn't there any more." }, 404);
+      if (action === "messages") return json({ messages: await thread(saved.messages, job.job.id) });
+      if (limited(`message:${token}`, 60)) return json({ error: "That's a lot of messages at once. Give it a minute." }, 429);
+      const text = str(body.body, 4000);
+      const photos: string[] = [];
+      if (body.data) {
+        const f = await photo(body);
+        if ("error" in f) return json({ error: f.error }, 400);
+        const path = `${accountId}/${job.job.id}/messages/${uid()}.${f.ext}`;
+        const up = await db.storage.from(BUCKET).upload(path, f.bytes, { contentType: f.type });
+        if (up.error) throw up.error;
+        photos.push(path);
+      }
+      if (!text && !photos.length) return json({ error: "Write something or add a photo." }, 400);
+      const places = cleanPlaces(body.places);
+      const m = { id: uid(), job_id: job.job.id, from: "client", author_name: job.job.client_name || "Client", body: text || null, photos, created_at: new Date().toISOString(), ...(places.length ? { places } : {}) };
+      const { error } = await db.from("records").insert({ account_id: accountId, kind: "message", id: m.id, job_id: job.job.id, data: m });
+      if (error) throw error;
+      return json({ messages: await thread([...saved.messages, m], job.job.id) });
+    }
+
+    if (action === "team" || action === "teammsg") {
+      if (link.audience === "client" || !link.member_id) return json({ error: "Not on this link." }, 403);
+      const me = saved.members.find((m: { id: string }) => m.id === link.member_id) as { id: string; full_name: string } | undefined;
+      if (!me) return json({ error: "You're not on this team any more." }, 403);
+      const board = async (list: { photos: string[] }[]) => {
+        const mine = teamFor(list, me.id);
+        const urls = await sign(mine.flatMap((m: { photos: string[] }) => m.photos));
+        return mine.map((m: { photos: string[] }) => ({ ...m, photos: m.photos.map((p) => urls.get(p)).filter(Boolean) }));
+      };
+      if (action === "team") return json({ messages: await board(saved.team) });
+      if (limited(`team:${token}`, 60)) return json({ error: "That's a lot of messages at once. Give it a minute." }, 429);
+      const text = str(body.body, 4000);
+      const photos: string[] = [];
+      if (body.data) {
+        const f = await photo(body);
+        if ("error" in f) return json({ error: f.error }, 400);
+        const path = `${accountId}/team/messages/${uid()}.${f.ext}`;
+        const up = await db.storage.from(BUCKET).upload(path, f.bytes, { contentType: f.type });
+        if (up.error) throw up.error;
+        photos.push(path);
+      }
+      if (!text && !photos.length) return json({ error: "Write something or add a photo." }, 400);
+      const m = { id: uid(), from: "crew", author_name: me.full_name, member_id: me.id, to: null, body: text || null, photos, created_at: new Date().toISOString() };
+      const { error } = await db.from("records").insert({ account_id: accountId, kind: "team", id: m.id, job_id: null, data: m });
+      if (error) throw error;
+      return json({ messages: await board([...saved.team, m]) });
+    }
+
+    if (action === "note" || action === "unnote" || action === "got") {
+      if (link.audience !== "client" || !link.job_id) return json({ error: "Not on this link." }, 403);
+      const at = new Date().toISOString();
+      if (action === "got") {
+        const id = str(body.id, 80);
+        if (!clientBuys(link, saved).has(id)) return json({ error: "That isn't on your list." }, 403);
+        const line = saved.materials.find((m: { id: string }) => m.id === id);
+        const { error } = await db.from("records").update({ data: { ...line, status: body.undo ? "to_buy" : "got" }, updated_at: at }).eq("account_id", accountId).eq("kind", "material").eq("id", id);
+        if (error) throw error;
+        return json({ ok: true });
+      }
+      if (action === "unnote") {
+        const id = str(body.id, 80);
+        const own = (p: { id: string; job_id: string; created_by: string | null }) => p.id === id && p.job_id === link.job_id && p.created_by === "client";
+        const kind = saved.notes.some(own) ? "note" : saved.jobs.some((d: { pins: { id: string; job_id: string; created_by: string | null }[] }) => d.pins.some(own)) ? "pin" : null;
+        if (!kind) return json({ error: "That note isn't yours." }, 403);
+        const { error } = await db.from("records").delete().eq("account_id", accountId).eq("kind", kind).eq("id", id);
+        if (error) throw error;
+        return json({ ok: true });
+      }
+      if (limited(`note:${token}`, 60)) return json({ error: "That's a lot of notes at once. Give it a minute." }, 429);
+      const n = clientNote(link, saved, body.note, uid(), at);
+      if (!n) return json({ error: "That note couldn't be added. Give it a title." }, 400);
+      const shared = !!(body.note as { shared?: boolean })?.shared;
+      const { error } = await db.from("records").insert({ account_id: accountId, kind: shared ? "pin" : "note", id: n.id, job_id: n.job_id, data: n });
+      if (error) throw error;
+      return json({ note: n, shared });
+    }
+
+    return json({ error: "Not found." }, 404);
+  } catch (e) {
+    console.error(e);
+    return json({ error: "Something went wrong on our side. Try again in a moment." }, 500);
+  }
+});

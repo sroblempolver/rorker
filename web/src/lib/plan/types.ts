@@ -1,5 +1,7 @@
 // Mirror of agent/rorker_agent/schema.py. Millimetres, x right, y down, one frame for all floors.
 import type { Part } from "./catalog";
+import type { Sketch } from "./sketch";
+import type { CabSpec } from "./cabinets";
 export type Pt = [number, number];
 export type BBox = [number, number, number, number];
 
@@ -21,10 +23,15 @@ export interface Room {
 }
 export interface Wall {
   id: string; polygon: Pt[]; length_mm: number; thickness_mm: number; exterior: boolean; room_ids: string[];
+  /** a wall lower than the ceiling (a half wall), mm; `free` when it was drawn as a piece of its own
+   *  (it stands as drawn, never read as a porch edge) */
+  height_mm?: number; free?: boolean;
 }
 export interface Opening {
   id: string; kind: OpeningKind; name: string; a: Pt; b: Pt; width_mm: number; thickness_mm: number;
   exterior: boolean; polygon: Pt[]; room_ids: string[]; leaves: DoorLeaf[]; confidence: number;
+  /** bottom above the floor and height, when the drawing or the contractor says (house rules otherwise) */
+  sill_mm?: number; height_mm?: number;
 }
 export interface Fixture {
   id: string; kind: string; name: string; room_id: string | null; center: Pt; bbox: BBox; rotation: number;
@@ -38,11 +45,23 @@ export interface Fixture {
   parts?: Part[] | null;
   /** the object it sits on (a computer on its desk), and where that one stood when this was put on it */
   on?: string | null; on_at?: Pt | null;
+  /** its number in its room (#1, #2 ...: lib/plan/numbers.ts) */
+  no?: number;
+  /** a kitchen or bath cabinet: how it's made, so it's rebuilt at a new size */
+  cab?: CabSpec;
 }
-export interface Stair { id: string; polygon: Pt[]; room_id: string | null; outline: Pt[][] }
+export interface Stair {
+  id: string; polygon: Pt[]; room_id: string | null; outline: Pt[][];
+  /** each tread and landing with the height of its top above the floor, when the stair's shape is known */
+  steps?: { polygon: Pt[]; top_mm: number }[];
+}
 export interface Floor {
   id: string; name: string; level: number; elevation_mm: number; height_mm: number; footprint: Pt[][];
   bounds: BBox; rooms: Room[]; walls: Wall[]; openings: Opening[]; fixtures: Fixture[]; stairs: Stair[];
+  /** openings cut in this floor for stairs coming up from the floor below */
+  holes?: Pt[][];
+  /** Build mode: points where a straight wall was cut into pieces that move on their own */
+  joints?: Pt[];
 }
 export interface Question {
   id: string; text: string; element_ids: string[]; options: string[]; default: string | null;
@@ -61,6 +80,9 @@ export interface Plan {
   flags: { code: string; message: string; element_ids: string[]; severity: string }[];
   source: { kind: string; filename: string; pipeline_version: string; model: string | null; ai_used: boolean };
   stats: Record<string, unknown>;
+  /** the drawing this plan was built from (drawn by hand or read from a file), so the Plan page can open
+   *  it again in the drawing tool and every wall, door and piece of furniture stays editable */
+  sketch?: Sketch;
 }
 
 export type ElementKind = "room" | "wall" | "opening" | "fixture" | "stair";

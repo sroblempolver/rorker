@@ -2,11 +2,14 @@
 // A job opened from a shared link: no sign-in, nothing to download. The plan (look around, step
 // inside, see their flags) and a list of only their tasks, with the photos posted on them. The one thing
 // they can do from here is send a photo onto one of their tasks (a photo the contractor asked for, or
-// their work). Under the tasks, the materials for their work: what it's for and who's getting it.
+// their work), and mark one done. Under the tasks, the materials for their work: what it's for and who's
+// getting it. An employee's link also lists the rest of the crew's open tasks on the job, to look at only.
 // A person's own link covers every job they have tasks on, with a row of jobs to
 // switch between, and a link copied from one task opens on that task.
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import type { Member, SharedMaterial, SharedView, SharedWork } from "@/lib/data/types";
+import { TeamInbox, type TeamInboxApi } from "@/components/team/TeamBoard";
+import type { JobPhotoInput, Member, SharedMaterial, SharedView, SharedWork } from "@/lib/data/types";
+import { roomOptions } from "@/lib/photos";
 import { STATUS_COLOR, STATUS_LABEL, qtyText, type Unit } from "@/lib/materials/types";
 import type { ElementStatus } from "@/lib/plan/types";
 import { applyEdits } from "@/lib/plan/edits";
@@ -33,8 +36,15 @@ export const postPhoto = (token: string): SendPhoto => async (pinId, file) => {
 };
 
 /** Everything a link opens: one job, or the person's jobs with a row to switch between them. */
-export function SharedWorkView({ work, pin, token, send: sendProp, onBack }: { work: SharedWork; /** open on this task (from a link copied off it) */ pin?: string | null;
-  /** the link's token, for sending photos; or `send` to handle them another way (the preview) */ token?: string; send?: SendPhoto; onBack?: () => void }) {
+/** Mark one of their own tasks done. */
+export type MarkDone = (pinId: string) => Promise<void>;
+/** Add a photo to the job's Photos (not onto a task), tagged with a room. */
+export type SendJobPhoto = (jobId: string, file: File, input: Partial<JobPhotoInput>) => Promise<void>;
+
+export function SharedWorkView({ work, pin, token, send: sendProp, done, addPhoto, onBack, inbox }: { work: SharedWork; /** open on this task (from a link copied off it) */ pin?: string | null;
+  /** the link's token, for sending photos; or `send` to handle them another way (the preview) */ token?: string; send?: SendPhoto; done?: MarkDone; addPhoto?: SendJobPhoto; onBack?: () => void;
+  /** the team board, on a person's own link: messages from the office, and their answers */
+  inbox?: TeamInboxApi }) {
   const send = sendProp ?? (token ? postPhoto(token) : undefined);
   const start = work.jobs.find((v) => v.pins.some((p) => p.id === pin)) ?? work.jobs[0];
   const [jobId, setJobId] = useState(start?.job.id ?? null);
@@ -59,12 +69,20 @@ export function SharedWorkView({ work, pin, token, send: sendProp, onBack }: { w
       ))}
     </nav>
   ) : null;
-  return <SharedJob key={view.job.id} view={view} pin={view.job.id === start?.job.id ? pin : null} switcher={switcher} send={send} onBack={onBack} />;
+  return <SharedJob key={view.job.id} view={view} pin={view.job.id === start?.job.id ? pin : null} switcher={switcher} send={send} done={done} addPhoto={addPhoto && ((f, input) => addPhoto(view.job.id, f, input))} onBack={onBack} inbox={inbox} />;
 }
 
-export function SharedJob({ view, pin: firstPin, switcher, send, onBack }: { view: SharedView; pin?: string | null; switcher?: ReactNode; send?: SendPhoto; /** the preview's way back to the full app */ onBack?: () => void }) {
-  const [photos, setPhotos] = useState(view.photos);
-  const plan = useMemo(() => (view.plan ? applyEdits(view.plan, view.edits) : null), [view]);
+export function SharedJob({ view: given, pin: firstPin, switcher, send, done: markDone, addPhoto, onBack, inbox }: { view: SharedView; pin?: string | null; switcher?: ReactNode; send?: SendPhoto; done?: MarkDone;
+  /** add a photo to the job's Photos */ addPhoto?: (f: File, input: Partial<JobPhotoInput>) => Promise<void>; /** the preview's way back to the full app */ onBack?: () => void; inbox?: TeamInboxApi }) {
+  const [side, setSide] = useState<"work" | "messages">("work");
+  const [photos, setPhotos] = useState(given.photos);
+  const [closed, setClosed] = useState<Set<string>>(() => new Set());
+  const [closing, setClosing] = useState(false);
+  const [closeErr, setCloseErr] = useState<string | null>(null);
+  const view = useMemo(() => ({ ...given, pins: given.pins.map((p) => (closed.has(p.id) ? { ...p, status: "done" as const } : p)) }), [given, closed]);
+  const crewPins = useMemo(() => given.crew_pins ?? [], [given]);
+  const mapPins = useMemo(() => [...view.pins, ...crewPins], [view.pins, crewPins]);
+  const plan = useMemo(() => (given.plan ? applyEdits(given.plan, given.edits) : null), [given]);
   const startPin = view.pins.find((p) => p.id === firstPin) ?? null;
   const [level, setLevel] = useState<Level>(() => (startPin && plan ? pinLevel(plan, startPin) : null) ?? { kind: "site" });
   const [pinId, setPinId] = useState<string | null>(startPin?.id ?? null);
@@ -73,7 +91,8 @@ export function SharedJob({ view, pin: firstPin, switcher, send, onBack }: { vie
   const [showDone, setShowDone] = useState(false);
   const states = useMemo(() => new Map<string, ElementStatus>(), []);
   const team = useMemo(() => ({ me: null, members: view.people.map((p): Member => ({ ...p, user_id: null, email: null, phone: null, role: "employee", is_owner: false })) }), [view.people]);
-  const pin = view.pins.find((p) => p.id === pinId) ?? null;
+  const pin = mapPins.find((p) => p.id === pinId) ?? null;
+  const mine = !!pin && view.pins.some((p) => p.id === pin.id);
   // material pins show in the materials list below, so the task list is only tasks, issues and notes
   const work = view.materials?.length ? view.pins.filter((p) => p.kind !== "material") : view.pins;
   const open = work.filter((p) => p.status !== "done").sort((a, b) => (a.due_date ?? "9").localeCompare(b.due_date ?? "9") || a.number - b.number);
@@ -83,7 +102,8 @@ export function SharedJob({ view, pin: firstPin, switcher, send, onBack }: { vie
 
   const show = (id: string) => {
     setPinId(id);
-    const p = view.pins.find((x) => x.id === id);
+    setCloseErr(null);
+    const p = mapPins.find((x) => x.id === id);
     const to = p && plan ? pinLevel(plan, p) : null;
     if (to) setLevel(to);
   };
@@ -106,17 +126,31 @@ export function SharedJob({ view, pin: firstPin, switcher, send, onBack }: { vie
           <div className="relative h-[58vh] shrink-0 lg:shrink lg:h-auto lg:flex-1 min-w-0 border-b lg:border-b-0 lg:border-r border-line">
             {plan ? (
               <PlanViewer plan={plan} level={level} setLevel={setLevel} selected={null} onSelect={nothing} selectedPin={pinId} onSelectPin={show}
-                states={states} pins={view.pins} colorMode={colorMode} setColorMode={setColorMode} pinMode={false} setPinMode={nothing} onPlacePin={nothing} draft={null}
+                states={states} pins={mapPins} colorMode={colorMode} setColorMode={setColorMode} pinMode={false} setPinMode={nothing} onPlacePin={nothing} draft={null}
                 flyTo={null} onAllJobs={nothing} jobName={view.job.name} items={view.items} selectedItem={null} onSelectItem={nothing} onMoveItem={nothing}
                 onMovePin={nothing} onMoveFixture={nothing} view3d={view3d} setView3d={setView3d} can3d readOnly
                 furnish={jobSettings(view.edits).furnish ?? "all"} />
             ) : <div className="h-full grid place-items-center text-muted p-6 text-center">The plan for this job isn&apos;t ready yet.</div>}
           </div>
           <aside className="lg:w-[380px] shrink-0 flex flex-col min-h-0 bg-panel">
+            {inbox && (
+              <div className="shrink-0 flex border-b border-line" role="tablist" aria-label="Your link">
+                {(["work", "messages"] as const).map((k) => (
+                  <button key={k} role="tab" aria-selected={side === k} onClick={() => setSide(k)}
+                    className={`flex-1 h-11 text-[13px] font-display font-bold tracking-[0.08em] uppercase border-b-2 ${side === k ? "border-accent text-text" : "border-transparent text-muted hover:text-text"}`}>
+                    {k === "work" ? "Your tasks" : "Messages"}
+                  </button>
+                ))}
+              </div>
+            )}
+            {inbox && side === "messages" ? (
+              <div className="flex-1 min-h-[420px] lg:min-h-0 p-3"><TeamInbox api={inbox} company={view.company.name} /></div>
+            ) : (
             <div className="flex-1 min-h-0 overflow-y-auto scroll-thin p-4 space-y-3">
               {pin ? (
                 <div className="space-y-3">
                   <button onClick={() => setPinId(null)} className="text-[13px] text-muted hover:text-text">← All your tasks</button>
+                  {!mine && <p className="chip">Crew task: not yours, shown so you know who&apos;s where</p>}
                   <div className="flex items-start gap-3">
                     <PinBadge pin={pin} size={30} />
                     <div className="min-w-0">
@@ -126,8 +160,18 @@ export function SharedJob({ view, pin: firstPin, switcher, send, onBack }: { vie
                   </div>
                   <p className="text-[13.5px]"><span className="eyebrow !text-[11px] block">Where</span>{where(plan, pin)}</p>
                   {pin.body && <p className="text-[14px] whitespace-pre-wrap leading-relaxed">{pin.body}</p>}
-                  {pin.close_requirement === "photo" && !photos[pin.id]?.length && <p className="chip !text-amber !border-amber">Photo requested: take one of this spot</p>}
-                  {send && <PhotoButton key={pin.id} requested={pin.close_requirement === "photo" && !photos[pin.id]?.length} send={(f) => send(pin.id, f).then((ph) => setPhotos((m) => ({ ...m, [pin.id]: ph })))} />}
+                  {mine && pin.close_requirement === "photo" && !photos[pin.id]?.length && <p className="chip !text-amber !border-amber">Photo requested: take one of this spot</p>}
+                  {mine && send && <PhotoButton key={pin.id} requested={pin.close_requirement === "photo" && !photos[pin.id]?.length} send={(f) => send(pin.id, f).then((ph) => setPhotos((m) => ({ ...m, [pin.id]: ph })))} />}
+                  {mine && markDone && pin.status !== "done" && (
+                    <div className="space-y-1">
+                      <button className="btn w-full" disabled={closing} onClick={async () => {
+                        setCloseErr(null);
+                        setClosing(true);
+                        try { await markDone(pin.id); setClosed((s) => new Set(s).add(pin.id)); } catch (x) { setCloseErr(x instanceof Error ? x.message : "Couldn't mark it done."); } finally { setClosing(false); }
+                      }}>{closing ? "Saving…" : "Mark done"}</button>
+                      {closeErr && <p className="text-red text-[13px]">{closeErr}</p>}
+                    </div>
+                  )}
                   {pin.links.length > 0 && (
                     <div className="space-y-1">
                       <span className="eyebrow !text-[11px] block">Links</span>
@@ -152,7 +196,17 @@ export function SharedJob({ view, pin: firstPin, switcher, send, onBack }: { vie
                     <p className="text-[13px] text-muted">{open.length ? `${open.length} open` : "Nothing open right now"}{stage ? ` · job stage: ${stage}` : ""}. Tap one to see where it is.</p>
                   </div>
                   <div className="space-y-1.5">{open.map((p) => <PinRow key={p.id} pin={p} plan={plan} onClick={() => show(p.id)} />)}</div>
+                  {addPhoto && <JobPhotoButton plan={plan} at={level.kind === "room" || level.kind === "wall" ? level.roomId : null} send={addPhoto} />}
                   {mats.length > 0 && <Materials title="Materials for your work" list={mats} showTask />}
+                  {crewPins.length > 0 && (
+                    <>
+                      <div>
+                        <p className="eyebrow">Rest of the crew</p>
+                        <p className="text-[13px] text-muted">{crewPins.length} open on this job for others. To look at only.</p>
+                      </div>
+                      <div className="space-y-1.5 opacity-80">{crewPins.map((p) => <PinRow key={p.id} pin={p} plan={plan} onClick={() => show(p.id)} />)}</div>
+                    </>
+                  )}
                   {done.length > 0 && (
                     <>
                       <button onClick={() => setShowDone(!showDone)} className="text-[13px] text-muted hover:text-text">{showDone ? "Hide" : "Show"} {done.length} done</button>
@@ -162,11 +216,53 @@ export function SharedJob({ view, pin: firstPin, switcher, send, onBack }: { vie
                 </>
               )}
             </div>
+            )}
             <p className="shrink-0 border-t border-line px-4 py-2 text-[11.5px] text-muted">Shared by {view.company.name} with Rorker. This link shows only what&apos;s yours{view.expires_at ? ` and works until ${view.expires_at.slice(0, 10)}` : ""}.</p>
           </aside>
         </div>
       </div>
     </TeamContext.Provider>
+  );
+}
+
+/** A photo for the job's Photos, not for one task: a room to tag it with (the one they're looking at on
+ *  the map, when they're in one) and a note. It goes to the contractor's team. */
+function JobPhotoButton({ plan, at, send }: { plan: SharedView["plan"]; at: string | null; send: (f: File, input: Partial<JobPhotoInput>) => Promise<void> }) {
+  const rooms = useMemo(() => roomOptions(plan), [plan]);
+  const ref = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [room, setRoom] = useState("");
+  const [caption, setCaption] = useState("");
+  const [state, setState] = useState<"idle" | "busy" | "sent">("idle");
+  const [err, setErr] = useState<string | null>(null);
+  const pick = (f: File | undefined) => { if (!f) return; setFile(f); setRoom(at ?? ""); setErr(null); setState("idle"); };
+  const go = async () => {
+    if (!file) return;
+    setState("busy"); setErr(null);
+    try { await send(file, { room_id: room || null, caption: caption.trim() || null }); setFile(null); setCaption(""); setState("sent"); }
+    catch (x) { setErr(x instanceof Error ? x.message : "Couldn't send the photo."); setState("idle"); }
+  };
+  return (
+    <div className="space-y-2">
+      <input ref={ref} type="file" accept="image/*" capture="environment" className="hidden" aria-label="Job photo" onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ""; }} />
+      {file ? (
+        <div className="card !rounded-[3px] p-2.5 space-y-2">
+          <p className="eyebrow !text-[11px]">Photo for the job</p>
+          <select className="input" aria-label="Room" value={room} onChange={(e) => setRoom(e.target.value)}>
+            <option value="">Which room? (optional)</option>
+            {rooms.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+          </select>
+          <input className="input" placeholder="A note (optional)" value={caption} onChange={(e) => setCaption(e.target.value)} />
+          <div className="flex gap-2">
+            <button className="btn btn-primary btn-sm flex-1" disabled={state === "busy"} onClick={() => void go()}>{state === "busy" ? "Sending…" : "Send photo"}</button>
+            <button className="btn btn-sm" disabled={state === "busy"} onClick={() => setFile(null)}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <button className="btn btn-sm w-full" onClick={() => ref.current?.click()}>{state === "sent" ? "Sent to the job's photos. Add another" : "+ Add a photo of the job"}</button>
+      )}
+      {err && <p className="text-red text-[13px]">{err}</p>}
+    </div>
   );
 }
 

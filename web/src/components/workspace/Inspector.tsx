@@ -21,7 +21,8 @@ const SOURCE: Record<string, string> = {
   drawing: "Read from the drawing", ai: "Named by the plan reader", contents: "Guessed from what is inside", contractor: "Confirmed by you", vision: "Read from the image",
 };
 
-const m = (mm: number) => `${(mm / 1000).toFixed(2)} m`;
+import { area, areaMm2, inches, len } from "@/lib/measure";
+import { RULES } from "@/lib/plan/rules";
 
 export interface Preset { kind: PinKind; title: string }
 export interface AddPin { elementId: string | null; floorId?: string | null; anchor?: PinAnchor | null; preset?: Preset; status?: ElementStatus }
@@ -249,7 +250,7 @@ export function Inspector(p: Props) {
       if (a.status) p.onSetStatus(e.el.id, a.status);
       p.onAddPin({ elementId: e.el.id, floorId: e.floor.id, anchor: wallAnchor, preset: { kind: a.kind, title: a.title(lname) } });
     };
-    const H = e.floor.height_mm || 2700;
+    const H = e.floor.height_mm || RULES.ceiling;
     const wallSide = e.kind === "wall" ? sideOfWall(e.floor, e.el.id, level.kind === "room" || level.kind === "wall" ? level.roomId : null) : null;
     const att = e.kind === "wall" ? attachedToWall(e.floor, e.el) : null;
     return (
@@ -259,7 +260,7 @@ export function Inspector(p: Props) {
         <div>
           {e.kind === "room" && (
             <>
-              <Row k="Size" v={`${e.el.area_m2.toFixed(1)} m²${e.el.drawing_area_m2 ? ` (drawing says ${e.el.drawing_area_m2} m²)` : ""}`} />
+              <Row k="Size" v={`${area(e.el.area_m2)}${e.el.drawing_area_m2 ? ` (drawing says ${area(e.el.drawing_area_m2)})` : ""}`} />
               <Row k="Type" v={e.el.type.replace("_", " ")} />
               <Row k="Name" v={<>{SOURCE[e.el.label_source] ?? e.el.label_source}{e.el.confidence < 0.7 && <span className="text-amber"> · please check</span>}</>} />
               <Row k="Contains" v={`${e.floor.fixtures.filter((f) => f.room_id === e.el.id).length} items, ${e.el.opening_ids.length} doors and windows, ${e.el.wall_ids.length} walls`} />
@@ -269,16 +270,16 @@ export function Inspector(p: Props) {
           )}
           {e.kind === "wall" && (
             <>
-              <Row k="Length" v={m(e.el.length_mm)} />
-              <Row k="Height" v={`${(H / 1000).toFixed(1)} m (floor to ceiling)`} />
-              <Row k="Face area" v={`${((e.el.length_mm * H) / 1e6).toFixed(1)} m² each side, before openings`} />
-              <Row k="Thickness" v={`${Math.round(e.el.thickness_mm)} mm · ${e.el.exterior ? "exterior" : "interior"}`} />
+              <Row k="Length" v={len(e.el.length_mm)} />
+              <Row k="Height" v={`${len(H)} (floor to ceiling)`} />
+              <Row k="Face area" v={`${areaMm2(e.el.length_mm * H)} each side, before openings`} />
+              <Row k="Thickness" v={`${inches(e.el.thickness_mm)} · ${e.el.exterior ? "exterior" : "interior"}`} />
               <Row k="Rooms" v={e.el.room_ids.map((id) => findElement(plan, id)).filter(Boolean).map((r) => elementLabel(r!)).join(" | ") + (e.el.exterior ? " | outside" : "") || "Outside"} />
             </>
           )}
           {e.kind === "opening" && (
             <>
-              <Row k="Width" v={`${Math.round(e.el.width_mm)} mm`} />
+              <Row k="Width" v={inches(e.el.width_mm)} />
               <Row k="Kind" v={e.el.kind.replace("_", " ")} />
               <Row k="Between" v={e.el.room_ids.map((id) => findElement(plan, id)).filter(Boolean).map((r) => elementLabel(r!)).join(" and ") + (e.el.exterior ? " and outside" : "") || "Outside"} />
               {e.el.confidence < 0.7 && <Row k="Note" v={<span className="text-amber">Found from the linework only, please check</span>} />}
@@ -352,7 +353,7 @@ export function Inspector(p: Props) {
     const r = f.rooms.find((x) => x.id === level.roomId)!;
     const side = roomSides(f, r).find((s) => s.key === level.sideKey);
     if (!side) return null;
-    const H = f.height_mm || 2700;
+    const H = f.height_mm || RULES.ceiling;
     const opArea = side.segments.filter((s) => s.kind === "opening").reduce((a, s) => a + (s.to - s.from) * 2100, 0);
     const main = [...side.segments.filter((s) => s.kind === "wall")].sort((a, b) => b.to - b.from - (a.to - a.from))[0];
     const here = p.pins.filter((x) => x.anchor?.side === side.key || side.segments.some((s) => s.id === x.element_id));
@@ -360,9 +361,9 @@ export function Inspector(p: Props) {
       <div className="p-4 space-y-5">
         <Head eyebrow={`${r.name} · ${f.name}`} title={side.label} />
         <div>
-          <Row k="Length" v={m(side.length)} />
-          <Row k="Height" v={`${(H / 1000).toFixed(1)} m`} />
-          <Row k="Paintable" v={`about ${((side.length * H - opArea) / 1e6).toFixed(1)} m² after doors and windows`} />
+          <Row k="Length" v={len(side.length)} />
+          <Row k="Height" v={len(H)} />
+          <Row k="Paintable" v={`about ${areaMm2(side.length * H - opArea)} after doors and windows`} />
           <Row k="Pieces" v={`${side.segments.filter((s) => s.kind === "wall").length} wall, ${side.segments.filter((s) => s.kind === "opening").length} doors and windows`} />
         </div>
         <div>
@@ -400,7 +401,7 @@ export function Inspector(p: Props) {
     return (
       <div className="p-4 space-y-4">
         <Head eyebrow="Floor" title={f.name} />
-        <p className="text-muted text-sm -mt-2">{f.rooms.length} rooms · {f.rooms.reduce((a, r) => a + r.area_m2, 0).toFixed(0)} m² inside · {f.openings.filter((o) => o.kind === "window").length} windows · {f.openings.filter((o) => o.kind !== "window").length} doors and openings</p>
+        <p className="text-muted text-sm -mt-2">{f.rooms.length} rooms · {area(f.rooms.reduce((a, r) => a + r.area_m2, 0))} inside · {f.openings.filter((o) => o.kind === "window").length} windows · {f.openings.filter((o) => o.kind !== "window").length} doors and openings</p>
         <div className="space-y-1">
           {f.rooms.map((r) => {
             const n = pinsFor(plan, open, { kind: "room", floor: f, el: r }).length;
@@ -410,7 +411,7 @@ export function Inspector(p: Props) {
                 <span className="w-1 self-stretch rounded-[1px]" style={{ background: st ? STATUS_COLOR[st] : "#3e3f45" }} />
                 <span className="text-[14px] truncate">{r.name}</span>
                 <span className="font-mono text-[11.5px] text-muted">{r.id}</span>
-                <span className="text-muted text-[12.5px] ml-auto shrink-0">{r.area_m2.toFixed(1)} m²</span>
+                <span className="text-muted text-[12.5px] ml-auto shrink-0">{area(r.area_m2)}</span>
                 {n > 0 && <span className="text-[11px] font-mono font-bold rounded-[2px] bg-accent text-accent-ink px-1.5 min-w-5 text-center">{n}</span>}
               </button>
             );

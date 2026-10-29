@@ -1,6 +1,8 @@
+import type { PlaceTag } from "@/lib/plan/tags";
 import type { Part } from "@/lib/plan/catalog";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
 import type { BuildLook, Furnish } from "@/lib/plan/build";
+import type { BuildSpec } from "@/lib/plan/buildSpec";
 
 export interface Company {
   id: string; name: string; logo_url: string | null; brand_color: string; phone: string | null;
@@ -16,6 +18,8 @@ export interface Job {
   id: string; company_id: string; name: string; address: string | null; client_name: string | null;
   client_email: string | null; client_phone: string | null; job_type: string; status: JobStatus;
   start_date: string | null; current_plan_id: string | null; created_at: string;
+  /** the client may add notes to the map that the contractor sees (their private notes are always allowed) */
+  client_can_add?: boolean;
 }
 export interface JobInput {
   name: string; address?: string | null; job_type: string; template_id?: string | null;
@@ -48,8 +52,23 @@ export interface ElementEdit {
   /** an object added in the app, not in the drawing: the edit's key is its new id */
   added?: AddedObject;
   /** job-wide, under the "@job" key: which floors are furnished, and the build stages the contractor added */
-  furnish?: Furnish; stage_looks?: Record<string, BuildLook>;
+  furnish?: Furnish; stage_looks?: Record<string, BuildLook>; build?: BuildSpec;
+  /** Build mode. A door or window: its bottom above the floor, and how far it slid along its wall (mm) */
+  sill_mm?: number; slide?: number;
+  /** a wall moved straight across: the side of a room it is (which way it faces, a point on it as
+   *  drawn) and how far, mm, out of the room (negative: into it). The rooms either side follow. */
+  move?: { room_id: string; heading: Heading; at: [number, number]; by: number; /** when, so changes replay in order */ t?: number };
+  /** a door or window added in the app: the edit's key is its new id */
+  opening?: AddedOpening;
+  /** a room cut in two by a new wall across it, at x (axis "x") or y (axis "y") on the plan */
+  split?: { axis: "x" | "y"; at: number; name?: string; t?: number };
+  /** a straight wall separated into two pieces at this point, so each moves on its own */
+  cut?: { floor_id: string; at: [number, number]; t: number };
 }
+export type Heading = "north" | "east" | "south" | "west";
+/** A door or window put in a wall in Build mode: the side of the room it's on (which way that wall
+ *  faces) and the point on it where its middle is, so it follows the wall when the wall moves. */
+export interface AddedOpening { floor_id: string; room_id: string; heading: Heading; kind: string; at: [number, number]; width: number; height_mm?: number | null; sill_mm?: number | null }
 /** Something added to the plan in the app (furniture, an appliance): where it stands, its size and front. */
 export interface AddedObject {
   floor_id: string; room_id: string | null; kind: string; name: string; center: [number, number]; width: number; depth: number; facing: number | null; height_mm?: number | null;
@@ -70,7 +89,11 @@ export interface ItemInput { kind: ItemKind; label?: string | null; floor_id: st
 export type PinKind = "task" | "issue" | "note" | "material";
 /** A pin placed outside the floor plans: on the site, the front elevation, one wall seen from inside, or
  *  a point on the 3D building (roof, outside walls): `point` has x, y on the plan and z mm above the ground. */
-export interface PinAnchor { view: "site" | "exterior" | "wall" | "point"; side?: string; x: number; y: number; z?: number }
+export interface PinAnchor {
+  view: "site" | "exterior" | "wall" | "point"; side?: string; x: number; y: number; z?: number;
+  /** in 3D, the way the surface faces where the pin went in (x, y on the plan, z up), so it stands out of it */
+  n?: [number, number, number];
+}
 export type PinStatus = "open" | "in_progress" | "done";
 export interface Pin {
   id: string; job_id: string; number: number; element_id: string | null; floor_id: string | null;
@@ -91,11 +114,71 @@ export interface ElementState { element_id: string; status: ElementStatus }
 /** Admin: everything, including the company, the team and stage templates. Employee: jobs, pins and
  *  stages only ("editor"). The owner is an admin who can't be removed or demoted. */
 export type MemberRole = "admin" | "employee";
+/** Crew who aren't admins work as one of two kinds. An employee's link shows the rest of the crew's open
+ *  work on their jobs too; a sub's shows only what's tagged to them. Neither ever sees money. */
+export type CrewKind = "employee" | "sub";
 export interface Member {
   id: string; user_id: string | null; full_name: string; email: string | null; phone: string | null;
   title: string | null; role: MemberRole; is_owner: boolean;
+  /** for role "employee": on the payroll or a subcontractor; left out, an employee */
+  crew?: CrewKind;
+  /** the job's client (the homeowner), taggable on that job's pins; not on the team */
+  client?: boolean;
 }
-export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole }
+
+/** The job's client as a person to tag: id "client:<job id>", named from the job's client contact. */
+export const clientMemberId = (jobId: string) => `client:${jobId}`;
+export function clientMember(job: Pick<Job, "id" | "client_name" | "client_email" | "client_phone">): Member | null {
+  if (!job.client_name?.trim()) return null;
+  return { id: clientMemberId(job.id), user_id: null, full_name: job.client_name.trim(), email: job.client_email, phone: job.client_phone, title: "Client", role: "employee", is_owner: false, client: true };
+}
+
+/** One message between the contractor and the job's client: their shared thread, both ways. */
+/** A note the client drops on their map. Private notes only they see; shared ones (when the job lets
+ *  them) become a note pin the contractor sees, tagged to the client. */
+export interface ClientNoteInput {
+  title: string; body: string | null; floor_id: string | null; x: number | null; y: number | null;
+  element_id: string | null; anchor: PinAnchor | null; shared: boolean;
+}
+export interface JobMessage {
+  id: string; job_id: string; from: "contractor" | "client"; author_name: string; body: string | null;
+  /** stored file paths when saved; addresses to show when handed to a page */
+  photos: string[]; created_at: string;
+  /** rooms and objects tagged in the words ("@Bedroom 1 › Bed"); a tap shows them on the map */
+  places?: PlaceTag[];
+}
+/** The team board: the office writes to everyone or to picked people, and each crew member answers the
+ *  office. A member sees what's to everyone, what's to them, and their own answers. */
+export interface TeamMessage {
+  id: string; from: "office" | "crew"; author_name: string;
+  /** the crew member who wrote it (an answer); null from the office */
+  member_id: string | null;
+  /** who it's for: everyone (null) or these members; an answer goes to the office */
+  to: string[] | null;
+  body: string | null;
+  /** stored file paths when saved; addresses to show when handed to a page */
+  photos: string[]; created_at: string;
+}
+/** Who put a photo on the job: someone signed in to the company, crew from their link, or the client. */
+export interface PhotoBy { kind: "team" | "crew" | "client"; name: string; member_id?: string | null }
+/** A photo added straight to the job's Photos (not on a pin or in a message), tagged with where it was
+ *  taken. Photos on pins and in the client thread show in Photos too, tagged from where they were posted. */
+export interface JobPhoto {
+  id: string; job_id: string;
+  /** a stored file path when saved; an address to show when handed to a page */
+  src: string;
+  by: PhotoBy; created_at: string;
+  room_id: string | null;
+  /** a thing in the room (a window, the sink), when it was picked */
+  element_id: string | null;
+  floor_id: string | null;
+  stage_id: string | null;
+  caption: string | null;
+  /** the job's client sees it on their page */
+  client: boolean;
+}
+export type JobPhotoInput = Pick<JobPhoto, "room_id" | "element_id" | "floor_id" | "stage_id" | "caption" | "client">;
+export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole; crew?: CrewKind }
 
 /** A no-sign-in link for a team member or a one-time sub. It shows the plan and only the pins that are
  *  theirs: the ones tagged to `member_id` (now and later), plus any listed in `pin_ids`. With a `job_id`
@@ -104,7 +187,17 @@ export interface MemberInput { full_name: string; email?: string | null; phone?:
 export interface ShareLink {
   id: string; job_id: string | null; company_id?: string; token: string; label: string; member_id: string | null; pin_ids: string[];
   expires_at: string | null; revoked_at: string | null; created_at: string;
+  /** who it's for: crew (the default) or the job's client (their progress and money page) */
+  audience?: "crew" | "client" | "contractor";
+  /** shown only: the people who saved this link to their own account (never saved with the link) */
+  saved_by?: string[];
+  /** shown only: a homeowner's project link, the contractor who took the project on */
+  taken_by?: string;
 }
+/** A homeowner's project, taken on by a contractor from the homeowner's link (the server writes these). */
+export interface ShareHandoff { id: string; share_id: string; account: string; company: string; user_id: string; email: string | null; job: string; at: string }
+/** Someone who saved a link to their own Rorker account, so it's in their "Shared with you". */
+export interface ShareAccess { id: string; share_id: string; user_id: string; email: string | null; name: string | null; saved_at: string }
 export interface ShareLinkInput { label: string; member_id?: string | null; pin_ids?: string[]; expires_at?: string | null }
 /** What a shared link shows. Built by shareView(), never straight from the database. */
 export interface SharedView {
@@ -119,6 +212,8 @@ export interface SharedView {
   photos: Record<string, string[]>;
   /** materials this person needs or is picking up, and the ones for these tasks */
   materials?: SharedMaterial[];
+  /** an employee's link only: the rest of the crew's open tasks on this job, to see, not to work on */
+  crew_pins?: Pin[];
 }
 /** A material line as a shared link shows it: what, for which task, and who's getting it. */
 export interface SharedMaterial {

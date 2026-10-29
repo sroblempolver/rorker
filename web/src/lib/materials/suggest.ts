@@ -6,6 +6,7 @@
 import type { ItemKind } from "@/lib/data/types";
 import type { Element, Fixture, Floor, Pt, Room } from "@/lib/plan/types";
 import type { Unit } from "./types";
+import { RULES } from "@/lib/plan/rules";
 
 export type SuggestGroup = "Finishes" | "Electrical" | "Plumbing" | "Cabinets & hardware" | "Doors & windows" | "Framing & drywall" | "Safety";
 export const GROUP_ORDER: SuggestGroup[] = ["Cabinets & hardware", "Plumbing", "Electrical", "Doors & windows", "Finishes", "Framing & drywall", "Safety"];
@@ -88,7 +89,7 @@ const PASSAGE = new Set(["hallway", "foyer", "stair_hall"]);
 
 /** Everything for one room: finishes from its size, then what its type and contents need. */
 export function roomSuggestions(floor: Floor, r: Room): Suggestion[] {
-  const H = floor.height_mm || 2700;
+  const H = floor.height_mm || RULES.ceiling;
   const area = r.area_m2 * 10.7639;
   const per = perimeter(r.polygon);
   const perFt = per * FT;
@@ -180,7 +181,7 @@ export const itemSuggestions = (kind: ItemKind) => ITEM[kind] ?? [];
 
 /** Suggestions for any element of the plan. */
 export function suggestFor(e: Element): Suggestion[] {
-  const H = e.floor.height_mm || 2700;
+  const H = e.floor.height_mm || RULES.ceiling;
   if (e.kind === "room") return roomSuggestions(e.floor, e.el);
   if (e.kind === "wall") return wallSuggestions(e.el.length_mm, H, e.el.exterior ? 1 : 2);
   if (e.kind === "opening") {

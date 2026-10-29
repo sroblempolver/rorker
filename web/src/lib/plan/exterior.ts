@@ -58,6 +58,43 @@ function snapAxis(vals: number[]): number[] {
   return out;
 }
 
+/** A gap narrower than this between parts of the house (the wall between rooms drawn apart, a sliver
+ *  the reader left) is roofed over, so the roof is one piece over the outside of the house. */
+const GAP = 900;
+
+/** One roof over the house however many walls are inside it: empty cells closed in by the house (a hole
+ *  between rooms) and narrow strips between two parts of it are roofed too. Changes `cell` in place. */
+function closeGaps(cell: number[][], xs: number[], ys: number[]) {
+  const nx = cell.length, ny = cell[0]?.length ?? 0;
+  if (!nx || !ny) return;
+  const on = (i: number, j: number) => i >= 0 && j >= 0 && i < nx && j < ny && cell[i][j] !== 0;
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+      if (cell[i][j] !== 0) continue;
+      // the run of empty cells this one is in, across and down: bridged when short and walled at both ends
+      let a = i, b = i;
+      while (a > 0 && cell[a - 1][j] === 0) a--;
+      while (b < nx - 1 && cell[b + 1][j] === 0) b++;
+      const across = on(a - 1, j) && on(b + 1, j) && xs[b + 1] - xs[a] <= GAP;
+      let c = j, d = j;
+      while (c > 0 && cell[i][c - 1] === 0) c--;
+      while (d < ny - 1 && cell[i][d + 1] === 0) d++;
+      const down = on(i, c - 1) && on(i, d + 1) && ys[d + 1] - ys[c] <= GAP;
+      if (across || down) { cell[i][j] = 1; changed = true; }
+    }
+  }
+  // empty cells the outside can't reach are inside the house
+  const out = cell.map((col) => col.map(() => false));
+  const stack: [number, number][] = [];
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) if ((i === 0 || j === 0 || i === nx - 1 || j === ny - 1) && cell[i][j] === 0) { out[i][j] = true; stack.push([i, j]); }
+  while (stack.length) {
+    const [i, j] = stack.pop()!;
+    for (const [u, v] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) if (u >= 0 && v >= 0 && u < nx && v < ny && !out[u][v] && cell[u][v] === 0) { out[u][v] = true; stack.push([u, v]); }
+  }
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) if (cell[i][j] === 0 && !out[i][j]) cell[i][j] = 1;
+}
+
 /** Splits what a floor needs roofed (its rooms minus whatever the floors above cover) into rectangles,
  *  biggest first. Returns the grid too, so the roofs can tell what they lean against. */
 function roofRects(own: Pt[][], above: Pt[][]) {
@@ -73,6 +110,7 @@ function roofRects(own: Pt[][], above: Pt[][]) {
       cell[i].push(above.some((r) => pointInPoly(c, r)) ? 2 : own.some((r) => pointInPoly(c, r)) ? 1 : 0);
     }
   }
+  closeGaps(cell, xs, ys);
   const owner: number[][] = cell.map((col) => col.map(() => -1));
   const rects: { i0: number; j0: number; i1: number; j1: number }[] = [];
   for (;;) {
@@ -100,7 +138,7 @@ export function planExterior(plan: Plan): Exterior {
   const rules = buildingRules(plan);
   const floors = [...plan.floors].sort((a, b) => a.level - b.level);
   const base = (fi: number) => floors[fi]?.elevation_mm || fi * rules.storey;
-  const height = (fi: number) => floors[fi]?.height_mm || 2700;
+  const height = (fi: number) => floors[fi]?.height_mm || RULES.ceiling;
   const rings = floors.map(indoorRings);
 
   // ---- roofs: each floor's rooms that nothing above covers, top floor first
@@ -125,9 +163,11 @@ export function planExterior(plan: Plan): Exterior {
       const sib = sides.map((s) => [s, touch(s, (i, j) => placed.includes(owner[i][j]))] as const).sort((a, b) => b[1] - a[1])[0];
       const top = fi === floors.length - 1;
       const eaveY = base(fi) + height(fi);
-      let kind: RoofPart["kind"] = rules.roof, high: Side | null = null, pitch = top && !roofs.length ? rules.pitch : RULES.lowPitch;
+      let kind: RoofPart["kind"] = rules.roof, high: Side | null = null, pitch = top && !roofs.length ? rules.pitch : rules.lowPitch;
       if (rules.roof === "flat") kind = "flat";
       else if (tall[1] > 600) { kind = "shed"; high = tall[0]; }
+      // a shed roof on its own rises toward the back (north), across the short way
+      else if (kind === "shed") high = w >= d ? "y0" : "x0";
       // a bump-out on the same floor gets its own small roof at the main roof's pitch, tucked into it
       else if (sib[1] > 600) pitch = roofs.find((q) => q.floorIndex === fi)?.pitch ?? pitch;
       // a lean-to against the floor above stays under that floor's windows
@@ -149,7 +189,7 @@ export function planExterior(plan: Plan): Exterior {
     if (!rings[fi].length) return;
     const items: { ids: string[]; box: BBox }[] = [];
     for (const ring of ringOf(f)) if (!rings[fi].includes(ring)) items.push({ ids: [], box: bboxOf(ring) });
-    for (const w of f.walls) if (!w.room_ids.length) items.push({ ids: [w.id], box: bboxOf(w.polygon) });
+    for (const w of f.walls) if (!w.room_ids.length && !w.free) items.push({ ids: [w.id], box: bboxOf(w.polygon) });
     // pieces close together are one porch
     const groups: { ids: string[]; box: BBox }[] = [];
     for (const it of items) {
@@ -178,7 +218,7 @@ export function planExterior(plan: Plan): Exterior {
   const overlap = (a: BBox, b: BBox) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
   for (const z of zones) {
     const f = floors[z.floorIndex];
-    const own = f.walls.filter((w) => !w.room_ids.length && overlap(bboxOf(w.polygon), z.rect) > 0);
+    const own = f.walls.filter((w) => !w.room_ids.length && !w.free && overlap(bboxOf(w.polygon), z.rect) > 0);
     const columns = own.filter((w) => { const b = bboxOf(w.polygon); return Math.max(b[2] - b[0], b[3] - b[1]) <= 600 && Math.min(b[2] - b[0], b[3] - b[1]) > 200; });
     const upper = zones.find((u) => u.floorIndex === z.floorIndex + 1 && overlap(u.rect, z.rect) > 0.3 * Math.min((z.rect[2] - z.rect[0]) * (z.rect[3] - z.rect[1]), (u.rect[2] - u.rect[0]) * (u.rect[3] - u.rect[1])));
     z.cover = upper ? "balcony" : columns.length ? "canopy" : null;

@@ -5,6 +5,7 @@
 import type { ElementEdit, JobStage } from "@/lib/data/types";
 import { pointInPoly } from "./geometry";
 import type { Fixture, Plan, Pt } from "./types";
+import type { BuildSpec } from "./buildSpec";
 
 export type BuildLook = "slab" | "framing" | "drywall" | "finished";
 
@@ -21,8 +22,9 @@ export type Furnish = "all" | string[];
 
 /** The job-wide settings live in the edits under this key (it never matches a plan element). */
 export const JOB_KEY = "@job";
-/** stage_looks: the look a stage was set to by hand, by stage id, over the one guessed from its name */
-export interface JobSettings { furnish?: Furnish; stage_looks?: Record<string, BuildLook> }
+/** stage_looks: the look a stage was set to by hand, by stage id, over the one guessed from its name;
+ *  build: how the house is built (the answers to the build questions, lib/plan/buildSpec.ts) */
+export interface JobSettings { furnish?: Furnish; stage_looks?: Record<string, BuildLook>; build?: BuildSpec }
 export const jobSettings = (edits: Record<string, ElementEdit>): JobSettings => edits[JOB_KEY] ?? {};
 
 /** What can be furnished one by one: each home when the drawing has several, otherwise each floor. */
@@ -56,7 +58,9 @@ export function stagedPlan(plan: Plan, look: BuildLook, furnish: Furnish | undef
 /** The look that goes with a job stage, from its name ("Framing", "Insulation and drywall" ...). */
 export function lookForStage(name: string): BuildLook {
   const n = name.toLowerCase();
-  if (/final|punch|handover|close|walkthrough|cabinet|counter|fixture|appliance|trim|glass|backsplash|exterior finish/.test(n)) return "finished";
+  if (/vapou?r|sheath|weather barrier|house wrap|felt|block wall/.test(n)) return "framing";
+  if (/insulation:/.test(n)) return "framing";
+  if (/final|punch|handover|close|walkthrough|cabinet|counter|fixture|appliance|trim|glass|backsplash|exterior finish|siding|cladding/.test(n)) return "finished";
   if (/drywall|sheetrock|plaster|board|insulation|waterproof|paint|tile|flooring|interior finish/.test(n)) return "drywall";
   if (/fram|structur|rough|roof|window|inspection/.test(n)) return "framing";
   if (/permit|survey|site|foundation|slab|demo|design|measure|layout|mitigation|damage|approval/.test(n)) return "slab";
@@ -110,4 +114,24 @@ export function furnishWhere(plan: Plan, current: Furnish | undefined, room: str
   if (kind === "home" && r?.unit) on.add(`unit:${r.unit}`);
   else if (kind === "floor" && fl) on.add(fl.id);
   return places.every((x) => on.has(x.id)) ? "all" : places.filter((x) => on.has(x.id)).map((x) => x.id);
+}
+
+/** The homes on show, by unit name, for looking at one or a few homes of a row; null keeps them all.
+ *  Rooms with no home (a shared stair, the street) stay, and so does whatever stands in them. */
+export function homesPlan(plan: Plan, homes: string[] | null): Plan {
+  if (!homes) return plan;
+  const keep = new Set(homes);
+  return { ...plan, floors: plan.floors.map((fl) => {
+    const rooms = fl.rooms.filter((r) => !r.unit || keep.has(r.unit));
+    if (rooms.length === fl.rooms.length) return fl;
+    const ids = new Set(rooms.map((r) => r.id));
+    const mine = (x: { room_ids: string[] }) => !x.room_ids.length || x.room_ids.some((id) => ids.has(id));
+    const inside = (pt: Pt) => { const r = fl.rooms.find((q) => pointInPoly(pt, q.polygon)); return !r || ids.has(r.id); };
+    const mid = (ps: Pt[]): Pt => [ps.reduce((a, q) => a + q[0], 0) / ps.length, ps.reduce((a, q) => a + q[1], 0) / ps.length];
+    return {
+      ...fl, rooms, walls: fl.walls.filter(mine), openings: fl.openings.filter(mine),
+      fixtures: fl.fixtures.filter((x) => (x.room_id ? ids.has(x.room_id) : inside(x.center))),
+      stairs: fl.stairs.filter((st) => inside(mid(st.polygon))),
+    };
+  }) };
 }

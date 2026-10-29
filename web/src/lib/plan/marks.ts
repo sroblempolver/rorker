@@ -5,31 +5,35 @@ import { useSyncExternalStore } from "react";
 import type { Mark } from "./pointing";
 
 export { MARK_COLORS, type Mark } from "./pointing";
-export interface Marks { marks: Mark[]; /** select this one (open it in the side panel) */ focus: string | null; n: number; /** when they went up, ms */ at: number }
+export interface Marks {
+  marks: Mark[]; /** select this one (open it in the side panel) */ focus: string | null; n: number; /** when they went up, ms */ at: number;
+  /** take the map there (a tag someone tapped); otherwise the map stays put and offers to go */
+  follow: boolean;
+}
 
 
 /** They blink for 10 seconds, fading out over the last 1.5, and come back each time the assistant points again. */
 export const MARK_LIFE = 10_000;
 export const MARK_FADE = 1_500;
-let state: Marks = { marks: [], focus: null, n: 0, at: 0 };
+let state: Marks = { marks: [], focus: null, n: 0, at: 0, follow: false };
 const subs = new Set<() => void>();
 let timer: ReturnType<typeof setTimeout> | null = null;
 const emit = () => subs.forEach((f) => f());
 
-export function showMarks(marks: Mark[], focus: string | null = null) {
+export function showMarks(marks: Mark[], focus: string | null = null, follow = false) {
   if (!marks.length && !focus) return;
-  state = { marks, focus, n: state.n + 1, at: Date.now() };
+  state = { marks, focus, n: state.n + 1, at: Date.now(), follow };
   emit();
   if (timer) clearTimeout(timer);
   timer = setTimeout(clearMarks, MARK_LIFE);
 }
 export function clearMarks() {
   if (!state.marks.length) return;
-  state = { marks: [], focus: null, n: state.n + 1, at: 0 };
+  state = { ...state, marks: [], focus: null, n: state.n + 1, at: 0, follow: false };
   emit();
 }
 const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
-const EMPTY: Marks = { marks: [], focus: null, n: 0, at: 0 };
+const EMPTY: Marks = { marks: [], focus: null, n: 0, at: 0, follow: false };
 export const getMarks = () => state;
 export function useMarks(): Marks {
   return useSyncExternalStore(subscribe, getMarks, () => EMPTY);

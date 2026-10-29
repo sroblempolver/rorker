@@ -3,10 +3,12 @@
 // rename, reorder or remove its own stages without touching the template. Stages are also layers: pick
 // one and the map shows only what belongs to it (pins, tasks, materials); anything without a stage is
 // on the whole house.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { JobStage, StageStatus } from "@/lib/data/types";
 import { useFeedback } from "@/components/ui/feedback";
 import { LOOKS, type BuildLook } from "@/lib/plan/build";
+import { nextQuestion, specSummary, stagesFromSpec, type BuildSpec } from "@/lib/plan/buildSpec";
+import { BuildQuestions } from "@/components/newjob/BuildQuestions";
 
 const NEXT: Record<StageStatus, StageStatus> = { not_started: "active", active: "done", done: "not_started" };
 const LABEL: Record<StageStatus, string> = { not_started: "Not started", active: "In progress", done: "Done" };
@@ -25,7 +27,7 @@ export function StageStrip({ stages }: { stages: JobStage[] }) {
 /** The layer for everything that has no stage. */
 export const HOUSE_LAYER = "house";
 
-export function StagesPanel({ stages, onStatus, onAdd, onRename, onDelete, onMove, layer, onLayer, counts, lookOf, onLook }: {
+export function StagesPanel({ stages, onStatus, onAdd, onRename, onDelete, onMove, layer, onLayer, counts, lookOf, onLook, build, onBuild }: {
   stages: JobStage[];
   /** the stage shown on the map (or the whole house), null for everything */
   layer: string | null;
@@ -40,12 +42,25 @@ export function StagesPanel({ stages, onStatus, onAdd, onRename, onDelete, onMov
   onRename: (id: string, name: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onMove: (id: string, dir: -1 | 1) => Promise<void>;
+  /** how the house is built (the build questions), and answering them again: the stages are made anew */
+  build?: BuildSpec;
+  onBuild?: (spec: BuildSpec) => Promise<void>;
 }) {
   const { confirm } = useFeedback();
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [name, setName] = useState("");
   const done = stages.filter((s) => s.status === "done").length;
+  // "How's it built?" asked again here, and "Build it": each stage on the map in turn
+  const [asking, setAsking] = useState<BuildSpec | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    if (!playing) return;
+    const at = stages.findIndex((s) => s.id === layer);
+    const t = setTimeout(() => { if (at + 1 >= stages.length) { setPlaying(false); return; } onLayer(stages[at + 1].id); }, at < 0 ? 0 : 1500);
+    return () => clearTimeout(t);
+  }, [playing, layer, stages, onLayer]);
 
   return (
     <div className="p-4 space-y-4">
@@ -56,7 +71,24 @@ export function StagesPanel({ stages, onStatus, onAdd, onRename, onDelete, onMov
         </div>
         <div className="mt-2"><StageStrip stages={stages} /></div>
         <p className="text-[12.5px] text-muted mt-2">Pick a stage to see only its pins, tasks and materials on the map, with the house drawn as it stands then.</p>
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {stages.length > 1 && <button className="btn btn-sm" onClick={() => { if (playing) setPlaying(false); else { onLayer(null); setPlaying(true); } }} title="Watch the house go up stage by stage on the map">{playing ? "❚❚ Pause" : "▶ Build it"}</button>}
+          {onBuild && <button className="btn btn-sm btn-ghost" onClick={() => setAsking(asking ? null : { ...build })} aria-expanded={!!asking}>{build ? "How it's built" : "Ask how it's built"}</button>}
+        </div>
+        {build && !asking && <p className="text-[12px] text-muted mt-1.5">{specSummary(build)}</p>}
       </div>
+      {asking && onBuild && (
+        <div className="space-y-2">
+          <BuildQuestions spec={asking} onSpec={setAsking} />
+          {!nextQuestion(asking) && (
+            <button className="btn btn-primary w-full" disabled={busy} onClick={async () => {
+              if (stages.length && !(await confirm({ title: `Use these ${stagesFromSpec(asking).length} stages?`, body: "They take the place of this job's stages now. Pins on the old stages stay on the job.", confirm: "Use these stages" }))) return;
+              setBusy(true);
+              try { await onBuild(asking); setAsking(null); } finally { setBusy(false); }
+            }}>{busy ? "Making the stages…" : `Make ${stagesFromSpec(asking).length} stages from this`}</button>
+          )}
+        </div>
+      )}
       <button onClick={() => onLayer(layer === HOUSE_LAYER ? null : HOUSE_LAYER)} aria-pressed={layer === HOUSE_LAYER}
         className={`card !rounded-[3px] w-full px-3 py-2.5 flex items-center gap-3 text-left ${layer === HOUSE_LAYER ? "!border-accent bg-panel-3" : "hover:bg-panel-2"}`}>
         <span className="w-7 h-7 grid place-items-center shrink-0 text-muted">⌂</span>

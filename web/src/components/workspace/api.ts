@@ -1,10 +1,13 @@
 // What the job workspace needs from the outside world. The app wires it to server actions; the
 // standalone preview wires it to memory, so the same screens run in both.
 import type { AssistantSend } from "@/components/assistant/Assistant";
+import type { ThreadApi } from "./ClientThread";
+import type { PlaceTag } from "@/lib/plan/places";
+import type { PhotoItem } from "@/lib/photos";
 import type { ClientStart } from "@/components/billing/MoneyPanel";
 import type { Billing, Brand } from "@/lib/billing/types";
 import type { MaterialLine, MaterialsApi, MaterialsJob } from "@/lib/materials/types";
-import type { ElementEdit, ElementState, ItemInput, Job, JobItem, JobStage, Member, Pin, PinComment, PinInput, PinStatus, PlanRow, PlanRun, ShareLink, ShareLinkInput, StageStatus } from "@/lib/data/types";
+import type { ElementEdit, ElementState, ItemInput, Job, JobItem, JobMessage, JobPhoto, JobPhotoInput, JobStage, Member, Pin, PinComment, PinInput, PinStatus, PlanRow, PlanRun, ShareLink, ShareLinkInput, StageStatus } from "@/lib/data/types";
 
 export interface WorkspaceData {
   job: Job;
@@ -29,8 +32,10 @@ export interface WorkspaceData {
   brand?: Brand;
   /** the company's payout account is connected, so clients can pay online */
   payoutsConnected?: boolean;
-  /** open on the Money tab (coming back from the client's page) */
-  startOnMoney?: boolean;
+  /** open on the Client tab (from a "new from your client" notice), showing the place they tagged */
+  startOnClient?: { place: PlaceTag | null };
+  /** open at a photo's spot (from Photos in the top bar): its pin, or its room or the thing in it */
+  startOnPhoto?: PhotoItem;
   /** the materials list: lines on every job this person can see, and those jobs (to split an add) */
   materials?: { lines: MaterialLine[]; jobs: MaterialsJob[] };
 }
@@ -60,6 +65,8 @@ export interface WorkspaceApi {
   revokeShareLink?(linkId: string): Promise<void>;
   /** a tagged person's own link: all their tasks for this company, on every job; the same link every time */
   personLink?(memberId: string): Promise<ShareLink>;
+  /** a homeowner's own project: the link a contractor opens to take it on (signed in only) */
+  contractorLink?(): Promise<ShareLink>;
   /** the full address of a link, to copy */
   shareUrl?(token: string): string;
   /** the preview has no second page: show what the link shows, right here */
@@ -79,4 +86,22 @@ export interface WorkspaceApi {
   materials?: MaterialsApi;
   /** open the shopping run across every job */
   openShopping?: () => void;
+  /** the job's client: one thread with them, whether they may add notes you see, and their page; left
+   *  out (or no client on the job), the Client tab is hidden */
+  client?: {
+    thread: ThreadApi;
+    setCanAdd(on: boolean): void;
+    /** show what the client sees on their link */
+    open(): void;
+  };
+}
+
+/** one job's Photos: everything added straight there, and the photos on its pins and in its client
+ *  thread (with addresses to show) */
+export interface PhotosApi {
+  /** everything Photos shows, fresh (crew and the client add photos from their links) */
+  list(): Promise<{ uploads: JobPhoto[]; comments: PinComment[]; messages: JobMessage[] }>;
+  add(file: File, input: JobPhotoInput): Promise<JobPhoto>;
+  update(id: string, patch: Partial<JobPhotoInput>): Promise<JobPhoto>;
+  remove(id: string): Promise<void>;
 }

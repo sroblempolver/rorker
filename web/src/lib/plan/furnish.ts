@@ -1,5 +1,5 @@
 // Quick furnishing asks, one tap each, said to the assistant that changes the plan: for the whole
-// house or one room. Shared by the new-project check and the Plan tab's chat.
+// house or one room. Shared by the new-project check and the chat in Build mode.
 export const FURNISH: { label: string; ask: (where: string) => string }[] = [
   { label: "Furnish it", ask: (w) => `Furnish ${w} with the usual furniture for each room.` },
   { label: "Kitchen appliances", ask: (w) => `Add the kitchen appliances that are missing${w === "the whole house" ? "" : ` in ${w}`}: fridge, range or cooktop with oven, range hood, dishwasher, sink.` },
