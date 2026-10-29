@@ -4,6 +4,8 @@
 // inside wall, an edge only one room has is an outside wall.
 import type { BBox, Fixture, Floor, Opening, OpeningKind, Plan, Pt, Question, Room, RoomType, Wall } from "./types";
 import { bboxOf, polyArea } from "./geometry";
+import { std } from "./standards";
+import "./rules"; // registers the house standards read below
 
 export type Side = "north" | "south" | "east" | "west";
 export interface SketchRoom { name: string; type?: string; polygon: Pt[]; unit?: string }
@@ -11,7 +13,7 @@ export interface SketchDoor { rooms: [string, string]; kind?: OpeningKind; width
 export interface SketchWindow { room: string; side: Side; width_mm?: number; height_mm?: number; /** bottom of the window above the floor */ sill_mm?: number; count?: number; /** where each one sits along the wall, 0 to 1 (spread evenly when left out) */ at?: number[] }
 export interface SketchFixture { kind: string; name?: string; room?: string; center: Pt; width_mm?: number; depth_mm?: number; facing?: Side | null; /** its own height, and its bottom above the floor (the catalogue's when missing) */ height_mm?: number; elevation_mm?: number }
 export interface SketchFloor {
-  name?: string; level: number; height_mm?: number; rooms: SketchRoom[]; doors?: SketchDoor[]; windows?: SketchWindow[]; fixtures?: SketchFixture[];
+  name?: string; level: number; /** finished floor to ceiling (the company's ceiling height when left out) */ height_mm?: number; rooms: SketchRoom[]; doors?: SketchDoor[]; windows?: SketchWindow[]; fixtures?: SketchFixture[];
   /** drawn on top of this level: its walls show underneath as a guide and rooms snap to them (drawing only) */
   guide?: number;
 }
@@ -19,6 +21,9 @@ export interface SketchFloor {
 export interface SketchUnit { name: string; copy_of?: string; mirror?: boolean; offset_mm?: Pt }
 export interface Sketch {
   building_name?: string; storey_height_mm?: number; roof?: string; scale?: string; units?: SketchUnit[]; floors: SketchFloor[];
+  /** the roof's pitch in degrees, how far the eaves stick out, and how high the foundation stands above
+   *  the ground (the company's standards when left out) */
+  roof_pitch_deg?: number; eave_mm?: number; plinth_mm?: number;
   questions?: { text: string; options?: string[]; rooms?: string[] }[];
 }
 export interface SketchSource { kind: string; filename: string }
@@ -77,7 +82,7 @@ function onSegment(p: Pt, a: Pt, b: Pt) {
 
 interface Seg { a: Pt; b: Pt; rooms: string[] }
 
-function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, notes: string[]): Floor {
+function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, notes: string[], at?: { elevation: number; height: number }): Floor {
   // rooms, snapped onto shared lines
   const raw = sf.rooms.filter((r) => Array.isArray(r.polygon) && r.polygon.length >= 3);
   const xs = snapAxis(raw.flatMap((r) => r.polygon.map((p) => p[0])));
@@ -238,7 +243,7 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
   const bounds = bboxOf([...rooms.flatMap((r) => r.polygon), ...walls.flatMap((w) => w.polygon)]);
   return {
     id: code, name: sf.name?.trim() || (sf.level === 0 ? "Ground floor" : sf.level < 0 ? "Basement" : `Level ${sf.level}`), level: sf.level,
-    elevation_mm: fi === 0 && sf.level <= 0 ? 0 : sf.level * storey, height_mm: sf.height_mm ?? storey,
+    elevation_mm: at?.elevation ?? (fi === 0 && sf.level <= 0 ? 0 : sf.level * storey), height_mm: at?.height ?? sf.height_mm ?? storey,
     footprint: outline([...segs.values()].filter((s) => s.rooms.length === 1 && !outdoorIds.has(s.rooms[0])), bounds), bounds, rooms, walls, openings, fixtures, stairs: [],
   };
 }
@@ -317,17 +322,22 @@ export function expandUnits(sk: Sketch, notes: string[] = []): SketchFloor[] {
 }
 
 export function planFromSketch(sk: Sketch, src: SketchSource): { plan: Plan; notes: string[] } {
-  const storey = Math.max(2400, Math.min(4500, sk.storey_height_mm ?? 3000));
+  const storey = Math.max(2400, Math.min(4500, sk.storey_height_mm ?? std("house.storey")));
   const notes: string[] = [];
   const used = new Set<string>();
   const floorsIn = expandUnits(sk, notes).filter((f) => f.rooms?.length).sort((a, b) => a.level - b.level);
+  // a floor with its own ceiling height is that plus the floor framing above it, floor to floor; the
+  // floors above ground stack on the ones below (a basement keeps its old place)
+  const framing = Math.max(0, storey - std("house.ceiling"));
+  const tall = (f?: SketchFloor) => (f?.height_mm ? f.height_mm + framing : storey);
+  const lift = (level: number) => { let y = 0; for (let k = 0; k < level; k++) y += tall(floorsIn.find((f) => f.level === k)); return y; };
   const floors = floorsIn.map((f, i) => {
     // each floor from its own top-left corner, so floors drawn side by side stack up
     const b0 = bboxOf(f.rooms.flatMap((r) => r.polygon ?? []));
     const shift = (p: Pt): Pt => [p[0] - b0[0] + 1000, p[1] - b0[1] + 1000];
     wallLines.clear();
     const moved: SketchFloor = { ...f, rooms: f.rooms.map((r) => ({ ...r, polygon: (r.polygon ?? []).map(shift) })), fixtures: (f.fixtures ?? []).map((x) => ({ ...x, center: shift(x.center) })) };
-    return buildFloor(moved, i, floorCode(f.level, used), storey, notes);
+    return buildFloor(moved, i, floorCode(f.level, used), storey, notes, { elevation: f.level > 0 ? lift(f.level) : i === 0 ? 0 : f.level * storey, height: tall(f) });
   });
   const bb = floors.length ? bboxOf(floors.flatMap((f) => [[f.bounds[0], f.bounds[1]], [f.bounds[2], f.bounds[3]]] as Pt[])) : [0, 0, 10000, 10000];
   const rooms = floors.flatMap((f) => f.rooms);
@@ -338,7 +348,10 @@ export function planFromSketch(sk: Sketch, src: SketchSource): { plan: Plan; not
   }));
   const plan: Plan = {
     schema_version: 1, units: "mm",
-    building: { name: sk.building_name || "Building", size_mm: [Math.round(bb[2] - bb[0]), Math.round(bb[3] - bb[1])], exterior: { estimated: true, storey_height_mm: storey, roof: sk.roof || "unknown", notes: null } },
+    building: { name: sk.building_name || "Building", size_mm: [Math.round(bb[2] - bb[0]), Math.round(bb[3] - bb[1])], exterior: {
+      estimated: true, storey_height_mm: storey, roof: sk.roof || "unknown", notes: null,
+      ...(sk.roof_pitch_deg != null ? { roof_pitch_deg: sk.roof_pitch_deg } : {}), ...(sk.eave_mm != null ? { eave_mm: sk.eave_mm } : {}), ...(sk.plinth_mm != null ? { plinth_mm: sk.plinth_mm } : {}),
+    } },
     floors, questions, flags: notes.map((m) => ({ code: "sketch", message: m, element_ids: [], severity: "info" })),
     source: { kind: src.kind, filename: src.filename, pipeline_version: "sketch-0.1", model: null, ai_used: true },
     stats: { mode: "assistant" },
