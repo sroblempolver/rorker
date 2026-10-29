@@ -8,9 +8,13 @@ import { bboxOf, polyArea } from "./geometry";
 export type Side = "north" | "south" | "east" | "west";
 export interface SketchRoom { name: string; type?: string; polygon: Pt[]; unit?: string }
 export interface SketchDoor { rooms: [string, string]; kind?: OpeningKind; width_mm?: number; at?: number; /** an outside door: which side of the house */ side?: Side }
-export interface SketchWindow { room: string; side: Side; width_mm?: number; count?: number }
+export interface SketchWindow { room: string; side: Side; width_mm?: number; count?: number; /** where each one sits along the wall, 0 to 1 (spread evenly when left out) */ at?: number[] }
 export interface SketchFixture { kind: string; name?: string; room?: string; center: Pt; width_mm?: number; depth_mm?: number; facing?: Side | null }
-export interface SketchFloor { name?: string; level: number; height_mm?: number; rooms: SketchRoom[]; doors?: SketchDoor[]; windows?: SketchWindow[]; fixtures?: SketchFixture[] }
+export interface SketchFloor {
+  name?: string; level: number; height_mm?: number; rooms: SketchRoom[]; doors?: SketchDoor[]; windows?: SketchWindow[]; fixtures?: SketchFixture[];
+  /** drawn on top of this level: its walls show underneath as a guide and rooms snap to them (drawing only) */
+  guide?: number;
+}
 /** One home in a drawing of several. A copy repeats another unit, flipped left to right when `mirror`. */
 export interface SketchUnit { name: string; copy_of?: string; mirror?: boolean; offset_mm?: Pt }
 export interface Sketch {
@@ -203,7 +207,7 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
     const w = cands[0];
     if (!w) continue;
     const count = Math.max(1, Math.min(4, wn.count ?? 1));
-    for (let k = 0; k < count; k++) place(w, wn.width_mm ?? 1200, (k + 1) / (count + 1), "window", "Window", "WN");
+    for (let k = 0; k < count; k++) place(w, wn.width_mm ?? 1200, wn.at?.[k] ?? (k + 1) / (count + 1), "window", "Window", "WN");
   }
 
   // objects at their real size, facing into the room
@@ -299,7 +303,7 @@ export function expandUnits(sk: Sketch, notes: string[] = []): SketchFloor[] {
         const upright = a && b ? Math.abs((a[0] + a[2]) / 2 - (b[0] + b[2]) / 2) > Math.abs((a[1] + a[3]) / 2 - (b[1] + b[3]) / 2) : d.side === "east" || d.side === "west";
         f.doors.push({ ...d, rooms: d.rooms.map((n) => mine(n) ?? n) as [string, string], side: u.mirror && d.side ? FLIP[d.side] : d.side, at: u.mirror && d.at != null && !upright ? 1 - d.at : d.at });
       }
-      for (const w of f.windows.filter((w) => mine(w.room))) f.windows.push({ ...w, room: mine(w.room)!, side: u.mirror ? FLIP[w.side] ?? w.side : w.side });
+      for (const w of f.windows.filter((w) => mine(w.room))) f.windows.push({ ...w, room: mine(w.room)!, side: u.mirror ? FLIP[w.side] ?? w.side : w.side, at: u.mirror && w.at && (w.side === "north" || w.side === "south") ? w.at.map((t) => 1 - t) : w.at });
       const inUnit = (c: Pt) => rooms.some((r) => { const b = bboxOf(r.polygon); return c[0] >= b[0] && c[0] <= b[2] && c[1] >= b[1] && c[1] <= b[3]; });
       for (const x of f.fixtures.filter((x) => (x.room ? mine(x.room) : Array.isArray(x.center) && inUnit(x.center)))) {
         f.fixtures.push({ ...x, room: x.room ? mine(x.room) : undefined, center: move(x.center), facing: u.mirror && x.facing ? FLIP[x.facing] : x.facing });

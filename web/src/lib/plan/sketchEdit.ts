@@ -89,28 +89,52 @@ export function sideWall(f: SketchFloor, ri: number, side: Side): Seg | null {
 
 const along = (s: Seg, t: number): Pt => [s[0][0] + (s[1][0] - s[0][0]) * t, s[0][1] + (s[1][1] - s[0][1]) * t];
 
-/** Where a door of the sketch is drawn: a short piece of its wall, or null when it can't be placed. */
-export function doorSpot(f: SketchFloor, d: { rooms: [string, string]; at?: number; width_mm?: number; side?: Side; kind?: string }): Seg | null {
+type DoorLike = { rooms: [string, string]; at?: number; width_mm?: number; side?: Side; kind?: string };
+type WindowLike = { room: string; side: Side; width_mm?: number; count?: number; at?: number[] };
+
+/** The stretch of wall a door's `at` is measured along: the wall the two rooms share, or the room's
+ *  outside wall on the door's side. */
+export function doorWall(f: SketchFloor, d: DoorLike): Seg | null {
   const i = byName(f, d.rooms[0] ?? "");
   if (i < 0) return null;
   const out = !d.rooms[1] || OUTSIDE.test(d.rooms[1]);
-  let wall: Seg | null;
-  if (out) wall = d.side ? sideWall(f, i, d.side) : outsidePieces(f, i).sort((a, b) => segLen(b) - segLen(a))[0] ?? null;
-  else { const j = byName(f, d.rooms[1]); wall = j >= 0 ? sharedEdge(f.rooms[i].polygon, f.rooms[j].polygon) : null; }
-  if (!wall) return null;
-  const L = segLen(wall);
-  const w = Math.min(d.width_mm ?? (d.kind === "garage_door" ? 2400 : d.kind === "double_door" || d.kind === "sliding_door" ? 1500 : d.kind === "opening" ? 1200 : 820), L - 200);
-  const c = Math.max(w / 2 + 100, Math.min(L - w / 2 - 100, (d.at ?? 0.5) * L));
+  if (out) return d.side ? sideWall(f, i, d.side) : outsidePieces(f, i).sort((a, b) => segLen(b) - segLen(a))[0] ?? null;
+  const j = byName(f, d.rooms[1]);
+  return j >= 0 ? sharedEdge(f.rooms[i].polygon, f.rooms[j].polygon) : null;
+}
+export const doorWidth = (d: DoorLike) => d.width_mm ?? (d.kind === "garage_door" ? 2400 : d.kind === "double_door" || d.kind === "sliding_door" ? 1500 : d.kind === "opening" ? 1200 : 820);
+export const windowWall = (f: SketchFloor, w: WindowLike) => { const i = byName(f, w.room); return i >= 0 ? sideWall(f, i, w.side) : null; };
+
+/** A piece of `wall` `width` long centred at `at` (0 to 1), kept clear of the corners. */
+function piece(wall: Seg, at: number, width: number): Seg {
+  const L = segLen(wall), w = Math.max(100, Math.min(width, L - 200));
+  const c = Math.max(w / 2 + 100, Math.min(L - w / 2 - 100, at * L));
   return [along(wall, (c - w / 2) / L), along(wall, (c + w / 2) / L)];
 }
 
-/** Where a sketch's windows are drawn: evenly along the room's outside wall on that side. */
-export function windowSpots(f: SketchFloor, w: { room: string; side: Side; width_mm?: number; count?: number }): Seg[] {
-  const i = byName(f, w.room);
-  const wall = i >= 0 ? sideWall(f, i, w.side) : null;
+/** Where a door of the sketch is drawn: a short piece of its wall, or null when it can't be placed. */
+export function doorSpot(f: SketchFloor, d: DoorLike): Seg | null {
+  const wall = doorWall(f, d);
+  return wall ? piece(wall, d.at ?? 0.5, doorWidth(d)) : null;
+}
+
+/** Where a sketch's windows are drawn: at their own spots, or evenly along the room's outside wall. */
+export function windowSpots(f: SketchFloor, w: WindowLike): Seg[] {
+  const wall = windowWall(f, w);
   if (!wall) return [];
-  const n = Math.max(1, Math.min(4, w.count ?? 1)), L = segLen(wall), wd = Math.min(w.width_mm ?? 1200, L / n - 100);
-  return Array.from({ length: n }, (_, k) => { const c = ((k + 1) / (n + 1)) * L; return [along(wall, (c - wd / 2) / L), along(wall, (c + wd / 2) / L)] as Seg; });
+  const n = Math.max(1, Math.min(4, w.count ?? 1)), wd = Math.min(w.width_mm ?? 1200, segLen(wall) / n - 100);
+  return Array.from({ length: n }, (_, k) => piece(wall, w.at?.[k] ?? (k + 1) / (n + 1), wd));
+}
+
+/** How far along `s` (0 to 1) the point nearest `p` is, not clamped. */
+export function param(p: Pt, s: Seg) {
+  const dx = s[1][0] - s[0][0], dy = s[1][1] - s[0][1];
+  return ((p[0] - s[0][0]) * dx + (p[1] - s[0][1]) * dy) / (dx * dx + dy * dy || 1);
+}
+/** Whether two straight pieces lie on one line (a door's wall and a room's edge). */
+export function sameLine(s: Seg, t: Seg) {
+  const L = segLen(s) || 1, cross = (p: Pt) => Math.abs((s[1][0] - s[0][0]) * (p[1] - s[0][1]) - (s[1][1] - s[0][1]) * (p[0] - s[0][0])) / L;
+  return cross(t[0]) < 5 && cross(t[1]) < 5;
 }
 
 /** Distance from a point to a segment, and how far along it (0 to 1) the nearest point is. */

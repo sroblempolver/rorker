@@ -7,11 +7,13 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import type { Pt } from "@/lib/plan/types";
 import type { Side, Sketch, SketchFloor, SketchRoom } from "@/lib/plan/sketch";
-import { doorSpot, edgesOf, flatten, moveCorner, moveWall, nearSeg, pointInPoly, roomArea, sideOf, snapTo, splitPoly, wallAt, windowSpots, type Seg } from "@/lib/plan/sketchEdit";
+import { OUTSIDE, doorSpot, outsidePieces, edgesOf, flatten, moveCorner, moveWall, nearSeg, pointInPoly, roomArea, sideOf, snapTo, splitPoly, wallAt, windowSpots, type Seg } from "@/lib/plan/sketchEdit";
 import { bboxOf, centroid } from "@/lib/plan/geometry";
 import { CATALOG } from "@/lib/plan/catalog";
 import { MATERIAL_BASE, ROOM_MATERIAL } from "@/components/plan/style";
 import { useEscape, editable } from "@/components/ui/hotkeys";
+import { WallView } from "./WallView";
+import { fmtArea, fmtLen, parseLength, type Units } from "@/lib/plan/units";
 import type { IntakePart } from "@/lib/intake/files";
 
 /** A picture of the drawing to trace over. `mmPerPx` when its scale is known (an AutoCAD drawing). */
@@ -43,7 +45,7 @@ const OPP: Record<Side, Side> = { north: "south", south: "north", east: "west", 
 
 type Tool = "select" | "room" | "split" | "door" | "window" | "thing" | "scale" | "match" | "picture";
 const TOOLS: { id: Tool; label: string; key: string; help: string }[] = [
-  { id: "select", label: "Select", key: "v", help: "Click a room, door, window or thing to change it. Drag a room to move it, a corner to reshape it, or the middle of a wall to slide it (the room next door follows). Drag empty space to look around, scroll to zoom." },
+  { id: "select", label: "Select", key: "v", help: "Click a room, door, window or thing to change it. Drag a room to move it, a corner to reshape it, or a wall to slide it (the room next door follows). Click a wall of the picked room to see it from the side. Arrow keys nudge. Drag empty space to look around, scroll to zoom." },
   { id: "room", label: "Room", key: "r", help: "Drag out a room over the drawing, corner to corner, on the middle of the walls. Edges snap to the rooms beside it so they share the wall." },
   { id: "split", label: "Split", key: "s", help: "Drag a line across a room to cut it in two (for two rooms read as one)." },
   { id: "door", label: "Door", key: "d", help: "Click a wall between two rooms to put a door in it, or an outside wall for an outside door." },
@@ -61,7 +63,7 @@ type Drag =
   | { k: "split"; a: Pt; b: Pt }
   | { k: "move"; i: number; from: Pt; orig: Pt[]; moved: boolean }
   | { k: "corner"; i: number; v: number; orig: Pt[] }
-  | { k: "wall"; s: Seg; from: Pt; orig: SketchRoom[] }
+  | { k: "wall"; s: Seg; from: Pt; orig: SketchRoom[]; i: number; e: number; moved: boolean }
   | { k: "thing"; i: number; from: Pt; orig: Pt }
   | { k: "picture"; from: Pt; orig: Pt };
 interface View { x: number; y: number; w: number }
@@ -70,19 +72,6 @@ const r10 = (v: number) => Math.round(v / 10) * 10;
 const dist = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const blankFloor = (level: number): SketchFloor => ({ name: level === 0 ? "Ground floor" : `Level ${level}`, level, rooms: [], doors: [], windows: [], fixtures: [] });
 
-function parseLength(s: string): number | null {
-  const m = /([\d.,]+)\s*(mm|cm|m|ft|'|in|")?/i.exec(s.trim());
-  if (!m) return null;
-  const v = parseFloat(m[1].replace(",", "."));
-  if (!(v > 0)) return null;
-  const u = (m[2] ?? "").toLowerCase();
-  if (u === "mm") return v;
-  if (u === "cm") return v * 10;
-  if (u === "m") return v * 1000;
-  if (u === "ft" || u === "'") return v * 304.8;
-  if (u === "in" || u === '"') return v * 25.4;
-  return v < 100 ? v * 1000 : v; // a bare small number is metres
-}
 
 export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCancel, doneLabel = "Use this plan" }: {
   initial: Sketch | null; pictures: Picture[]; initialBackdrops?: Record<number, Backdrop>;
@@ -100,6 +89,11 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   const [note, setNote] = useState<string | null>(null);
   const [sizes, setSizes] = useState<Record<number, [number, number]>>({});
   const [bgs, setBgs] = useState<Record<number, Backdrop>>(initialBackdrops ?? {});
+  // the wall seen from the side (a room and which of its edges), and the "+ Floor" choice
+  const [wall, setWall] = useState<{ room: number; edge: number } | null>(null);
+  const [addingFloor, setAddingFloor] = useState(false);
+  const [lu, setLuState] = useState<Units>(() => { try { return localStorage.getItem("rorker-units") === "ft" ? "ft" : "m"; } catch { return "m"; } });
+  const setLu = (u: Units) => { setLuState(u); try { localStorage.setItem("rorker-units", u); } catch { /* private window */ } };
   const svg = useRef<SVGSVGElement>(null);
   const [box, setBox] = useState({ w: 800, h: 560 });
   const floor = sk.floors[Math.min(fi, sk.floors.length - 1)];
@@ -125,15 +119,18 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     setBgs((x) => ({ ...x, [fi]: b }));
   }, [fi, sizes, pictures, bgs, floor.rooms]);
   const bg = bgs[fi];
+  // the floor this one is drawn on top of, shown underneath so rooms line up with its walls
+  const below = floor.guide == null ? null : sk.floors.find((f) => f.level === floor.guide && f !== floor) ?? null;
+  const belowOutline = useMemo(() => (below ? below.rooms.flatMap((_, i) => outsidePieces(below, i)) : []), [below]);
 
   // the camera
   const home = useMemo(() => {
-    const pts: Pt[] = floor.rooms.flatMap((r) => r.polygon);
+    const pts: Pt[] = [...floor.rooms, ...(below?.rooms ?? [])].flatMap((r) => r.polygon);
     if (bg && sizes[bg.pic]) pts.push(bg.at, [bg.at[0] + sizes[bg.pic][0] * bg.mmPerPx, bg.at[1] + sizes[bg.pic][1] * bg.mmPerPx]);
     if (!pts.length) pts.push([0, 0], [15000, 10000]);
     const [x0, y0, x1, y1] = bboxOf(pts);
     return { x: x0, y: y0, w: Math.max(2000, x1 - x0), h: Math.max(2000, y1 - y0) };
-  }, [floor, bg, sizes]);
+  }, [floor, below, bg, sizes]);
   const fitView = (): View => {
     const aspect = box.h / box.w, pad = 0.05;
     let w = home.w * (1 + 2 * pad);
@@ -184,15 +181,49 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   };
   const undo = () => { const p = past.current.pop(); if (p) { setSk(p); setSel(null); } };
 
+  // a new floor: empty, or a copy of the one you're on (rooms, inside doors and windows; no furniture)
+  const ORD = ["Ground", "First", "Second", "Third", "Fourth", "Fifth"];
+  const addFloor = (how: "copy" | "outline" | "empty") => {
+    const copy = how === "copy";
+    const lv = Math.max(...sk.floors.map((f) => f.level)) + 1;
+    const name = lv < ORD.length ? `${ORD[lv]} floor` : `Level ${lv}`;
+    const f: SketchFloor = copy
+      ? { ...JSON.parse(JSON.stringify(floor)), name, level: lv, fixtures: [], doors: (floor.doors ?? []).filter((d) => d.rooms[1] && !OUTSIDE.test(d.rooms[1])) }
+      : { ...blankFloor(lv), name, ...(how === "outline" ? { guide: floor.level } : {}) };
+    commit({ ...sk, floors: [...sk.floors, f] });
+    // the same picture underneath, lined up the same way, when copying
+    if (copy && bgs[fi]) setBgs((b) => ({ ...b, [sk.floors.length]: { ...bgs[fi] } }));
+    setFi(sk.floors.length);
+    setSel(null);
+    setWall(null);
+    setAddingFloor(false);
+    setNote(copy ? `${name} starts as a copy of ${floor.name || "the floor below"}. Rename and reshape the rooms, then add the stairs' doors and windows.`
+      : how === "outline" ? `${floor.name || "The floor below"} shows underneath. Draw the rooms on top: their walls lock onto the walls below.` : null);
+    if (how === "outline") setTool("room");
+  };
+  // a rectangular room's size, changed by sliding its east or south wall (the room next door follows)
+  const resize = (i: number, axis: 0 | 1, size: number) => {
+    const r = floor.rooms[i], b = bboxOf(r.polygon);
+    if (!(size >= 300)) return;
+    const s: Seg = axis === 0 ? [[b[2], b[1]], [b[2], b[3]]] : [[b[0], b[3]], [b[2], b[3]]];
+    setFloor({ ...floor, rooms: moveWall(floor.rooms, s, size - (b[axis + 2] - b[axis])) }, false);
+  };
+  const duplicate = (i: number) => {
+    const r = floor.rooms[i], b = bboxOf(r.polygon), w = b[2] - b[0];
+    setFloor({ ...floor, rooms: [...floor.rooms, { ...r, name: uniqueName(r.name), polygon: r.polygon.map(([x, y]) => [x + w, y] as Pt) }] });
+    setSel({ t: "room", i: floor.rooms.length });
+  };
+
   const snapLines = (skip?: number) => {
     const xs: number[] = [], ys: number[] = [];
     floor.rooms.forEach((r, i) => { if (i !== skip) for (const p of r.polygon) { xs.push(p[0]); ys.push(p[1]); } });
+    for (const r of below?.rooms ?? []) for (const p of r.polygon) { xs.push(p[0]); ys.push(p[1]); }
     return { xs, ys };
   };
-  const snapPt = (p: Pt, skip?: number): Pt => { const { xs, ys } = snapLines(skip); const g = px > 40 ? 100 : 50; return [snapTo(p[0], xs, 12 * px, g), snapTo(p[1], ys, 12 * px, g)]; };
+  const snapPt = (p: Pt, skip?: number): Pt => { const { xs, ys } = snapLines(skip); const g = px > 40 ? 100 : px < 8 ? 10 : 50; return [snapTo(p[0], xs, 12 * px, g), snapTo(p[1], ys, 12 * px, g)]; };
   const snapCorner = (p: Pt): Pt => {
     let best = p, d = 14 * px;
-    for (const r of floor.rooms) for (const q of r.polygon) if (dist(p, q) < d) { d = dist(p, q); best = q; }
+    for (const r of [...floor.rooms, ...(below?.rooms ?? [])]) for (const q of r.polygon) if (dist(p, q) < d) { d = dist(p, q); best = q; }
     return best;
   };
 
@@ -233,6 +264,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       setFloor({ ...floor, rooms: floor.rooms.filter((_, i) => i !== sel.i),
         doors: (floor.doors ?? []).filter((d) => !d.rooms.some((n) => n.toLowerCase() === name)),
         windows: (floor.windows ?? []).filter((w) => w.room.toLowerCase() !== name) });
+      setWall(null);
     } else if (sel.t === "door") setFloor({ ...floor, doors: (floor.doors ?? []).filter((_, i) => i !== sel.i) });
     else if (sel.t === "window") setFloor({ ...floor, windows: (floor.windows ?? []).filter((_, i) => i !== sel.i) });
     else setFloor({ ...floor, fixtures: (floor.fixtures ?? []).filter((_, i) => i !== sel.i) });
@@ -246,13 +278,22 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); return; }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); return; }
+      // arrows nudge the picked room or thing: 100 mm, 10 mm with Shift
+      const dir: Record<string, Pt> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+      if (dir[e.key] && (sel?.t === "room" || sel?.t === "thing")) {
+        e.preventDefault();
+        const st = e.shiftKey ? 10 : 100, [dx, dy] = [dir[e.key][0] * st, dir[e.key][1] * st];
+        if (sel.t === "room") setFloor({ ...floor, rooms: floor.rooms.map((r, i) => (i === sel.i ? { ...r, polygon: r.polygon.map(([x, y]) => [x + dx, y + dy] as Pt) } : r)) });
+        else setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? { ...f, center: [f.center[0] + dx, f.center[1] + dy] as Pt } : f)) });
+        return;
+      }
       const t = TOOLS.find((x) => x.key === e.key.toLowerCase());
       if (t) { setTool(t.id); setClicks([]); }
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   });
-  useEscape(() => { if (drag) setDrag(null); else if (clicks.length) setClicks([]); else if (sel) setSel(null); else setTool("select"); });
+  useEscape(() => { if (drag) setDrag(null); else if (clicks.length) setClicks([]); else if (sel) setSel(null); else if (wall) setWall(null); else setTool("select"); });
 
   const down = (e: RPointerEvent<SVGSVGElement>) => {
     if (e.button === 2) return;
@@ -265,8 +306,9 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         const poly = floor.rooms[sel.i].polygon;
         const vi = poly.findIndex((q) => dist(q, p) < 9 * px);
         if (vi >= 0) { past.current.push(sk); setDrag({ k: "corner", i: sel.i, v: vi, orig: poly }); return; }
-        const s = edgesOf(poly).find((s) => nearSeg(p, s).d < 6 * px && nearSeg(p, s).t > 0.15 && nearSeg(p, s).t < 0.85);
-        if (s) { past.current.push(sk); setDrag({ k: "wall", s, from: p, orig: floor.rooms }); return; }
+        const es = edgesOf(poly);
+        const ei = es.findIndex((s) => nearSeg(p, s).d < 7 * px && nearSeg(p, s).t > 0.08 && nearSeg(p, s).t < 0.92);
+        if (ei >= 0) { setDrag({ k: "wall", s: es[ei], from: p, orig: floor.rooms, i: sel.i, e: ei, moved: false }); return; }
       }
       const ti = thingAt(p);
       if (ti >= 0) { setSel({ t: "thing", i: ti }); past.current.push(sk); setDrag({ k: "thing", i: ti, from: p, orig: floor.fixtures![ti].center }); return; }
@@ -310,6 +352,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       const to = snapPt(p, drag.i);
       setFloor({ ...floor, rooms: floor.rooms.map((r, i) => (i === drag.i ? { ...r, polygon: moveCorner(drag.orig, drag.v, to) } : r)) }, false);
     } else if (drag.k === "wall") {
+      if (!drag.moved && dist(p, drag.from) < 4 * px) return;
+      if (!drag.moved) { past.current.push(sk); setDrag({ ...drag, moved: true }); }
       const h = Math.abs(drag.s[0][1] - drag.s[1][1]) < 1;
       const { xs, ys } = snapLines();
       const line = h ? drag.s[0][1] : drag.s[0][0];
@@ -352,6 +396,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       setSel({ t: "room", i: floor.rooms.length });
       return;
     }
+    // a click on a wall of the picked room opens it from the side
+    if (d?.k === "wall" && !d.moved) { setWall({ room: d.i, edge: d.e }); return; }
     if (d) return;
     // single clicks
     if (tool === "door") {
@@ -400,7 +446,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   };
 
   const applyScale = (everything: boolean) => {
-    const real = parseLength(lengthText);
+    const real = parseLength(lengthText, lu);
     if (clicks.length < 2 || !real) { setNote("Type the length, like 3.6 m or 3600."); return; }
     const k = real / Math.max(1, dist(clicks[0], clicks[1]));
     const o = clicks[0];
@@ -424,6 +470,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   const fix = sel?.t === "thing" ? floor.fixtures?.[sel.i] : null;
   const units = [...new Set(sk.floors.flatMap((f) => f.rooms.map((r) => r.unit).filter(Boolean) as string[]))];
   const fontMm = Math.max(120, 12 * px);
+  const seen = wall && floor.rooms[wall.room] && wall.edge < floor.rooms[wall.room].polygon.length ? wall : null;
   const allRooms = sk.floors.reduce((n, f) => n + f.rooms.length, 0);
 
   const done = () => {
@@ -439,6 +486,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             className={`btn btn-sm ${tool === t.id ? "btn-primary" : "btn-ghost"}`}>{t.label}</button>
         ))}
         <span className="mx-1 h-5 w-px bg-line" />
+        <button className="chip !h-7" onClick={() => setLu(lu === "m" ? "ft" : "m")} title="Switch metres / feet and inches">{lu === "m" ? "m" : "ft·in"}</button>
         <button className="btn btn-sm btn-ghost" onClick={undo} disabled={!past.current.length} title="Undo (Ctrl+Z)">Undo</button>
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(0.75)} aria-label="Zoom in">+</button>
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(1.33)} aria-label="Zoom out">−</button>
@@ -446,18 +494,36 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       </div>
       <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 border-b border-line text-[13px]">
         {sk.floors.map((f, i) => (
-          <button key={i} onClick={() => { setFi(i); setSel(null); setClicks([]); }} className={`chip !h-7 ${i === fi ? "!text-accent !border-accent" : ""}`}>{f.name || `Level ${f.level}`} · {f.rooms.length}</button>
+          <button key={i} onClick={() => { setFi(i); setSel(null); setClicks([]); setWall(null); }} className={`chip !h-7 ${i === fi ? "!text-accent !border-accent" : ""}`}>{f.name || `Level ${f.level}`} · {f.rooms.length}</button>
         ))}
-        <button className="chip !h-7" onClick={() => { const lv = Math.max(...sk.floors.map((f) => f.level)) + 1; commit({ ...sk, floors: [...sk.floors, blankFloor(lv)] }); setFi(sk.floors.length); setSel(null); }}>+ Floor</button>
+        {addingFloor ? (
+          <>
+            <button className="chip !h-7 !text-accent !border-accent" onClick={() => addFloor("copy")} disabled={!floor.rooms.length} title="Same rooms, doors and windows">Copy {floor.name || "this floor"}</button>
+            <button className="chip !h-7" onClick={() => addFloor("outline")} disabled={!floor.rooms.length} title="Draw new rooms on top of this floor's walls">Same outline</button>
+            <button className="chip !h-7" onClick={() => addFloor("empty")}>Start empty</button>
+            <button className="chip !h-7" onClick={() => setAddingFloor(false)} aria-label="Cancel">✕</button>
+          </>
+        ) : <button className="chip !h-7" onClick={() => (floor.rooms.length ? setAddingFloor(true) : addFloor("empty"))}>+ Floor</button>}
+        {floor.level > 0 && !addingFloor && sk.floors.some((f) => f.level < floor.level) && (
+          <button className={`chip !h-7 ${below ? "!text-accent !border-accent" : ""}`} title="Show the floor underneath and lock rooms onto its walls"
+            onClick={() => setFloor({ ...floor, guide: below ? undefined : Math.max(...sk.floors.filter((f) => f.level < floor.level).map((f) => f.level)) })}>Floor below</button>
+        )}
         <span className="ml-auto text-muted">{allRooms} rooms</span>
       </div>
       <div className="grid lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="relative h-[62vh] min-h-[420px] bg-ink">
+        <div className="min-w-0">
+        <div className={`relative ${seen ? "h-[42vh] min-h-[300px]" : "h-[62vh] min-h-[420px]"} bg-ink`}>
           <svg ref={svg} className="absolute inset-0 w-full h-full touch-none select-none" viewBox={`${v.x} ${v.y} ${v.w} ${vh}`}
             style={{ cursor: drag?.k === "pan" ? "grabbing" : tool === "select" ? "default" : tool === "picture" ? "move" : "crosshair" }}
             onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrag(null)} onContextMenu={(e) => e.preventDefault()}>
             {bg && sizes[bg.pic] && (
               <image href={pictures[bg.pic].url} x={bg.at[0]} y={bg.at[1]} width={sizes[bg.pic][0] * bg.mmPerPx} height={sizes[bg.pic][1] * bg.mmPerPx} opacity={bg.opacity} preserveAspectRatio="none" style={{ pointerEvents: "none" }} />
+            )}
+            {below && (
+              <g style={{ pointerEvents: "none" }} fill="none">
+                {below.rooms.map((r, i) => <polygon key={`b${i}`} points={r.polygon.map((q) => q.join(",")).join(" ")} stroke="#6e6a62" strokeWidth={1.2 * px} strokeDasharray={`${6 * px} ${5 * px}`} />)}
+                {belowOutline.map((s, i) => <line key={`bo${i}`} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke="#9c978d" strokeWidth={3 * px} strokeOpacity={0.7} />)}
+              </g>
             )}
             {floor.rooms.map((r, i) => {
               const c = centroid(r.polygon);
@@ -467,7 +533,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
                 <g key={i}>
                   <polygon points={r.polygon.map((q) => q.join(",")).join(" ")} fill={color} fillOpacity={bg ? 0.35 : 0.75} stroke={on ? "#ff6a1f" : "#efe8da"} strokeWidth={(on ? 3 : 2) * px} />
                   <text x={c[0]} y={c[1]} fontSize={fontMm} textAnchor="middle" dominantBaseline="middle" fill="#fff" stroke="#000" strokeWidth={fontMm * 0.18} paintOrder="stroke" style={{ pointerEvents: "none" }}>{r.name}</text>
-                  <text x={c[0]} y={c[1] + fontMm * 1.2} fontSize={fontMm * 0.8} textAnchor="middle" dominantBaseline="middle" fill="#ddd" stroke="#000" strokeWidth={fontMm * 0.14} paintOrder="stroke" style={{ pointerEvents: "none" }}>{roomArea(r).toFixed(1)} m²</text>
+                  <text x={c[0]} y={c[1] + fontMm * 1.2} fontSize={fontMm * 0.8} textAnchor="middle" dominantBaseline="middle" fill="#ddd" stroke="#000" strokeWidth={fontMm * 0.14} paintOrder="stroke" style={{ pointerEvents: "none" }}>{fmtArea(roomArea(r), lu)}</text>
                 </g>
               );
             })}
@@ -490,14 +556,23 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             {room && room.polygon.map((q, k) => <rect key={k} x={q[0] - 5 * px} y={q[1] - 5 * px} width={10 * px} height={10 * px} fill="#ff6a1f" stroke="#fff" strokeWidth={px} />)}
             {room && edgesOf(room.polygon).map((s, k) => <circle key={`m${k}`} cx={(s[0][0] + s[1][0]) / 2} cy={(s[0][1] + s[1][1]) / 2} r={4 * px} fill="#fff" stroke="#ff6a1f" strokeWidth={1.5 * px} />)}
             {drag?.k === "newRoom" && <rect x={Math.min(drag.a[0], drag.b[0])} y={Math.min(drag.a[1], drag.b[1])} width={Math.abs(drag.b[0] - drag.a[0])} height={Math.abs(drag.b[1] - drag.a[1])} fill="#ff6a1f" fillOpacity={0.2} stroke="#ff6a1f" strokeWidth={2 * px} />}
-            {drag?.k === "newRoom" && <text x={Math.max(drag.a[0], drag.b[0])} y={Math.max(drag.a[1], drag.b[1]) + fontMm} fontSize={fontMm} fill="#ff6a1f" textAnchor="end">{(Math.abs(drag.b[0] - drag.a[0]) / 1000).toFixed(2)} × {(Math.abs(drag.b[1] - drag.a[1]) / 1000).toFixed(2)} m</text>}
+            {drag?.k === "newRoom" && <text x={Math.max(drag.a[0], drag.b[0])} y={Math.max(drag.a[1], drag.b[1]) + fontMm} fontSize={fontMm} fill="#ff6a1f" textAnchor="end">{fmtLen(Math.abs(drag.b[0] - drag.a[0]), lu, true)} × {fmtLen(Math.abs(drag.b[1] - drag.a[1]), lu)}</text>}
             {drag?.k === "split" && <line x1={drag.a[0]} y1={drag.a[1]} x2={drag.b[0]} y2={drag.b[1]} stroke="#ff6a1f" strokeWidth={2 * px} strokeDasharray={`${6 * px} ${4 * px}`} />}
             {clicks.map((c, i) => <circle key={i} cx={c[0]} cy={c[1]} r={6 * px} fill={tool === "match" && i % 2 === 1 ? "#3fb46a" : "#ff6a1f"} stroke="#fff" strokeWidth={1.5 * px} />)}
             {tool === "scale" && clicks.length === 2 && <line x1={clicks[0][0]} y1={clicks[0][1]} x2={clicks[1][0]} y2={clicks[1][1]} stroke="#ff6a1f" strokeWidth={2 * px} />}
+            {/* the picked room's wall lengths, and the wall being looked at */}
+            {room && edgesOf(room.polygon).map((s, k) => {
+              const c = centroid(room.polygon), mx = (s[0][0] + s[1][0]) / 2, my = (s[0][1] + s[1][1]) / 2;
+              const d = Math.hypot(c[0] - mx, c[1] - my) || 1, off = fontMm * 1.1;
+              return <text key={`len${k}`} x={mx + ((c[0] - mx) / d) * off} y={my + ((c[1] - my) / d) * off} fontSize={fontMm * 0.8} textAnchor="middle" dominantBaseline="middle" fill="#ff6a1f" stroke="#000" strokeWidth={fontMm * 0.12} paintOrder="stroke" style={{ pointerEvents: "none" }}>{fmtLen(Math.hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]), lu, true)}</text>;
+            })}
+            {seen && (() => { const [a, b] = edgesOf(floor.rooms[seen.room].polygon)[seen.edge]; return <line x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="#ff6a1f" strokeWidth={6 * px} strokeOpacity={0.8} style={{ pointerEvents: "none" }} />; })()}
           </svg>
           {!floor.rooms.length && !bg && (
             <p className="absolute inset-x-0 top-1/3 text-center text-muted text-[14px] pointer-events-none px-6">Pick Room and drag out the first room. Rooms that touch share a wall.</p>
           )}
+        </div>
+        {seen && <WallView floor={floor} room={seen.room} edge={seen.edge} height={2700} units={lu} onChange={(f, h) => setFloor(f, h ?? true)} onClose={() => setWall(null)} onEdge={(edge) => setWall({ room: seen.room, edge })} />}
         </div>
 
         <aside className="border-t lg:border-t-0 lg:border-l border-line p-3 space-y-3 text-[13.5px] max-h-[62vh] overflow-y-auto scroll-thin">
@@ -541,8 +616,30 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
                   onChange={(e) => setFloor({ ...floor, rooms: floor.rooms.map((r, i) => (i === sel.i ? { ...r, unit: e.target.value || undefined } : r)) }, false)} onFocus={() => past.current.push(sk)} />
                 <datalist id="units">{units.map((u) => <option key={u} value={u} />)}</datalist>
               </div>
-              <p className="text-muted">{roomArea(room).toFixed(1)} m² · {(() => { const b = bboxOf(room.polygon); return `${((b[2] - b[0]) / 1000).toFixed(2)} × ${((b[3] - b[1]) / 1000).toFixed(2)} m`; })()}</p>
-              <button className="btn btn-sm btn-ghost text-red" onClick={deleteSel}>Delete room</button>
+              {(() => {
+                const b = bboxOf(room.polygon), rect = room.polygon.length === 4;
+                return rect ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    {([0, 1] as const).map((ax) => (
+                      <div key={ax}><label className="label !mb-1" htmlFor={`size${ax}`}>{ax === 0 ? "Width (east–west)" : "Depth (north–south)"}</label>
+                        <input id={`size${ax}`} key={`${sel.i}-${ax}-${b[ax + 2] - b[ax]}-${lu}`} className="input !h-9" defaultValue={fmtLen(b[ax + 2] - b[ax], lu, true)}
+                          onFocus={() => past.current.push(sk)} onBlur={(e) => { const v = parseLength(e.target.value, lu); if (v) resize(sel.i, ax, Math.round(v / 10) * 10); }}
+                          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></div>
+                    ))}
+                  </div>
+                ) : null;
+              })()}
+              <p className="text-muted">{fmtArea(roomArea(room), lu)} · {(() => { const b = bboxOf(room.polygon); return `${fmtLen(b[2] - b[0], lu, true)} × ${fmtLen(b[3] - b[1], lu)}`; })()}</p>
+              <div>
+                <p className="label !mb-1">See a wall from the side</p>
+                <div className="flex flex-wrap gap-1">{edgesOf(room.polygon).map((s, k) => (
+                  <button key={k} onClick={() => setWall({ room: sel.i, edge: k })} className={`chip !h-7 ${seen?.room === sel.i && seen.edge === k ? "!text-accent !border-accent" : ""}`}>{sideOf(room.polygon, s)} · {fmtLen(Math.hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]), lu)}</button>
+                ))}</div>
+              </div>
+              <div className="flex gap-2">
+                <button className="btn btn-sm" onClick={() => duplicate(sel.i)}>Duplicate</button>
+                <button className="btn btn-sm btn-ghost text-red" onClick={deleteSel}>Delete room</button>
+              </div>
             </div>
           )}
           {door && sel && (
