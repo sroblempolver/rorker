@@ -6,8 +6,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementStatus, Question } from "@/lib/plan/types";
 import { clearMarks, MARK_COLORS, showMarks } from "@/lib/plan/marks";
-import { clientMember, type ElementEdit, type ItemInput, type JobItem, type Member, type Pin, type PinInput, type PinKind, type PlanRow } from "@/lib/data/types";
+import { clientMember, type JobMessage, type ElementEdit, type ItemInput, type JobItem, type Member, type Pin, type PinInput, type PinKind, type PlanRow } from "@/lib/data/types";
 import { ClientThread } from "./ClientThread";
+import { markFor, placeOptions, type PlaceTag } from "@/lib/plan/places";
+import { markSeen, unread } from "@/lib/seen";
 import { today } from "@/lib/dates";
 import { PlanChat } from "./PlanChat";
 import { applyEdits, turnedFacing } from "@/lib/plan/edits";
@@ -74,7 +76,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   // a pin being made: `at` set means the quick card at that screen point, otherwise the full form
   const [draft, setDraft] = useState<(PinTarget & { at?: ScreenPoint; preset?: { kind: PinKind; title: string; tagged?: string[]; photo?: boolean; stage?: string | null } }) | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
-  const [tab, setTab] = useState<Tab>(data.startOnMoney && data.billing ? "money" : data.plan ? "feed" : "plan");
+  const [tab, setTab] = useState<Tab>(data.startOnClient && api.client ? "client" : data.startOnMoney && data.billing ? "money" : data.plan ? "feed" : "plan");
   const [flyTo, setFlyTo] = useState<{ ids: string[]; n: number } | null>(null);
   const job = data.job;
   const [billing, setBilling] = useState(data.billing);
@@ -175,6 +177,26 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
 
   // the plan as it is now: what the reader found, plus everything moved or changed in the app
   const view = useMemo(() => (plan ? applyEdits(plan.data, edits) : null), [plan, edits]);
+  // the client's thread: what's new since you last looked, and the rooms and objects you can tag in it
+  const places = useMemo(() => (view ? placeOptions(view) : []), [view]);
+  const seenKey = `contractor:${data.job.id}`;
+  const [clientNew, setClientNew] = useState<JobMessage[]>([]);
+  useEffect(() => {
+    if (!api.client || !data.job.client_name) return;
+    let live = true;
+    void api.client.thread.list().then((l) => { if (live) setClientNew(unread(l, "contractor", seenKey)); }, () => {});
+    return () => { live = false; };
+  }, [api.client, data.job.client_name, seenKey]);
+  /** a tag in a message: the map goes to its floor and the spot blinks */
+  const showPlace = useCallback((t: PlaceTag) => {
+    const m = view ? markFor(view, t.id, t.label, MARK_COLORS[0][1]) : null;
+    if (!m) return;
+    setSelected(t.id);
+    setSelectedPin(null);
+    showMarks([m]);
+  }, [view]);
+  const firstPlace = useRef(data.startOnClient?.place ?? null);
+  useEffect(() => { const t = firstPlace.current; if (t && view) { firstPlace.current = null; setTimeout(() => showPlace(t), 300); } }, [view, showPlace]);
   // furnishing, and how built the house looks: finished, unless a stage is picked in Stages
   const settings = useMemo(() => jobSettings(edits), [edits]);
   const layerStage = layer && layer !== HOUSE_LAYER ? stages.find((s) => s.id === layer) ?? null : null;
@@ -676,7 +698,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
             <input type="checkbox" className="mt-1" checked={!!job.client_can_add} onChange={(e) => c.setCanAdd(e.target.checked)} />
             <span>Let {job.client_name} add notes to the map that you see. <span className="text-muted">Their private notes stay theirs either way.</span></span>
           </label>
-          <div className="flex-1 min-h-0"><ClientThread key={job.id} api={c.thread} side="contractor" tone="app" other={job.client_name} /></div>
+          <div className="flex-1 min-h-0"><ClientThread key={job.id} api={c.thread} side="contractor" tone="app" other={job.client_name} places={places} onPlace={showPlace}
+            onSeen={(l) => { markSeen(seenKey, l); setClientNew([]); }} /></div>
         </div>
       );
     }
@@ -706,7 +729,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind}
       buy={api.materials ? { lines: mlines.filter((l) => l.job_id === job.id && l.status !== "returned"), onQuick: quickBuy, onAll: quickBuyAll, onMore: (t) => openBuy(t), onOpen: openLine, onTick: (id) => { const l = mlines.find((x) => x.id === id); if (l) void updateMaterial(id, { status: NEXT_STATUS[l.status] }); } } : undefined} />;
   }, [tab, feedPerson, buyDraft, buyFocus, mlines, mjobs, lastBuyer, job.id, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, runs, level, selected, states, api, data.aiAvailable, data.canShare, say, showPin, updatePin, deletePin, undoable, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
-    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext, billing, payouts, moneyKey, data.brand, job, guard, layer, layerPins, layerStage, inLayer, stageCounts, pickLayer, settings]);
+    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, askContext, billing, payouts, moneyKey, data.brand, job, guard, places, showPlace, seenKey, layer, layerPins, layerStage, inLayer, stageCounts, pickLayer, settings]);
 
   // where the quick card sits inside the map, kept on screen
   const quick = (() => {
@@ -822,7 +845,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
             {tabBtn("plan", "Plan", questions)}
             {billing && api.money && tabBtn("money", "Money", billing.quotes.filter((q) => q.status === "approved")
               .flatMap((q) => q.schedule).filter((d) => !d.invoice_id && stages.some((s) => s.status === "done" && s.name === d.stage_name)).length)}
-            {api.client && job.client_name && tabBtn("client", "Client")}
+            {api.client && job.client_name && tabBtn("client", "Client", clientNew.length)}
           </div>
           {backTo && (
             <button onClick={back} className="shrink-0 h-10 px-4 flex items-center gap-2 border-b border-line text-[13.5px] text-muted hover:text-text hover:bg-panel-2 text-left" title="Back (Esc)">
@@ -831,6 +854,22 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
               <kbd className="kbd ml-auto hidden md:inline-grid !h-5 !text-[10.5px]">Esc</kbd>
             </button>
           )}
+          {clientNew.length > 0 && tab !== "client" && (() => {
+            const m = clientNew[clientNew.length - 1];
+            const t = m.places?.[0];
+            return (
+              <div role="status" className="shrink-0 border-b border-line bg-panel-2 px-4 py-2.5 flex items-start gap-3">
+                <span className="dot bg-accent mt-1.5 shrink-0" />
+                <p className="flex-1 min-w-0 text-[13.5px]">
+                  <span className="font-semibold">{clientNew.length > 1 ? `${clientNew.length} new from ${m.author_name}` : `New from ${m.author_name}`}</span>
+                  {t ? <> · tagged <span className="font-semibold">{t.label}</span></> : null}
+                  <span className="block text-muted truncate">{m.body?.replace(/@(?=\S)/g, "") ?? "A photo"}</span>
+                </p>
+                {t && <button className="btn btn-sm shrink-0" onClick={() => showPlace(t)}>Show me</button>}
+                <button className="btn btn-sm btn-primary shrink-0" onClick={() => openTab("client")}>Read</button>
+              </div>
+            );
+          })()}
           <div ref={panelRef} className="flex-1 min-h-0 overflow-y-auto scroll-thin"><div key={tab} className="fade-in">{panel}</div></div>
         </aside>
       </div>

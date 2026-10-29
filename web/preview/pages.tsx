@@ -108,7 +108,7 @@ export function ClientLinkPage({ token, open, pin }: { token: string; open: stri
   const api = useMemo<ClientApi>(() => ({
     thread: {
       list: async () => (await cloud.call<{ messages: JobMessage[] }>("messages", { token })).messages,
-      send: async (body, file) => (await cloud.call<{ messages: JobMessage[] }>("message", { token, body, ...(file ? await cloud.photoData(file) : {}) })).messages,
+      send: async (body, file, places) => (await cloud.call<{ messages: JobMessage[] }>("message", { token, body, places, ...(file ? await cloud.photoData(file) : {}) })).messages,
     },
     // each change goes out in order; the server takes only what a client may change
     billing: (b: Billing) => {
@@ -124,5 +124,5 @@ export function ClientLinkPage({ token, open, pin }: { token: string; open: stri
   if (data.kind === "crew") { location.hash = `#/s/${token}`; return null; }
   const [kind, id] = (open ?? "").split(":");
   const start: ClientStart = id && (kind === "quote" || kind === "invoice" || kind === "change") ? { kind, id } : null;
-  return <ClientPage view={data.view} api={api} start={start} pin={pin} error={err} />;
+  return <ClientPage view={data.view} api={api} start={start} pin={pin} error={err} seenKey={`client:${token}`} />;
 }

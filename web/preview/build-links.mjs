@@ -11,7 +11,8 @@ await esbuild.build({
     contents: `export { fromRecords } from "@/lib/cloud/records";
 export { clientBuys, clientNote, clientPinIds, clientView, companyOf, crewPinIds, crewWork, findLink } from "@/lib/cloud/links";
 export { clientBilling, forClient } from "@/lib/billing/clientGuard";
-export { linkLive } from "@/lib/share";`,
+export { linkLive } from "@/lib/share";
+export { cleanPlaces } from "@/lib/plan/tags";`,
     resolveDir: root, loader: "ts",
   },
   bundle: true, format: "esm", target: "es2022", platform: "neutral",

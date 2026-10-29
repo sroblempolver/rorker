@@ -1,3 +1,4 @@
+import type { PlaceTag } from "@/lib/plan/tags";
 import type { Part } from "@/lib/plan/catalog";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
 import type { BuildLook, Furnish } from "@/lib/plan/build";
@@ -123,6 +124,8 @@ export interface JobMessage {
   id: string; job_id: string; from: "contractor" | "client"; author_name: string; body: string | null;
   /** stored file paths when saved; addresses to show when handed to a page */
   photos: string[]; created_at: string;
+  /** rooms and objects tagged in the words ("@Bedroom 1 › Bed"); a tap shows them on the map */
+  places?: PlaceTag[];
 }
 export interface MemberInput { full_name: string; email?: string | null; phone?: string | null; title?: string | null; role: MemberRole; crew?: CrewKind }
 

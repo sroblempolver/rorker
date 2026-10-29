@@ -283,7 +283,21 @@ function clientNote(l, a, n, id, at) {
     closed_at: null
   };
 }
+
+// src/lib/plan/tags.ts
+function cleanPlaces(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const t of v.slice(0, 8)) {
+    const o = t;
+    if (typeof o?.id !== "string" || typeof o.label !== "string" || !/^[\w:.-]{1,80}$/.test(o.id)) continue;
+    const label = o.label.trim().slice(0, 80);
+    if (label && !out.some((x) => x.id === o.id)) out.push({ id: o.id, label });
+  }
+  return out;
+}
 export {
+  cleanPlaces,
   clientBilling,
   clientBuys,
   clientNote,

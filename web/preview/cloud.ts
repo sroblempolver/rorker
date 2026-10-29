@@ -4,6 +4,7 @@
 // edge function, which shows them only what their link may see.
 import { createClient, type Session } from "@supabase/supabase-js";
 import type { JobMessage, PinComment } from "@/lib/data/types";
+import type { PlaceTag } from "@/lib/plan/places";
 import { fromRecords, POSTED, recKey, toRecords, type PageSaved, type Rec, type SavedAccount } from "@/lib/cloud/records";
 
 const URL_ = "https://uofdydjfwdsvaribvsfy.supabase.co";
@@ -173,6 +174,13 @@ export async function addComment(accountId: string, jobId: string, c: Omit<PinCo
   if (error) throw new Error("Couldn't post that. Check your connection and try again.");
 }
 
+/** Messages written straight in (the sample job's thread on a new account). */
+export async function putMessages(accountId: string, list: JobMessage[]) {
+  if (!list.length) return;
+  const { error } = await sb.from("records").insert(list.map((m) => ({ account_id: accountId, kind: "message", id: m.id, job_id: m.job_id, data: m })));
+  if (error) console.error(error);
+}
+
 /** A file as base64, to send through the function (crew photos). Big phone photos are shrunk first. */
 export async function photoData(f: File): Promise<{ type: string; data: string }> {
   let blob: Blob = f;
@@ -201,9 +209,9 @@ export async function listMessages(accountId: string, jobId: string): Promise<Jo
   return list.map((m) => ({ ...m, photos: m.photos.map((p) => urls.get(p) ?? p) }));
 }
 
-export async function addMessage(accountId: string, jobId: string, author: string, body: string, file: File | null) {
+export async function addMessage(accountId: string, jobId: string, author: string, body: string, file: File | null, places: PlaceTag[]) {
   const photos = file ? [await upload(accountId, jobId, "messages", file)] : [];
-  const m: JobMessage = { id: shortId(), job_id: jobId, from: "contractor", author_name: author, body: body || null, photos, created_at: new Date().toISOString() };
+  const m: JobMessage = { id: shortId(), job_id: jobId, from: "contractor", author_name: author, body: body || null, photos, created_at: new Date().toISOString(), ...(places.length ? { places } : {}) };
   const { error } = await sb.from("records").insert({ account_id: accountId, kind: "message", id: m.id, job_id: jobId, data: m });
   if (error) throw new Error("Couldn't send that. Check your connection and try again.");
 }

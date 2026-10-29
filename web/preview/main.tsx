@@ -21,6 +21,8 @@ import { newToken, shareWork } from "@/lib/share";
 import { NewProject, type NewProjectResult } from "@/components/newjob/NewProject";
 import { ClientPage, type ClientApi } from "@/components/share/ClientPage";
 import { clientNote, clientView } from "@/lib/cloud/links";
+import type { PlaceTag } from "@/lib/plan/places";
+import { unread } from "@/lib/seen";
 import type { SavedAccount } from "@/lib/cloud/records";
 import type { ClientStart } from "@/components/billing/MoneyPanel";
 import type { Brand } from "@/lib/billing/types";
@@ -94,7 +96,11 @@ function seed(owner: Owner = { name: "Company owner", email: "owner@demobuilders
     stage_id: null, links: [], created_by: null, created_at: now(), closed_at: null, comment_count: 0 });
   if (materials.lines[0]) materials.lines.push({ ...materials.lines[0], id: "mlc", job_id: jobId, name: "Cabinet pulls (your pick)", qty: 22, unit: "ea", unit_cost: null, store: null, link: null, sku: null,
     status: "to_buy", buyer: client, installer: null, task_id: null, pin_id: null, note: "128 mm centers", receipts: [], created_at: now() });
-  messages.set(jobId, [{ id: "msg1", job_id: jobId, from: "contractor", author_name: owner.name, body: "Framing passed inspection today. Drywall starts Monday.", photos: [], created_at: now() }]);
+  messages.set(jobId, [
+    { id: "msg1", job_id: jobId, from: "contractor", author_name: owner.name, body: "Framing passed inspection today. Drywall starts Monday.", photos: [], created_at: new Date(Date.now() - 3_600_000).toISOString() },
+    { id: "msg2", job_id: jobId, from: "client", author_name: "Sam and Priya Okafor", body: "@Bedroom 1 › Bed needs to be replaced, the frame is cracked. Can you take it out with the old carpet?", photos: [], created_at: now(),
+      places: [{ id: "1-F12", label: "Bedroom 1 › Bed" }] },
+  ]);
   const planRow: PlanRow = { id: "plan1", job_id: jobId, version: 1, data: plan, created_at: now() };
   return {
     job: { id: jobId, company_id: "demo", name: "Hadley Road house", address: "14 Hadley Road", client_name: "Sam and Priya Okafor", client_email: null, client_phone: null, job_type: "renovation", status: "active", start_date: null, current_plan_id: "plan1", created_at: now() },
@@ -146,6 +152,44 @@ const pinPhotos = new Map<string, string[]>();
 const comments = new Map<string, PinComment[]>();
 /** each job's thread with its client, by job id */
 const messages = new Map<string, JobMessage[]>();
+/** a message on a job's thread in the preview */
+function post(d: WorkspaceData, from: JobMessage["from"], body: string, f: File | null, places: PlaceTag[]) {
+  const author = from === "client" ? d.job.client_name || "Client" : team.members.find((m) => m.is_owner)?.full_name ?? "You";
+  const list = [...(messages.get(d.job.id) ?? []), { id: uid(), job_id: d.job.id, from, author_name: author, body: body || null, photos: f ? [URL.createObjectURL(f)] : [], created_at: now(), ...(places.length ? { places } : {}) }];
+  messages.set(d.job.id, list);
+  window.dispatchEvent(new Event("rorker-seen"));
+  return list;
+}
+/** What your clients wrote since you last looked, on the jobs page: who, which job, the place they
+ *  tagged; "Show me" opens the job's thread and takes the map there. */
+function ClientNews({ jobs, onOpen }: { jobs: WorkspaceData[]; onOpen: (jobId: string, place: PlaceTag | null) => void }) {
+  const [, bump] = useState(0);
+  useEffect(() => { const f = () => bump((n) => n + 1); window.addEventListener("rorker-seen", f); return () => window.removeEventListener("rorker-seen", f); }, []);
+  const news = jobs.flatMap((d) => {
+    const l = unread(messages.get(d.job.id) ?? [], "contractor", `contractor:${d.job.id}`);
+    return l.length ? [{ d, l, m: l[l.length - 1] }] : [];
+  });
+  if (!news.length) return null;
+  return (
+    <div className="px-4 sm:px-6 pb-4 space-y-1.5" role="status">
+      <p className="eyebrow">New from your clients</p>
+      {news.map(({ d, l, m }) => {
+        const t = m.places?.[0] ?? null;
+        return (
+          <div key={d.job.id} className="card !rounded-[3px] px-3 py-2.5 flex items-center gap-3">
+            <span className="dot bg-accent shrink-0" />
+            <p className="flex-1 min-w-0 text-[14px]">
+              <span className="font-semibold">{m.author_name}</span> <span className="text-muted">· {d.job.name}{l.length > 1 ? ` · ${l.length} new` : ""}</span>
+              {t && <span className="text-muted"> · tagged <span className="text-text font-semibold">{t.label}</span></span>}
+              <span className="block text-muted truncate">{m.body?.replace(/@(?=\S)/g, "") ?? "A photo"}</span>
+            </p>
+            <button className="btn btn-sm btn-primary shrink-0" onClick={() => onOpen(d.job.id, t)}>{t ? "Show me" : "Read"}</button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 /** the clients' private notes in the preview */
 let clientNotes: Pin[] = [];
 /** the job's client link: the same one every time */
@@ -167,15 +211,10 @@ function savedAccount(jobs: WorkspaceData[]): SavedAccount {
 /** what the client's link shows and does, on the preview's own data */
 function demoClient(jobs: () => WorkspaceData[], d: WorkspaceData): { view: ReturnType<typeof clientView>; api: ClientApi } {
   const l = clientLink(d);
-  const say = (from: JobMessage["from"], body: string, f: File | null) => {
-    const list = [...(messages.get(d.job.id) ?? []), { id: uid(), job_id: d.job.id, from, author_name: from === "client" ? d.job.client_name || "Client" : team.members.find((m) => m.is_owner)?.full_name ?? "You", body: body || null, photos: f ? [URL.createObjectURL(f)] : [], created_at: now() }];
-    messages.set(d.job.id, list);
-    return list;
-  };
   return {
     view: clientView(l, COMPANY, savedAccount(jobs()), Object.fromEntries(d.pins.map((p) => [p.id, pinPhotos.get(p.id) ?? []])), messages.get(d.job.id) ?? []),
     api: {
-      thread: { list: async () => messages.get(d.job.id) ?? [], send: async (body, f) => say("client", body, f) },
+      thread: { list: async () => messages.get(d.job.id) ?? [], send: async (body, f, places) => post(d, "client", body, f, places) },
       billing: (b) => { d.billing = b; },
       async addNote(n) {
         const pin = clientNote(l, savedAccount(jobs()), n, uid(), now());
@@ -269,11 +308,7 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
     client: {
       thread: {
         async list() { return messages.get(d.job.id) ?? []; },
-        async send(body, f) {
-          const list = [...(messages.get(d.job.id) ?? []), { id: uid(), job_id: d.job.id, from: "contractor" as const, author_name: team.members.find((m) => m.is_owner)?.full_name ?? "You", body: body || null, photos: f ? [URL.createObjectURL(f)] : [], created_at: now() }];
-          messages.set(d.job.id, list);
-          return list;
-        },
+        async send(body, f, places) { return post(d, "contractor", body, f, places); },
       },
       setCanAdd(on) { d.job = { ...d.job, client_can_add: on }; },
       open() {},
@@ -405,6 +440,8 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
   const [share, setShare] = useState<{ token: string; pin?: string } | null>(null);
   const [client, setClient] = useState<ClientStart>(null);
   const [clientPin, setClientPin] = useState<string | null>(null);
+  /** open the job on its Client tab, at the place the client tagged (from a "new from your client" notice) */
+  const [clientStart, setClientStart] = useState<{ place: PlaceTag | null } | null>(null);
   const [tier, setTier] = useState<Brand["tier"]>("standard");
   const [jobs, setJobs] = useState<WorkspaceData[]>(initial);
   const jobsRef = useRef(jobs);
@@ -425,6 +462,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
   const [activeId, setActiveIdRaw] = useState(() => fromHash().id ?? initial[0]?.job.id ?? "");
   /** go somewhere: a new history entry first, so the screen that opens builds on it */
   const go = (p: Page, id = activeId) => {
+    if (p !== "job") setClientStart(null);
     const h = hashFor(p, id);
     if (location.hash !== h) history.pushState(null, "", h);
     setPageRaw(p);
@@ -444,7 +482,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
   // the assistant changes the job behind the screen's back: hand the workspace a fresh copy after
   const [ver, setVer] = useState(0);
   const [fromClient, setFromClient] = useState(false);
-  const current = useMemo(() => active && ({ ...active, startOnMoney: fromClient, materials: { lines: materials.lines, jobs: mjobs } }), [active, ver, fromClient, jobs.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const current = useMemo(() => active && ({ ...active, startOnMoney: fromClient, startOnClient: clientStart ?? undefined, materials: { lines: materials.lines, jobs: mjobs } }), [active, ver, fromClient, clientStart, jobs.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const api = useMemo(() => {
     if (!active) return null;
     const a = memoryApi(active);
@@ -472,8 +510,8 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
       };
       a.money = a.money && { ...a.money, openClient };
       a.client = a.client && { ...a.client, open: () => openClient(null), thread: {
-        list: () => cloud.listMessages(acct, active.job.id),
-        async send(body, f) { await cloud.addMessage(acct, active.job.id, signedIn.name, body, f); return cloud.listMessages(acct, active.job.id); },
+        list: () => cloud.listMessages(acct, active.job.id).then((l) => { messages.set(active.job.id, l); return l; }),
+        async send(body, f, places) { await cloud.addMessage(acct, active.job.id, signedIn.name, body, f, places); return cloud.listMessages(acct, active.job.id); },
       } };
     }
     const saved = saving(a, poke);
@@ -564,7 +602,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
           {(() => {
             const c = demoClient(() => jobsRef.current, active);
             if (!c.view) return <p className="p-6 text-muted">This job has no client page.</p>;
-            return <ClientPage key={`${client?.id ?? "home"}-${clientPin}-${tier}`} view={{ ...c.view, brand: { ...c.view.brand, tier } }} api={c.api} start={client} pin={clientPin}
+            return <ClientPage key={`${client?.id ?? "home"}-${clientPin}-${tier}`} view={{ ...c.view, brand: { ...c.view.brand, tier } }} api={c.api} start={client} pin={clientPin} seenKey={`client-demo:${active.job.id}`}
               onBack={() => { setFromClient(!!client); setVer((n) => n + 1); setPage("job"); }} />;
           })()}
         </div>
@@ -598,6 +636,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
               <p className="text-muted text-sm">Click a building or a card to go inside. Press <kbd className="kbd !h-5 !text-[10.5px]">/</kbd> to jump straight to any job, room or pin.</p>
             </div>
           </div>
+          <ClientNews jobs={jobs} onOpen={(id, place) => { setFromClient(false); go("job", id); setClientStart({ place }); }} />
           {jobs.length ? (
             <>
               <div className="px-4 sm:px-6"><AllJobsMap jobs={jobs.map(summary)} /></div>
@@ -669,12 +708,14 @@ async function openAccount(s: Session): Promise<Boot> {
   } else {
     team.members = saved.members;
     materials.lines = saved.materials;
+    messages.clear();
+    for (const m of saved.messages) messages.set(m.job_id, [...(messages.get(m.job_id) ?? []), m]);
     shares.splice(0, shares.length, ...saved.shares);
     jobs = saved.jobs.map((d) => ({ ...d, members: team.members, me: account.memberId, aiAvailable: false, canShare: true, brand: BRAND }));
   }
   const saver = new cloud.Saver(account.id, snapshot, (st) => window.dispatchEvent(new CustomEvent("rorker-save", { detail: st })), rows);
   const signedIn: CloudBoot = { account, saver, email: s.user.email ?? null, name };
-  if (fresh) { liveJobs = () => jobs; await saver.flush(); }
+  if (fresh) { liveJobs = () => jobs; await saver.flush(); await cloud.putMessages(account.id, [...messages.values()].flat()); }
   return { kind: "app", jobs, signedIn };
 }
 

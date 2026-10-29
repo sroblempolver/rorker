@@ -13,6 +13,7 @@ import { addedFixture, applyEdits, fixtureSize } from "@/lib/plan/edits";
 import { kindFor, OBJECT_KINDS, specOf, topOf, bottomOf, weightOf, type Part } from "@/lib/plan/catalog";
 import { naturalFacing, partnerOf, supportOf, toward } from "@/lib/plan/arrange";
 import { MARK_COLORS, type Mark } from "@/lib/plan/pointing";
+import { markFor } from "@/lib/plan/places";
 import { today } from "@/lib/dates";
 
 /** `plan` is the plan as drawn; `edits` are the changes made in the app on top of it (moved, added, removed). */
@@ -292,17 +293,6 @@ function readParts(v: unknown): Part[] {
   });
 }
 
-/** Where a place is, for a dot on the plan. */
-function markFor(plan: Plan, id: string, label: string, color: string): Mark | null {
-  const e = findElement(plan, id);
-  if (!e) return null;
-  let pt: [number, number], z = 0;
-  if (e.kind === "fixture") { pt = e.el.center; z = topOf(e.el); }
-  else if (e.kind === "opening") { pt = [(e.el.a[0] + e.el.b[0]) / 2, (e.el.a[1] + e.el.b[1]) / 2]; z = 1000; }
-  else if (e.kind === "room") pt = labelPoint(e.el.polygon);
-  else { const b = bboxOf(e.el.polygon); pt = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]; z = e.kind === "wall" ? 1200 : 0; }
-  return { floor_id: e.floor.id, x: Math.round(pt[0]), y: Math.round(pt[1]), z: Math.round(z), label, color, id };
-}
 
 const date = (v: unknown) => { const s = str(v); if (!s) return undefined; if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error("Dates are YYYY-MM-DD."); return s; };
 

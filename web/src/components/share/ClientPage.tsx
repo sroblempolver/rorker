@@ -20,6 +20,10 @@ import { PIN_LABEL } from "@/components/plan/style";
 import { TeamContext } from "@/components/team/context";
 import { PinBadge, PinRow, where } from "@/components/workspace/PinsPanel";
 import { ClientThread, type ThreadApi } from "@/components/workspace/ClientThread";
+import { markFor, placeOptions, type PlaceTag } from "@/lib/plan/places";
+import { MARK_COLORS, showMarks } from "@/lib/plan/marks";
+import { markSeen, unread } from "@/lib/seen";
+import { useFollowMarks } from "@/components/workspace/useFollowMarks";
 import { ClientMoneyView } from "@/components/billing/ClientMoneyView";
 import type { ClientStart } from "@/components/billing/MoneyPanel";
 
@@ -38,11 +42,22 @@ export interface ClientApi {
 
 type Tab = "job" | "messages" | "money";
 
-export function ClientPage({ view: v, api, start, pin: firstPin, error, onBack }: {
+export function ClientPage({ view: v, api, start, pin: firstPin, error, onBack, seenKey }: {
   view: ClientView; api: ClientApi; /** open the money page on this */ start?: ClientStart; /** open on this pin */ pin?: string | null;
   error?: string | null; onBack?: () => void;
+  /** remembers what they've read, for the "new from your contractor" notice */ seenKey: string;
 }) {
   const [tab, setTab] = useState<Tab>(start ? "money" : "job");
+  const plan = useMemo(() => (v.view?.plan ? applyEdits(v.view.plan, v.view.edits) : null), [v.view]);
+  const places = useMemo(() => (plan ? placeOptions(plan) : []), [plan]);
+  const [fresh, setFresh] = useState(() => unread(v.messages, "client", seenKey));
+  /** a tag in a message: back to the plan, which goes to that floor, and the spot blinks */
+  const showPlace = (t: PlaceTag) => {
+    const m = plan ? markFor(plan, t.id, t.label, MARK_COLORS[0][1]) : null;
+    if (!m) return;
+    setTab("job");
+    setTimeout(() => showMarks([m]), 50);
+  };
   const done = v.stages.filter((s) => s.status === "done").length;
   const now = v.stages.find((s) => s.status === "active");
   const color = v.company.brand_color;
@@ -69,14 +84,31 @@ export function ClientPage({ view: v, api, start, pin: firstPin, error, onBack }
             <div className="mt-1.5 flex gap-1" aria-hidden>{v.stages.map((s, i) => <span key={i} title={s.name} className="h-1.5 flex-1 rounded-full" style={{ background: s.status === "done" ? color : s.status === "active" ? `${color}88` : "rgb(255 255 255 / 0.12)" }} />)}</div>
           </div>
         )}
-        <nav className="flex gap-1 mt-1" role="tablist">{tabBtn("job", "Your project")}{tabBtn("messages", "Messages")}{tabBtn("money", "Money")}</nav>
+        <nav className="flex gap-1 mt-1" role="tablist">{tabBtn("job", "Your project")}{tabBtn("messages", fresh.length ? `Messages (${fresh.length})` : "Messages")}{tabBtn("money", "Money")}</nav>
       </header>
       {error && <p className="shrink-0 px-4 py-2 text-[14px] text-red border-b border-line">{error}</p>}
+      {fresh.length > 0 && tab !== "messages" && (() => {
+        const m = fresh[fresh.length - 1];
+        const t = m.places?.[0];
+        return (
+          <div role="status" className="shrink-0 border-b border-line bg-panel-2 px-4 py-2.5 flex items-start gap-3">
+            <span className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ background: color }} />
+            <p className="flex-1 min-w-0 text-[13.5px]">
+              <span className="font-semibold">{fresh.length > 1 ? `${fresh.length} new messages from ${v.company.name}` : `New from ${v.company.name}`}</span>
+              {t ? <> · about <span className="font-semibold">{t.label}</span></> : null}
+              <span className="block text-muted truncate">{m.body?.replace(/@(?=\S)/g, "") ?? "A photo"}</span>
+            </p>
+            {t && <button className="btn btn-sm shrink-0" onClick={() => showPlace(t)}>Show me</button>}
+            <button className="btn btn-sm btn-primary shrink-0" onClick={() => setTab("messages")}>Read</button>
+          </div>
+        );
+      })()}
       <div className="flex-1 min-h-0 flex flex-col">
         {tab === "job" ? <ClientJob v={v} api={api} firstPin={firstPin ?? null} onMessages={() => setTab("messages")} />
           : tab === "messages" ? (
             <div className="flex-1 min-h-0 w-full max-w-[760px] mx-auto p-4 flex flex-col">
-              <ClientThread api={api.thread} initial={v.messages} side="client" tone="app" other={v.company.name} color={color} />
+              <ClientThread api={api.thread} initial={v.messages} side="client" tone="app" other={v.company.name} color={color} places={places} onPlace={showPlace}
+                onSeen={(l) => { markSeen(seenKey, l); setFresh([]); }} />
             </div>
           ) : (
             <div className="flex-1 min-h-0 overflow-y-auto bg-neutral-100">
@@ -99,6 +131,8 @@ function ClientJob({ v, api, firstPin, onMessages }: { v: ClientView; api: Clien
   const startPin = pins.find((p) => p.id === firstPin) ?? null;
   const [level, setLevel] = useState<Level>(() => (startPin && plan ? pinLevel(plan, startPin) : null) ?? { kind: "site" });
   const [pinId, setPinId] = useState<string | null>(startPin?.id ?? null);
+  // a tag tapped in their messages: go to the floor it's on (the dot blinks there)
+  useFollowMarks(plan, level, setLevel, nothing);
   const [colorMode, setColorMode] = useState<ColorMode>("type");
   const [view3d, setView3d] = useState(true);
   const [pinMode, setPinMode] = useState(false);

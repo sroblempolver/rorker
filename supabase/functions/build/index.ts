@@ -5,7 +5,7 @@
 //   photo   a crew member sends a photo onto one of their own tasks
 //   done    a crew member marks one of their own tasks done
 //   client  a client signs, declines or pays on their money page (prices and lines can't change)
-//   message a client writes to the contractor (words and a photo) on the job's thread
+//   message a client writes to the contractor (words, a photo, rooms or objects tagged) on the job's thread
 //   messages the job's thread again, for a client page that's open
 //   note    a client drops a note on their map: private, or shared with the contractor if the job allows
 //   unnote  a client takes one of their own notes off
@@ -13,7 +13,7 @@
 // The rules for what a link shows and what a client may change are in core.js, built from the page's own
 // code (web/preview/build-links.mjs), so both sides agree.
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
-import { clientBilling, clientBuys, clientNote, clientPinIds, clientView, companyOf, crewPinIds, crewWork, findLink, forClient, fromRecords, linkLive } from "./core.js";
+import { cleanPlaces, clientBilling, clientBuys, clientNote, clientPinIds, clientView, companyOf, crewPinIds, crewWork, findLink, forClient, fromRecords, linkLive } from "./core.js";
 
 const ORIGINS = [/^https:\/\/([a-z0-9-]+\.)?rorker\.com$/, /^https:\/\/[a-z0-9-]+\.github\.io$/, /^https?:\/\/localhost(:\d+)?$/, /^https?:\/\/127\.0\.0\.1(:\d+)?$/];
 const extra = (Deno.env.get("ALLOWED_ORIGINS") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -193,7 +193,8 @@ Deno.serve(async (req) => {
         photos.push(path);
       }
       if (!text && !photos.length) return json({ error: "Write something or add a photo." }, 400);
-      const m = { id: uid(), job_id: job.job.id, from: "client", author_name: job.job.client_name || "Client", body: text || null, photos, created_at: new Date().toISOString() };
+      const places = cleanPlaces(body.places);
+      const m = { id: uid(), job_id: job.job.id, from: "client", author_name: job.job.client_name || "Client", body: text || null, photos, created_at: new Date().toISOString(), ...(places.length ? { places } : {}) };
       const { error } = await db.from("records").insert({ account_id: accountId, kind: "message", id: m.id, job_id: job.job.id, data: m });
       if (error) throw error;
       return json({ messages: await thread([...saved.messages, m], job.job.id) });
