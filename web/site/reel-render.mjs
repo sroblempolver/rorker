@@ -19,7 +19,9 @@ const pageName = process.argv[2] || "reel.html";
 const out = path.resolve(process.argv[3] || path.join(dist, pageName.replace(/\.html$/, ".mp4")));
 const workers = Math.max(1, Number(process.argv[4]) || 1);
 const FPS = 30;
-const frames = fs.mkdtempSync(path.join(os.tmpdir(), "reel-"));
+// REEL_FRAMES=<dir> picks up an interrupted render: frames already in the folder are kept
+const frames = process.env.REEL_FRAMES || fs.mkdtempSync(path.join(os.tmpdir(), "reel-"));
+fs.mkdirSync(frames, { recursive: true });
 
 const server = http.createServer((req, res) => {
   const f = path.join(dist, decodeURIComponent(req.url.split("?")[0]).replace(/^\/+/, "") || pageName);
@@ -44,8 +46,10 @@ async function shoot(worker) {
   const from = worker * share, to = Math.min(total, from + share);
   for (let i = 0; i < to; i++) {
     await page.clock.runFor(1000 / FPS);
-    if (i < from) continue;
-    await page.screenshot({ path: path.join(frames, `f${String(i).padStart(5, "0")}.png`) });
+    const file = path.join(frames, `f${String(i).padStart(5, "0")}.png`);
+    if (i < from || fs.existsSync(file)) continue;
+    // software rendering can be slow when the machine is busy: never give up on a frame
+    await page.screenshot({ path: file, timeout: 0 });
     if (i % 60 === 0) console.log(`worker ${worker}: frame ${i}/${total}`);
   }
   await browser.close();
