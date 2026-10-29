@@ -259,7 +259,7 @@ export function PlanViewer(p: Props) {
 
       {/* in 3D: which floors and homes show, any mix, without moving the camera */}
       {in3d && level.kind !== "room" && (floors.length > 1 || units.length > 1) && (
-        <div className="absolute left-3 top-14 md:left-1/2 md:-translate-x-1/2 md:top-3 flex flex-col items-start md:items-center gap-1">
+        <div className="absolute left-3 top-14 2xl:left-1/2 2xl:-translate-x-1/2 2xl:top-3 flex flex-col items-start 2xl:items-center gap-1">
           {[
             ...(floors.length > 1 ? [{ key: "floors", all: "All floors", list: floors.map((f) => ({ id: f.id, name: f.name })), cur: only, set: setOnly }] : []),
             ...(units.length > 1 ? [{ key: "homes", all: "All homes", list: units.map((u) => ({ id: u, name: u })), cur: homes, set: setHomes }] : []),
