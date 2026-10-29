@@ -38,12 +38,12 @@ import { PlanPanel, UploadBox } from "./PlanPanel";
 import { ShareDialog } from "./ShareDialog";
 import { useFollowMarks } from "./useFollowMarks";
 import { HOUSE_LAYER, StagesPanel, StageStrip } from "./StagesPanel";
-import { MoneyPanel } from "@/components/billing/MoneyPanel";
 import { AddMaterial, MaterialsPanel, blankLine, type BuyTarget } from "@/components/materials/MaterialsPanel";
 import { parseQty, type Suggestion } from "@/lib/materials/suggest";
 import { NEXT_STATUS, pinSummary, qtyText, type MaterialInput, type MaterialLine } from "@/lib/materials/types";
 
-const TABS: Tab[] = ["feed", "details", "pins", "buy", "stages", "money", "client"];
+// (a job's money is on the Money page, beside every other job's)
+const TABS: Tab[] = ["feed", "details", "pins", "buy", "stages", "client"];
 // Build mode clears the pins off the map, so a click lands on the wall under them
 const NO_PINS: Pin[] = [];
 const OUT: Record<string, Pt> = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] };
@@ -60,7 +60,7 @@ function levelFits(plan: PlanRow["data"], l: Level) {
 }
 const sameLevel = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-type Tab = "feed" | "details" | "pins" | "buy" | "stages" | "money" | "client";
+type Tab = "feed" | "details" | "pins" | "buy" | "stages" | "client";
 /** the wall picked with Move wall: its saved move (key), the room side it is, where it was drawn and how far it moved */
 interface SideSel { key: string; roomId: string; heading: "north" | "east" | "south" | "west"; at: [number, number]; by: number; t: number }
 export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; api: WorkspaceApi; onAllJobs: () => void }) {
@@ -85,7 +85,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   // a pin being made: `at` set means the quick card at that screen point, otherwise the full form
   const [draft, setDraft] = useState<(PinTarget & { at?: ScreenPoint; preset?: { kind: PinKind; title: string; tagged?: string[]; photo?: boolean; stage?: string | null } }) | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
-  const [tab, setTab] = useState<Tab>(data.startOnClient && api.client ? "client" : data.startOnMoney && data.billing ? "money" : "feed");
+  const [tab, setTab] = useState<Tab>(data.startOnClient && api.client ? "client" : "feed");
   // Build mode: the tool in hand, the kind of door it puts in, the wall being moved
   const [build, setBuild] = useState(false);
   const [tool, setToolRaw] = useState<BuildTool>("pick");
@@ -93,9 +93,6 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   const [sideSel, setSideSel] = useState<SideSel | null>(null);
   const [flyTo, setFlyTo] = useState<{ ids: string[]; n: number } | null>(null);
   const job = data.job;
-  const [billing, setBilling] = useState(data.billing);
-  const [payouts, setPayouts] = useState(!!data.payoutsConnected);
-  const [moneyKey, setMoneyKey] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
   // materials: lines on every job (so one add can split across jobs), the add sheet, the line to open
   const [mlines, setMlines] = useState<MaterialLine[]>(data.materials?.lines ?? []);
@@ -180,7 +177,6 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     if (firstData.current === data) return;
     firstData.current = data;
     setPlan(data.plan); setRuns(data.runs); setStages(data.stages); setPins(data.pins); setItems(data.items); setEdits(data.edits);
-    setBilling(data.billing); setMoneyKey((k) => k + 1);
     if (data.materials) setMlines(data.materials.lines);
     setStates(new Map(data.states.map((s) => [s.element_id, s.status] as [string, ElementStatus])));
   }, [data]);
@@ -686,7 +682,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   useEscape(back);
 
   // the tabs this job shows (Buy and Money only when they're wired up); 1, 2, 3... open them in order
-  const shownTabs = TABS.filter((t) => (t !== "buy" || !!api.materials) && (t !== "money" || !!(billing && api.money)) && (t !== "client" || !!(api.client && job.client_name)));
+  const shownTabs = TABS.filter((t) => (t !== "buy" || !!api.materials) && (t !== "client" || !!(api.client && job.client_name)));
   const openTab = useCallback((t: Tab) => {
     // a tab takes you out of Build mode
     if (build) { setBuild(false); setPinMode(false); setSideSel(null); setToolRaw("pick"); }
@@ -704,7 +700,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   });
 
   // this job's places and actions in the Go to box (Ctrl+K): floors, rooms, open pins, people, tabs
-  const tabName: Record<Tab, string> = { feed: "Feed", details: "Details", pins: "Pins", buy: "Buy list", stages: "Stages", money: "Money", client: "Client" };
+  const tabName: Record<Tab, string> = { feed: "Feed", details: "Details", pins: "Pins", buy: "Buy list", stages: "Stages", client: "Client" };
   const goItems = useMemo<GoItem[]>(() => {
     const out: GoItem[] = [];
     const k = job.id;
@@ -747,8 +743,8 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     if (!m) return;
     if (typeof m.view3d === "boolean" && data.can3d !== false) setView3d(m.view3d);
     if (m.colorMode) setColorMode(m.colorMode);
-    if (m.level && plan && m.level.kind !== "site" && levelFits(plan.data, m.level)) { replaceNext.current = true; setLevel(m.level); if (!data.startOnMoney) setTab("feed"); }
-  }, [memKey, plan, data.can3d, data.startOnMoney, setLevel]);
+    if (m.level && plan && m.level.kind !== "site" && levelFits(plan.data, m.level)) { replaceNext.current = true; setLevel(m.level); if (!data.startOnClient) setTab("feed"); }
+  }, [memKey, plan, data.can3d, data.startOnClient, setLevel]);
   useEffect(() => { if (restored.current) remember(memKey, { level, view3d, colorMode }); }, [memKey, level, view3d, colorMode]);
 
   // the browser's back and forward buttons walk the map too (and a phone's back gesture)
@@ -884,14 +880,6 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         onDelete={(id) => stageOp(() => api.deleteStage(id))}
         onMove={(id, d) => stageOp(() => api.moveStage(id, d))} />
     );
-    if (tab === "money" && billing && data.brand && api.money) {
-      const money = api.money;
-      return <MoneyPanel key={moneyKey} initial={billing} brand={data.brand} jobId={job.id} plan={view} stages={stages} connected={payouts}
-        job={{ name: job.name, address: job.address, client_name: job.client_name, client_email: job.client_email, client_phone: job.client_phone }}
-        onConnect={() => void guard(async () => { await money.connectPayouts(); setPayouts(true); say("Payouts are on. Clients can now pay by card or bank."); })}
-        api={{ say, openClient: money.openClient, save: (b) => { setBilling(b); money.save(b); },
-          showRoom: (roomId) => { const f = view?.floors.find((fl) => fl.rooms.some((r) => r.id === roomId)); if (f) { setLevelRaw({ kind: "room", floorId: f.id, roomId }); setSelected(roomId); } } }} />;
-    }
     if (tab === "client" && api.client && job.client_name) {
       const c = api.client;
       return (
@@ -916,7 +904,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind}
       buy={api.materials ? { lines: mlines.filter((l) => l.job_id === job.id && l.status !== "returned"), onQuick: quickBuy, onAll: quickBuyAll, onMore: (t) => openBuy(t), onOpen: openLine, onTick: (id) => { const l = mlines.find((x) => x.id === id); if (l) void updateMaterial(id, { status: NEXT_STATUS[l.status] }); } } : undefined} />;
   }, [build, buildFloor, tool, setTool, doorKind, side, removeOpening, setSideBy, splitAt, joinBack, joinWall, toggleBuild, planSection, tab, feedPerson, buyDraft, buyFocus, mlines, mjobs, lastBuyer, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, level, selected, states, api, data.canShare, say, showPin, updatePin, deletePin, undoable, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
-    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, billing, payouts, moneyKey, data.brand, job, guard, places, showPlace, seenKey, layer, layerPins, layerStage, inLayer, stageCounts, pickLayer, settings]);
+    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, job, places, showPlace, seenKey, layer, layerPins, layerStage, inLayer, stageCounts, pickLayer, settings]);
 
   // where the quick card sits inside the map, kept on screen
   const quick = (() => {
@@ -1030,8 +1018,6 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
             {tabBtn("pins", "Pins", openPins)}
             {api.materials && tabBtn("buy", "Buy", mlines.filter((l) => l.job_id === job.id && l.status === "to_buy").length)}
             {tabBtn("stages", "Stages")}
-            {billing && api.money && tabBtn("money", "Money", billing.quotes.filter((q) => q.status === "approved")
-              .flatMap((q) => q.schedule).filter((d) => !d.invoice_id && stages.some((s) => s.status === "done" && s.name === d.stage_name)).length)}
             {api.client && job.client_name && tabBtn("client", "Client", clientNew.length)}
           </div>
           {backTo && (
