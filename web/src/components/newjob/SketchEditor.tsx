@@ -319,7 +319,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     setSel(null);
   };
   const deleteSel = () => { if (sel) removeIt(sel); };
-  const pickTool = (t: Tool) => { setTool(t); setClicks([]); setCorners([]); setTyped(""); setPickedType(null); };
+  const pickTool = (t: Tool) => { setTool(t); setClicks([]); setCorners([]); setTyped(""); setPickedType(null); if (t === "remove" || t === "eyedrop" || t === "corners") setSel(null); };
   // what a click at p lands on: furniture first, then doors, windows, the room
   const hitAt = (p: Pt): Sel => {
     const ti = thingAt(p);
@@ -719,7 +719,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       </div>
       <div className="grid lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0">
-        <div className={`relative ${seen ? "h-[42vh] min-h-[300px]" : "h-[62vh] min-h-[420px]"} bg-ink`}>
+        <div className={`relative ${seen ? "h-[42vh] min-h-[300px]" : tool === "thing" ? "h-[48vh] min-h-[340px]" : "h-[62vh] min-h-[420px]"} bg-ink`}>
           <svg ref={svg} className="absolute inset-0 w-full h-full touch-none select-none" viewBox={`${v.x} ${v.y} ${v.w} ${vh}`}
             style={{ cursor: drag?.k === "pan" ? "grabbing" : tool === "select" ? "default" : tool === "picture" ? "move" : "crosshair" }}
             onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrag(null)} onPointerLeave={() => setHover(null)}
@@ -774,11 +774,15 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             })}
             {drag?.k === "wall" && drag.moved && room && (() => {
               // live size of the room, and how far the wall has gone
-              const b = bboxOf(room.polygon), c = centroid(room.polygon), h = handles.find((x) => x.e === drag.e);
+              const b = bboxOf(room.polygon), c = centroid(room.polygon), h = handles.find((x) => x.e === drag.e), f = fontMm * 1.5;
+              const size = `${fmtLen(b[2] - b[0], lu, true)} × ${fmtLen(b[3] - b[1], lu, true)}`;
+              const by = h ? `${drag.by * (h.n[0] + h.n[1]) >= 0 ? "pulled out" : "pushed in"} ${fmtLen(Math.abs(drag.by), lu, true)}` : "";
+              const w = Math.max(size.length, by.length) * f * 0.56;
               return (
-                <g style={{ pointerEvents: "none" }} fontSize={fontMm} textAnchor="middle" dominantBaseline="middle" stroke="#000" strokeWidth={fontMm * 0.16} paintOrder="stroke">
-                  <text x={c[0]} y={c[1] - fontMm * 1.4} fill="#ff6a1f" fontWeight={700}>{fmtLen(b[2] - b[0], lu, true)} × {fmtLen(b[3] - b[1], lu, true)}</text>
-                  {h && <text x={h.at[0] + h.n[0] * fontMm * 2.6} y={h.at[1] + h.n[1] * fontMm * 1.6} fill="#fff" fontSize={fontMm * 0.85}>{drag.by * (h.n[0] + h.n[1]) >= 0 ? "+" : "−"}{fmtLen(Math.abs(drag.by), lu, true)}</text>}
+                <g style={{ pointerEvents: "none" }} textAnchor="middle" dominantBaseline="middle">
+                  <rect x={c[0] - w / 2} y={c[1] - f * 3.3} width={w} height={f * 2.5} rx={f * 0.3} fill="#17181b" fillOpacity={0.88} stroke="#ff6a1f" strokeWidth={1.5 * px} />
+                  <text x={c[0]} y={c[1] - f * 2.6} fontSize={f} fill="#ff6a1f" fontWeight={700}>{size}</text>
+                  <text x={c[0]} y={c[1] - f * 1.5} fontSize={f * 0.75} fill="#efe8da">{by}</text>
                 </g>
               );
             })()}
@@ -808,7 +812,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
                   {corners.map((q, k) => <circle key={k} cx={q[0]} cy={q[1]} r={(k === 0 && corners.length >= 3 ? 7 : 4.5) * px} fill={k === 0 ? "#ff6a1f" : "#fff"} stroke={k === 0 ? "#fff" : "#ff6a1f"} strokeWidth={1.5 * px} />)}
                   {next && <circle cx={next[0]} cy={next[1]} r={4 * px} fill="none" stroke="#fff" strokeWidth={1.5 * px} />}
                   {mid && last && next && dist(last, next) > 1 && (
-                    <text x={mid[0]} y={mid[1] - fontMm * 0.9} fontSize={fontMm} textAnchor="middle" fill="#ff6a1f" stroke="#000" strokeWidth={fontMm * 0.16} paintOrder="stroke">{typed ? `${typed}▏` : fmtLen(dist(last, next), lu, true)}</text>
+                    <text x={mid[0]} y={mid[1] - fontMm * 1.1} fontSize={fontMm * 1.35} fontWeight={700} textAnchor="middle" fill="#ff6a1f" stroke="#000" strokeWidth={fontMm * 0.2} paintOrder="stroke">{typed ? `${typed}▏` : fmtLen(dist(last, next), lu, true)}</text>
                   )}
                 </g>
               );
@@ -832,7 +836,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
               return <rect x={at[0] - hw} y={at[1] - hd} width={2 * hw} height={2 * hd} fill={spec?.fill ?? "#f4efe6"} fillOpacity={0.55} stroke="#ff6a1f" strokeWidth={2 * px} strokeDasharray={`${5 * px} ${3 * px}`} style={{ pointerEvents: "none" }} />;
             })()}
           </svg>
-          {!floor.rooms.length && !bg && (
+          {!floor.rooms.length && !bg && !corners.length && (
             <p className="absolute inset-x-0 top-1/3 text-center text-muted text-[14px] pointer-events-none px-6">Pick Walls and draw around the first room. Rooms that touch share a wall.</p>
           )}
         </div>
