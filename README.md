@@ -75,6 +75,27 @@ python3 -m rorker_agent answer out/plan.json Q1="One room" Q3="Pantry"
 fixtures found, questions asked, unidentified items, cost and time. To add a case, drop the drawing and
 an `expected.json` in a new folder; `house/expected.json` shows the format.
 
+## Plan tests (the reader's scorecard) and drawing by hand
+
+The New project reader is measured on real plans in the preview's **Plan tests** page (`#/bench`).
+Each test plan is exactly what an upload sends the reader (`parts`, made by `lib/intake/files.ts`) plus
+the right answer, drawn with the same sketch editor contractors use (`components/newjob/SketchEditor.tsx`).
+**Run all** reads every plan with the live reader (questions skipped) and `lib/bench/score.ts` scores it
+out of 100: floors, homes, rooms found by overlap after lining the floors up, rooms named right, scale,
+doors, windows (room and side) and the main fixtures. Plans added in the page live in that browser
+(IndexedDB); "Save all to a file" exports them. Shared test plans are `web/bench/cases/<id>/case.json`,
+listed in `web/bench/cases/index.json`, and are copied beside the preview page by `preview/build.mjs`.
+
+When a read is wrong, New project's review has **Fix it by drawing** (and the start screen **Draw it
+myself**): rooms dragged out over the uploaded drawing, split, reshaped by corner or wall, doors, windows,
+things, scale from one known length, and "Line up" to sit the picture under the rooms.
+
+Inside a job, **Build** (the button over Pin on the map, or `B`) changes the house where it stands: put a
+door or window in a wall, slide or resize one (US standard sizes in `web/src/lib/plan/standard.ts`), move
+a wall (the room next door follows), or split a room. Changes are edits on top of the drawing
+(`web/src/lib/plan/house.ts`), so Undo and "Put back as drawn" work and pins keep their ids. The plan's
+questions, a new drawing and talking to the plan live there too (they used to be the Plan tab).
+
 ## Deploy (Railway + Supabase)
 
 Everything is new for this project: a new GitHub repo, Supabase project, Railway project and API key.
@@ -89,6 +110,26 @@ Everything is new for this project: a new GitHub repo, Supabase project, Railway
 
 Keys go in the Railway and Supabase settings only. The Supabase code path is written against the
 schema but has not run against a live project yet; expect a short shakedown when it exists.
+
+## The build site: real accounts (build.rorker.com)
+
+The build site is the preview page with real accounts on the Supabase project "rorker". A contractor
+makes an account on the page (the `build` function signs them up, no email to confirm) and gets the
+sample jobs to start from; every change is saved a moment later and loads on any device.
+
+- **Tables** (`supabase/build/`): `accounts`, `account_users` (who signs in, as which team member) and
+  `records`, one row per thing (job, plan, pin, stage, wall item, material, team member, share link,
+  the job's money, pin threads) with the thing as JSON. Only the account's admins can read or write
+  them (row-level security). Photos go in the private `build-files` bucket.
+- **Links** (`supabase/functions/build`): crew and clients don't sign in and never read the tables.
+  The function opens the link and hands back only what it may show. Crew (`#/s/<token>`): the plan and
+  their tasks, never money or client details; an employee also sees the crew's other open tasks, a sub
+  only their own; they can send photos and mark their own tasks done. Client (`#/c/<token>`): the job's
+  stages and their quotes, invoices and receipts, never crew or costs; they can sign and pay, and the
+  function refuses any other change (`web/src/lib/billing/clientGuard.ts`).
+- The link rules are the page's own code, copied into the function by `node preview/build-links.mjs`
+  (run it after changing `src/lib/share.ts`, `src/lib/cloud/` or the client guard, then redeploy).
+- "Look around on sample data" on the sign-in screen runs the old in-memory preview.
 
 ## Preview build
 

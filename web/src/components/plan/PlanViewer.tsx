@@ -5,12 +5,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JobItem, Pin, PinInput } from "@/lib/data/types";
 import { roomSides } from "@/lib/plan/geometry";
-import { furnishPlaces, furnishedSet, stagedPlan, type BuildLook, type Furnish } from "@/lib/plan/build";
+import { furnishPlaces, furnishedSet, homesPlan, stagedPlan, type BuildLook, type Furnish } from "@/lib/plan/build";
 import type { ElementStatus, Plan } from "@/lib/plan/types";
+import type { BuildMap } from "./BuildLayer";
 import { ExteriorView, WallView } from "./Elevations";
 import { FloorCanvas, type ColorMode } from "./FloorCanvas";
 import { Plan3D, webglAvailable, type WallMode } from "./Plan3D";
 import { SiteView } from "./SiteView";
+import { AwayChip } from "./AwayButtons";
+import { showMarks, useMarks, type Mark } from "@/lib/plan/marks";
+import { awayFrom, awaySay, setAway, setHere, type AwayTarget } from "@/lib/plan/away";
 import { STATUS_COLOR, STATUS_LABEL, STATUS_ORDER } from "./style";
 import type { PinTarget, ScreenPoint } from "./target";
 
@@ -62,6 +66,10 @@ interface Props {
   onFurnish?: (f: Furnish) => void;
   /** how far the house is built: set by the stage picked in Stages, finished when none is */
   look?: BuildLook;
+  /** Build mode (change the house): the button that turns it on and off; left out, no button */
+  build?: { on: boolean; toggle: () => void; map?: BuildMap; place?: boolean };
+  /** what a click does while the map is waiting for one (a build tool), instead of dropping a pin */
+  placeHint?: string;
 }
 
 const DEPTH: Level["kind"][] = ["site", "exterior", "floor", "room", "wall"];
@@ -79,6 +87,16 @@ export function PlanViewer(p: Props) {
   const hasObjects = useMemo(() => p.plan.floors.some((f) => f.fixtures.length > 0), [p.plan]);
   const [panel, setPanel] = useState<"furnish" | null>(null);
   const floors = useMemo(() => [...plan.floors].sort((a, b) => a.level - b.level), [plan]);
+  // in 3D you pick which floors (and which homes of a row) show, any mix; all of them by default
+  const [only, setOnly] = useState<string[] | null>(null);
+  const [homes, setHomes] = useState<string[] | null>(null);
+  const units = useMemo(() => [...new Set(plan.floors.flatMap((f) => f.rooms.map((r) => r.unit)).filter(Boolean) as string[])].sort(), [plan]);
+  const plan3d = useMemo(() => homesPlan(plan, homes), [plan, homes]);
+  const toggle = (all: string[], cur: string[] | null, id: string) => {
+    const now = cur ?? all;
+    const next = now.includes(id) ? now.filter((x) => x !== id) : [...now, id];
+    return next.length === 0 || next.length === all.length ? null : all.filter((x) => next.includes(x));
+  };
   const floor = level.kind === "site" || level.kind === "exterior" ? null : floors.find((f) => f.id === level.floorId) ?? floors[0];
   const room = floor && (level.kind === "room" || level.kind === "wall") ? floor.rooms.find((r) => r.id === level.roomId) ?? null : null;
   const side = useMemo(() => (floor && room && level.kind === "wall" ? roomSides(floor, room).find((s) => s.key === level.sideKey) ?? null : null), [floor, room, level]);
@@ -89,6 +107,29 @@ export function PlanViewer(p: Props) {
   useEffect(() => setGl(webglAvailable()), []);
   // a room opens as its own top view: in 3D when 3D is on, with buttons to face each wall
   const in3d = p.view3d && p.can3d && gl && (level.kind === "exterior" || level.kind === "floor" || level.kind === "room");
+  // the assistant's dots stay where they are; when some are out of view (another floor, the outside),
+  // say so and offer to go there, here on the map and under the assistant's answer
+  const { marks, n: markN, follow } = useMarks();
+  const [pending, setPending] = useState<Mark[]>([]);
+  useEffect(() => { if (marks.length) setPending(follow ? [] : marks); }, [markN]); // eslint-disable-line react-hooks/exhaustive-deps
+  const can3dHere = p.can3d && gl;
+  useEffect(() => { setHere({ plan: p.plan, view: level, in3d: !!in3d, can3d: can3dHere }); }, [p.plan, level, in3d, can3dHere]);
+  useEffect(() => () => { setHere(null); setAway(null); }, []);
+  const away = useMemo(() => awayFrom(p.plan, level, !!in3d, can3dHere, pending), [p.plan, level, in3d, can3dHere, pending]);
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+  const goAway = useCallback((t: AwayTarget) => {
+    if (t.needs3d) p.setView3d(true);
+    p.setLevel(t.go);
+    // they blink again once the map is there
+    const again = pendingRef.current;
+    setTimeout(() => showMarks(again), 60);
+  }, [p]);
+  useEffect(() => {
+    // once every dot is in view there's nothing left to offer
+    if (pending.length && !away.length) setPending([]);
+    setAway({ targets: away, say: awaySay(p.plan, level, away, pending.length), go: goAway });
+  }, [away]); // eslint-disable-line react-hooks/exhaustive-deps
   // the build stage applies to the 3D model and the 2D floor plan
   const staged = in3d || level.kind === "floor" || level.kind === "room";
   const faces = useMemo(() => (floor && room && in3d ? roomSides(floor, room) : []), [floor, room, in3d]);
@@ -136,11 +177,11 @@ export function PlanViewer(p: Props) {
     const t = setTimeout(() => setHintOn(false), 6000);
     return () => clearTimeout(t);
   }, [level.kind, in3d]);
-  const hint = p.pinMode ? "Click anywhere to drop the pin · Esc to cancel" :
-    in3d && level.kind === "exterior" ? "Drag to look around · zoom in to open the building, keep zooming to step into a floor · right-click or Pin to flag the roof or a wall" :
+  const hint = p.pinMode ? p.placeHint ?? "Click anywhere to drop the pin · Esc to cancel" :
+    in3d && level.kind === "exterior" ? "Drag to look around · zoom in to open the building, keep zooming to step into a floor · Pin to flag the roof or a wall" :
     in3d && p.readOnly ? "Drag to look around · right-drag to slide · click a flag to see the task" :
-    in3d && level.kind === "room" ? "Click an object to select it, then drag it to move · drag anywhere else to look around · Face a wall at the top · right-click to pin" :
-    in3d ? "Drag to look around · click a room to see it from above · click an object to select, drag it to move · right-click to pin" :
+    in3d && level.kind === "room" ? "Click an object to select it, then drag it to move · drag anywhere else to look around · Face a wall at the top · Pin to add a pin" :
+    in3d ? "Drag to look around · click a room to see it from above · click an object to select, drag it to move · right-drag to move the view" :
     level.kind === "site" ? "The whole job · click the building or zoom in to go inside" :
     level.kind === "exterior" ? "Click a floor to go inside · zoom out for the whole site" :
     level.kind === "floor" ? "Click a room to step in · zoom out for the outside" :
@@ -148,7 +189,7 @@ export function PlanViewer(p: Props) {
     "Click a cabinet or object to select it, then drag it to move · zoom out to go back";
 
   return (
-    <div className={`relative w-full h-full overflow-hidden bg-ink ${p.pinMode ? "pin-cursor" : ""}`}>
+    <div className={`relative w-full h-full overflow-hidden bg-ink ${p.build?.on ? `build-cursor ${p.build.place ? "build-place" : ""}` : p.pinMode ? "pin-cursor" : ""}`}>
       {level.kind === "site" && (
         <SiteView plan={plan} jobName={p.jobName} pins={p.pins} states={p.states} colorMode={p.colorMode} selectedPin={p.selectedPin} pinMode={p.pinMode} draft={p.draft}
           controls={controls} onOpenBuilding={() => p.setLevel({ kind: "exterior" })} onSelectPin={p.onSelectPin} onPlacePin={p.onPlacePin} onLimitOut={p.onAllJobs} />
@@ -158,7 +199,7 @@ export function PlanViewer(p: Props) {
           onOpenFloor={(id) => p.setLevel({ kind: "floor", floorId: id })} onLimitOut={() => p.setLevel({ kind: "site" })} />
       )}
       {in3d && (
-        <Plan3D plan={plan} mode={level.kind === "exterior" ? "building" : "floor"} floor={floor} room={room} selected={p.selected} selectedPin={p.selectedPin} selectedItem={p.selectedItem}
+        <Plan3D plan={plan3d} only={only} mode={level.kind === "exterior" ? "building" : "floor"} floor={floor} room={room} selected={p.selected} selectedPin={p.selectedPin} selectedItem={p.selectedItem}
           states={p.states} colorMode={p.colorMode} pins={p.pins} items={p.items} pinMode={p.pinMode} draft={p.draft} wallMode={wallMode} look={look} locked={p.readOnly} controls={controls}
           onSelect={(id) => { const r = floor && id ? floor.rooms.find((x) => x.id === id) : null; if (r && floor) p.setLevel({ kind: "room", floorId: floor.id, roomId: r.id }); p.onSelect(id); }}
           onSelectPin={p.onSelectPin} onSelectItem={p.onSelectItem} onPlacePin={p.onPlacePin}
@@ -175,6 +216,7 @@ export function PlanViewer(p: Props) {
           onPlacePin={p.onPlacePin}
           items={p.items} showItems={showItems} selectedItem={p.selectedItem} onSelectItem={p.onSelectItem} onMovePin={p.onMovePin}
           onMoveFixture={(id, dx, dy) => p.onMoveFixture(id, dx, dy, 0)} locked={p.readOnly} look={look}
+          build={p.build?.on ? p.build.map : undefined}
         />
       )}
       {floor && room && side && level.kind === "wall" && (
@@ -215,8 +257,32 @@ export function PlanViewer(p: Props) {
         })}
       </div>
 
-      {/* floor switcher */}
-      {floor && level.kind === "floor" && floors.length > 1 && (
+      {/* in 3D: which floors and homes show, any mix, without moving the camera */}
+      {in3d && level.kind !== "room" && (floors.length > 1 || units.length > 1) && (
+        <div className="absolute left-3 top-14 2xl:left-1/2 2xl:-translate-x-1/2 2xl:top-3 flex flex-col items-start 2xl:items-center gap-1">
+          {[
+            ...(floors.length > 1 ? [{ key: "floors", all: "All floors", list: floors.map((f) => ({ id: f.id, name: f.name })), cur: only, set: setOnly }] : []),
+            ...(units.length > 1 ? [{ key: "homes", all: "All homes", list: units.map((u) => ({ id: u, name: u })), cur: homes, set: setHomes }] : []),
+          ].map((row) => (
+            <div key={row.key} className={`flex flex-wrap gap-1 p-1 rounded-[4px] ${glass}`} role="group" aria-label={row.key === "floors" ? "Floors to show" : "Homes to show"}>
+              <button onClick={() => row.set(null)} aria-pressed={!row.cur}
+                className={`h-7 px-2.5 rounded-[3px] text-[13px] font-display font-bold tracking-[0.06em] uppercase ${!row.cur ? "bg-panel-3 text-text" : "text-muted hover:text-text"}`}>{row.all}</button>
+              {row.list.map((x) => {
+                const on = !row.cur || row.cur.includes(x.id);
+                return (
+                  <button key={x.id} onClick={() => row.set(toggle(row.list.map((y) => y.id), row.cur, x.id))} aria-pressed={on}
+                    className={`h-7 px-2.5 rounded-[3px] text-[13px] font-display font-bold tracking-[0.06em] uppercase inline-flex items-center gap-1.5 ${on && row.cur ? "bg-panel-3 text-text" : on ? "text-text" : "text-muted hover:text-text"}`}>
+                    <span className={`w-2.5 h-2.5 rounded-[2px] border ${on ? "bg-accent border-accent" : "border-[#77736a]"}`} />{x.name}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* floor switcher (the flat plan shows one floor at a time) */}
+      {floor && level.kind === "floor" && !in3d && floors.length > 1 && (
         <div className={`absolute left-3 top-14 md:left-1/2 md:-translate-x-1/2 md:top-3 flex gap-1 p-1 rounded-[4px] ${glass}`}>
           {floors.map((f) => (
             <button key={f.id} onClick={() => p.setLevel({ kind: "floor", floorId: f.id })} className={`h-7 px-2.5 rounded-[3px] text-[13px] font-display font-bold tracking-[0.06em] uppercase ${f.id === floor.id ? "bg-panel-3 text-text" : "text-muted hover:text-text"}`}>{f.name}</button>
@@ -287,7 +353,14 @@ export function PlanViewer(p: Props) {
 
       {/* tools */}
       <div className="absolute right-3 bottom-3 flex flex-col items-end gap-1.5">
-        {!p.readOnly && <button onClick={() => p.setPinMode(!p.pinMode)} title="Pick up a pin: your cursor becomes a pin, click anywhere to drop it (right-click or press and hold works too)" aria-pressed={p.pinMode}
+        {!p.readOnly && p.build && (
+          <button onClick={p.build.toggle} aria-pressed={p.build.on} title={p.build.on ? "Done changing the house (B)" : "Build mode: add doors and windows, move walls, split rooms (B)"}
+            className={`self-end h-10 rounded-[4px] border inline-flex items-center gap-1.5 px-3 font-display font-bold tracking-[0.08em] uppercase text-[13px] ${p.build.on ? "bg-accent border-accent text-accent-ink" : `${glass} text-text hover:bg-panel-3`}`}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 4l6 6-3 3-6-6z" /><path d="M11 7L3 15l3 3 8-8" /><path d="M3 21h8" /></svg>
+            {p.build.on ? "Done" : "Build"}
+          </button>
+        )}
+        {!p.readOnly && !p.build?.on && <button onClick={() => p.setPinMode(!p.pinMode)} title="Pick up a pin: your cursor becomes a pin, click anywhere to drop it (right-click or press and hold works too)" aria-pressed={p.pinMode}
           className={`self-end h-10 rounded-[4px] border inline-flex items-center gap-1.5 px-3 font-display font-bold tracking-[0.08em] uppercase text-[13px] ${p.pinMode ? "bg-accent border-accent text-accent-ink" : `${glass} text-text hover:bg-panel-3`}`}>
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M6 22V3" /><path d="M6 3h12l-3 4 3 4H6" fill="currentColor" /></svg>
           {p.pinMode ? "Cancel" : "Pin"}
@@ -303,6 +376,8 @@ export function PlanViewer(p: Props) {
           </button>
         )}
       </div>
+
+      <AwayChip glass={glass} onClose={() => setPending([])} />
 
       {/* hints and legend */}
       <div className="absolute left-3 bottom-3 flex flex-col gap-2 items-start max-w-[calc(100%-80px)] pointer-events-none">

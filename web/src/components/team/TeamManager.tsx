@@ -1,9 +1,11 @@
 "use client";
 // The team: everyone who works on the company's jobs, the owner included. Admins add people, change
 // roles and remove them; employees see the list. People can be added before they have an account, so
-// they can be tagged on pins right away; they join by signing in with the same email.
+// they can be tagged on pins right away; they join by signing in with the same email. Crew are either
+// employees or subs (a switch on each person): employees' links also show the rest of the crew's open
+// work, subs' links show only their own. Neither ever sees money.
 import { useState } from "react";
-import type { Member, MemberInput, MemberRole } from "@/lib/data/types";
+import type { CrewKind, Member, MemberInput, MemberRole } from "@/lib/data/types";
 import { Avatar } from "./Avatar";
 import { useFeedback } from "@/components/ui/feedback";
 
@@ -15,8 +17,25 @@ export interface TeamApi {
 
 const ROLE: Record<MemberRole, { label: string; can: string }> = {
   admin: { label: "Admin", can: "Everything: jobs, pins and stages, plus company details, the team, roles and stage templates." },
-  employee: { label: "Employee", can: "Editor: works on jobs, pins, notes, photos and stages. Can't change the company, the team or templates." },
+  employee: { label: "Crew", can: "Works on jobs, pins, notes, photos and stages. Never sees money. Can't change the company, the team or templates." },
 };
+const CREW: Record<CrewKind, { label: string; can: string }> = {
+  employee: { label: "Employee", can: "Their link shows their tasks and the rest of the crew's open work on their jobs." },
+  sub: { label: "Sub", can: "Their link shows only the tasks tagged to them. Nothing else on the job." },
+};
+
+function CrewPick({ value, onChange, disabled }: { value: CrewKind; onChange: (c: CrewKind) => void; disabled?: boolean }) {
+  return (
+    <div className="inline-flex rounded-[3px] border border-line overflow-hidden shrink-0" role="group" aria-label="Employee or sub">
+      {(["employee", "sub"] as const).map((c) => (
+        <button key={c} type="button" disabled={disabled} onClick={() => onChange(c)} aria-pressed={value === c} title={CREW[c].can}
+          className={`h-8 px-2.5 text-[12.5px] font-display font-bold uppercase tracking-[0.08em] ${value === c ? "bg-panel-3 text-text" : "bg-panel-2 text-muted hover:text-text"} disabled:cursor-default`}>
+          {CREW[c].label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function RolePick({ value, onChange, disabled }: { value: MemberRole; onChange: (r: MemberRole) => void; disabled?: boolean }) {
   return (
@@ -37,7 +56,7 @@ export function TeamManager({ initial, canManage, meId, api }: { initial: Member
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
-  const blank: MemberInput = { full_name: "", title: "", email: "", phone: "", role: "employee" };
+  const blank: MemberInput = { full_name: "", title: "", email: "", phone: "", role: "employee", crew: "employee" };
   const [form, setForm] = useState<MemberInput>(blank);
   const [edit, setEdit] = useState<MemberInput>(blank);
 
@@ -58,6 +77,7 @@ export function TeamManager({ initial, canManage, meId, api }: { initial: Member
               <span className="font-mono text-[12px] text-muted">{members.filter((m) => m.role === r).length}</span>
             </div>
             <p className="text-[13px] text-muted mt-1">{ROLE[r].can}</p>
+            {r === "employee" && <p className="text-[12.5px] text-muted mt-1">Each one is an <b className="text-text font-medium">employee</b> or a <b className="text-text font-medium">sub</b>: {CREW.employee.can.charAt(0).toLowerCase() + CREW.employee.can.slice(1, -1)} for employees; only their own tasks for subs.</p>}
           </div>
         ))}
       </div>
@@ -87,6 +107,7 @@ export function TeamManager({ initial, canManage, meId, api }: { initial: Member
                   <p className="text-[12.5px] text-muted truncate">{[m.title, m.email, m.phone].filter(Boolean).join(" · ") || "No details yet"}</p>
                   {!m.user_id && <p className="text-[12px] text-amber mt-0.5">Not signed in yet{m.email ? `: joins when they sign in with ${m.email}` : ": add an email so they can sign in"}</p>}
                 </div>
+                {m.role === "employee" && <CrewPick value={m.crew ?? "employee"} disabled={!canManage || busy} onChange={(c) => c !== (m.crew ?? "employee") && run(() => api.update(m.id, { crew: c }))} />}
                 <RolePick value={m.role} disabled={!canManage || busy || m.is_owner || (m.role === "admin" && admins === 1)}
                   onChange={(r) => r !== m.role && run(() => api.update(m.id, { role: r }))} />
                 {canManage && (
@@ -117,7 +138,8 @@ export function TeamManager({ initial, canManage, meId, api }: { initial: Member
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <RolePick value={form.role} onChange={(r) => setForm({ ...form, role: r })} />
-            <span className="text-[12.5px] text-muted flex-1 min-w-[200px]">{ROLE[form.role].can}</span>
+            {form.role === "employee" && <CrewPick value={form.crew ?? "employee"} onChange={(c) => setForm({ ...form, crew: c })} />}
+            <span className="text-[12.5px] text-muted flex-1 min-w-[200px]">{form.role === "employee" ? CREW[form.crew ?? "employee"].can : ROLE[form.role].can}</span>
             <button className="btn btn-primary" disabled={busy || !form.full_name.trim()}>{busy ? "Adding…" : "Add to team"}</button>
           </div>
           <p className="text-[12px] text-muted">They can be tagged on pins straight away. Email invites come next; for now they join by signing in with this email.</p>

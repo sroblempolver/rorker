@@ -1,5 +1,6 @@
-// When the assistant points at places, the plan goes to them: the floor they're on comes up, and the
-// one it is about (a room it means, an object it just added) opens in the side panel.
+// When someone taps a tag (a place in a message, a question's spot), the plan goes to it: the floor it's
+// on comes up. The assistant's own dots don't move the map: it says where they are and offers to go
+// (see lib/plan/away). Either way the one it's about opens in the side panel.
 import { useEffect, useRef } from "react";
 import type { Level } from "@/components/plan/PlanViewer";
 import { useMarks } from "@/lib/plan/marks";
@@ -7,7 +8,7 @@ import { findElement, roomOf } from "@/lib/plan/geometry";
 import type { Plan } from "@/lib/plan/types";
 
 export function useFollowMarks(view: Plan | null, level: Level, go: (l: Level) => void, open: (id: string) => void) {
-  const { marks, focus, n } = useMarks();
+  const { marks, focus, n, follow } = useMarks();
   const pending = useRef<string | null>(null);
   const cb = useRef({ go, open, level });
   cb.current = { go, open, level };
@@ -16,6 +17,7 @@ export function useFollowMarks(view: Plan | null, level: Level, go: (l: Level) =
   useEffect(() => {
     if (!n || !marks.length) { pending.current = focus; return; }
     pending.current = focus;
+    if (!follow) return;
     const floorId = marks[0].floor_id;
     const l = cb.current.level;
     // dots on the outside (the roof, a porch) show on the building from outside

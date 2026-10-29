@@ -1,4 +1,5 @@
 import type { BBox, Element, Fixture, Floor, Opening, Plan, Pt, Room, Wall } from "./types";
+import { RULES } from "./rules";
 
 export function polyArea(p: Pt[]): number {
   let a = 0;
@@ -233,7 +234,7 @@ export function frontView(plan: Plan): FrontView {
     const cy = (d.a[1] + d.b[1]) / 2;
     side = cy - bb[1] < bb[3] - cy ? "top" : "bottom";
   }
-  const H = plan.building.exterior.storey_height_mm || 3000;
+  const H = plan.building.exterior.storey_height_mm || RULES.storey;
   const storeys: FrontView["storeys"] = floors.map((f, i) => {
     const fb = floorBBox(f);
     // the front wall line: the outermost real door or window on that side (porch gaps don't count)

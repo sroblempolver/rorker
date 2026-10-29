@@ -25,6 +25,8 @@ export interface Wall {
 export interface Opening {
   id: string; kind: OpeningKind; name: string; a: Pt; b: Pt; width_mm: number; thickness_mm: number;
   exterior: boolean; polygon: Pt[]; room_ids: string[]; leaves: DoorLeaf[]; confidence: number;
+  /** bottom above the floor and height, when the drawing or the contractor says (house rules otherwise) */
+  sill_mm?: number; height_mm?: number;
 }
 export interface Fixture {
   id: string; kind: string; name: string; room_id: string | null; center: Pt; bbox: BBox; rotation: number;
@@ -43,6 +45,8 @@ export interface Stair { id: string; polygon: Pt[]; room_id: string | null; outl
 export interface Floor {
   id: string; name: string; level: number; elevation_mm: number; height_mm: number; footprint: Pt[][];
   bounds: BBox; rooms: Room[]; walls: Wall[]; openings: Opening[]; fixtures: Fixture[]; stairs: Stair[];
+  /** Build mode: points where a straight wall was cut into pieces that move on their own */
+  joints?: Pt[];
 }
 export interface Question {
   id: string; text: string; element_ids: string[]; options: string[]; default: string | null;

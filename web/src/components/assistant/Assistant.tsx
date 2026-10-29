@@ -6,6 +6,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { AssistantContext } from "@/lib/assistant/core";
 import { speak, stopSpeaking, useDictation } from "@/components/voice/speech";
+import { AwayButtons } from "@/components/plan/AwayButtons";
+import { awayNote } from "@/lib/plan/away";
+import { getMarks } from "@/lib/plan/marks";
 
 export type Turn = { role: "user" | "assistant"; content: string };
 /** Ask the assistant. `changed` says it changed something, so the screen should refresh. */
@@ -43,10 +46,15 @@ export function Assistant({ send, context, onChanged, open, setOpen, wide }: { s
     setOpen(true);
     ctl.current = new AbortController();
     try {
+      const n0 = getMarks().n;
       const r = await send(next.slice(-12), ctxRef.current, ctl.current.signal);
-      setTurns((t) => [...t, { role: "assistant", content: r.text }]);
+      // dots it put up out of view (another floor, the outside): say where, with a button to go
+      const mk = getMarks();
+      const note = mk.n !== n0 && !mk.follow ? awayNote(mk.marks) : "";
+      const said = note ? `${r.text} ${note}` : r.text;
+      setTurns((t) => [...t, { role: "assistant", content: said }]);
       if (r.changed) onChanged?.();
-      if (byVoice) speak(r.text);
+      if (byVoice) speak(said);
     } catch (e) {
       const cancelled = !!(e && typeof e === "object" && "code" in e && (e as { code: string }).code === "cancelled") || (e instanceof DOMException && e.name === "AbortError");
       if (!cancelled) setErr(e instanceof Error ? e.message : "Couldn't reach the assistant.");
@@ -84,9 +92,12 @@ export function Assistant({ send, context, onChanged, open, setOpen, wide }: { s
           <div ref={list} className="max-h-[260px] overflow-y-auto scroll-thin px-3 pb-2.5 pt-1 space-y-1.5" aria-live="polite">
             {!shown.length && !busy && !dict.listening && <p className="text-[12.5px] text-muted leading-relaxed">{HINT}</p>}
             {shown.map((t, i) => (
-              <p key={turns.length - shown.length + i} className={`text-[13.5px] leading-snug whitespace-pre-wrap ${t.role === "user" ? "text-muted" : "text-text"}`}>
-                {t.role === "user" ? <span>“{t.content}”</span> : t.content}
-              </p>
+              <div key={turns.length - shown.length + i}>
+                <p className={`text-[13.5px] leading-snug whitespace-pre-wrap ${t.role === "user" ? "text-muted" : "text-text"}`}>
+                  {t.role === "user" ? <span>“{t.content}”</span> : t.content}
+                </p>
+                {t.role === "assistant" && i === shown.length - 1 && <AwayButtons className="pt-1" />}
+              </div>
             ))}
             {dict.listening && <p className="text-[13.5px] text-accent">Listening, let go when done… {dict.interim && <span className="text-text">“{dict.interim}”</span>}</p>}
             {busy && <p className="text-[13px] text-muted inline-flex items-center gap-2"><span className="dot bg-accent animate-pulse" />Working on it… <button className="underline" onClick={() => ctl.current?.abort()}>Stop</button></p>}

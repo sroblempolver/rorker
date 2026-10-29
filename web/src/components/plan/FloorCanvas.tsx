@@ -15,6 +15,8 @@ import { HIDDEN_KINDS, TOP_FILL, fixtureBottom, fixtureTop, isWallMounted } from
 import { ITEM_ICON } from "./items";
 import type { Controls, PinTarget, ScreenPoint } from "./target";
 import { usePanZoom } from "./usePanZoom";
+import { area, inches, len } from "@/lib/measure";
+import { BuildLayer, type BuildMap } from "./BuildLayer";
 
 export type ColorMode = "type" | "progress";
 
@@ -49,6 +51,8 @@ interface Props {
   locked?: boolean;
   /** the build stage to show: slab, framing, sheetrock or finished (the default) */
   look?: BuildLook;
+  /** Build mode: walls can be grabbed and dragged */
+  build?: BuildMap;
 }
 
 /** Fixtures that can't be picked or moved in the top view: linework of something else, and things up
@@ -130,12 +134,15 @@ export function FloorCanvas(props: Props) {
   });
   const { view, px, setHome, animateTo, zoomBy } = pz;
 
-  // fly the camera when the level or floor changes
+  // fly the camera when the level or floor changes, not when something on it moves (a cabinet, a wall)
   const first = useRef(true);
+  const homeRef = useRef(homeBox);
+  homeRef.current = homeBox;
   useEffect(() => {
-    setHome(homeBox, !first.current, room ? 0.3 : 0.06);
+    setHome(homeRef.current, !first.current, room ? 0.3 : 0.06);
     first.current = false;
-  }, [homeBox, room, setHome]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floor.id, room?.id, setHome]);
 
   // fly to an element picked from a list
   useEffect(() => {
@@ -215,7 +222,9 @@ export function FloorCanvas(props: Props) {
   const hov = (id: string | null) => () => setHover(id);
 
   // press and hold (touch) or right-click anywhere drops a note right there
-  const handlers = useHoldToPin(pz.handlers, (e) => place(e));
+  // (in Build mode a right-click is for cutting a wall, not for a pin)
+  const holdPin = useHoldToPin(pz.handlers, (e) => place(e));
+  const handlers = props.build ? { ...holdPin, onContextMenu: (e: React.MouseEvent) => e.preventDefault() } : holdPin;
 
   const lw = px; // one screen pixel in world units
   const fs = 13 * px;
@@ -235,17 +244,17 @@ export function FloorCanvas(props: Props) {
     >
       <PlanDefs />
       <defs>
-        <pattern id="survey" width={1000} height={1000} patternUnits="userSpaceOnUse">
-          <path d="M1000 0H0V1000" fill="none" stroke="#262923" strokeWidth={10} />
+        <pattern id="survey" width={1219.2} height={1219.2} patternUnits="userSpaceOnUse">
+          <path d="M1219.2 0H0V1219.2" fill="none" stroke="#262923" strokeWidth={10} />
           <path d="M0 -40V40M-40 0H40" stroke="#33372f" strokeWidth={14} />
         </pattern>
         <filter id="soft" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation={240} /></filter>
       </defs>
-      {/* the lot: ground with a 1 m survey grid */}
+      {/* the lot: ground with a 4 ft survey grid */}
       <rect x={fb[0] - 80000} y={fb[1] - 80000} width={W + 160000} height={Hh + 160000} fill={GROUND} />
       <rect x={fb[0] - 80000} y={fb[1] - 80000} width={W + 160000} height={Hh + 160000} fill="url(#survey)" />
       <g pointerEvents="none" fontFamily="var(--font-mono)" fontSize={fs * 0.75} fill="#5d6157">
-        <text x={fb[0]} y={fb[1] - 900}>{floor.name.toUpperCase()} · {(W / 1000).toFixed(1)} × {(Hh / 1000).toFixed(1)} m</text>
+        <text x={fb[0]} y={fb[1] - 900}>{floor.name.toUpperCase()} · {len(W)} × {len(Hh)}</text>
       </g>
 
       {/* soft ground shadow under the building */}
@@ -316,7 +325,7 @@ export function FloorCanvas(props: Props) {
                 </>
               )}
               {f.facing != null && <FrontEdge b={b} facing={f.facing} lw={lw} strong={sel || hot} />}
-              {live && <text x={f.center[0]} y={b[1] - 10 * lw} textAnchor="middle" fontSize={11 * lw} fontFamily="var(--font-mono)" fill="#55b2ff" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>moved {Math.round(Math.hypot(live.dx, live.dy))} mm</text>}
+              {live && <text x={f.center[0]} y={b[1] - 10 * lw} textAnchor="middle" fontSize={11 * lw} fontFamily="var(--font-mono)" fill="#55b2ff" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>moved {inches(Math.hypot(live.dx, live.dy))}</text>}
             </g>
           );
         })}
@@ -359,6 +368,8 @@ export function FloorCanvas(props: Props) {
           );
         })}
       </g>
+
+      {props.build && <BuildLayer floor={floor} room={room} lw={px} map={props.build} drag={drag} start={start} toWorld={pz.toWorld} />}
 
       {/* openings: glass for windows, timber leaves and swing arcs for doors */}
       <g>
@@ -406,7 +417,7 @@ export function FloorCanvas(props: Props) {
           const tw = name.length * fs * 0.52;
           if (tw > (b[2] - b[0]) * 0.95 && !room) return null;
           const n = openByRoom.get(r.id) ?? 0;
-          const sub = `${r.area_m2.toFixed(1)} m²`;
+          const sub = area(r.area_m2);
           const showSub = sub.length * fs * 0.5 + 5 * fs < (b[2] - b[0]) * 0.95;
           return (
             <g key={r.id}>

@@ -1,7 +1,8 @@
 // Shared links: what a team member or one-time sub sees when they open a job link without signing in.
 // One function decides it for every backend, so the rule lives in one place: the plan, and only the
-// pins that are theirs, plus the materials for their work. No client details, no other pins, no
-// comments, no prices, no team contact details.
+// pins that are theirs, plus the materials for their work. No client details, no comments, no prices,
+// no money, no team contact details. Subs see no other pins; employees also see the crew's other open
+// tasks on the job (to know who's where), but can only work on their own.
 import type { Company, ElementEdit, Job, JobItem, JobStage, Member, Pin, ShareLink, SharedMaterial, SharedView, SharedWork } from "@/lib/data/types";
 import type { Plan } from "@/lib/plan/types";
 import type { MaterialLine } from "@/lib/materials/types";
@@ -35,10 +36,20 @@ export function linkMaterials(l: Pick<ShareLink, "member_id">, d: Pick<ShareJobD
     }));
 }
 
+/** Employees see the rest of the crew's open work on a job; subs see only their own. */
+export function linkCrew(l: Pick<ShareLink, "member_id">, members: Member[]): "employee" | "sub" {
+  const m = l.member_id ? members.find((x) => x.id === l.member_id) : null;
+  return m && m.crew !== "sub" ? "employee" : "sub";
+}
+
 export function shareView(l: ShareLink, d: ShareJobData): SharedView | null {
-  if (!linkLive(l) || (l.job_id !== null && l.job_id !== d.job.id)) return null;
+  if (!linkLive(l) || l.audience === "client" || (l.job_id !== null && l.job_id !== d.job.id)) return null;
   const pins = linkPins(l, d.pins).map((p) => ({ ...p, created_by: null, comment_count: 0 }));
-  const tagged = new Set(pins.flatMap((p) => p.tagged));
+  const mine = new Set(pins.map((p) => p.id));
+  const crewPins = linkCrew(l, d.members) === "employee"
+    ? d.pins.filter((p) => !mine.has(p.id) && p.status !== "done" && (p.kind === "task" || p.kind === "issue")).map((p) => ({ ...p, created_by: null, comment_count: 0 }))
+    : [];
+  const tagged = new Set([...pins, ...crewPins].flatMap((p) => p.tagged));
   return {
     label: l.label, expires_at: l.expires_at,
     company: { name: d.company.name, logo_url: d.company.logo_url, brand_color: d.company.brand_color, phone: d.company.phone },
@@ -47,14 +58,15 @@ export function shareView(l: ShareLink, d: ShareJobData): SharedView | null {
     stages: [...d.stages].sort((a, b) => a.position - b.position).map((s) => ({ name: s.name, status: s.status })),
     people: d.members.filter((m) => tagged.has(m.id)).map((m) => ({ id: m.id, full_name: m.full_name, title: m.title })),
     photos: Object.fromEntries(pins.map((p) => [p.id, d.photos?.[p.id] ?? []]).filter(([, ph]) => ph.length)),
-    materials: linkMaterials(l, d, new Set(pins.map((p) => p.id))),
+    materials: linkMaterials(l, d, mine),
+    ...(crewPins.length ? { crew_pins: crewPins } : {}),
   };
 }
 
 /** What a link opens. A person's own link shows only the jobs with something for them, the ones with
  *  open tasks first. */
 export function shareWork(l: ShareLink, company: Company, jobs: ShareJobData[]): SharedWork | null {
-  if (!linkLive(l)) return null;
+  if (!linkLive(l) || l.audience === "client") return null;
   const views = jobs.map((d) => shareView(l, d)).filter((v): v is SharedView => !!v);
   const open = (v: SharedView) => v.pins.filter((p) => p.status !== "done").length;
   const shown = l.job_id ? views : views.filter((v) => v.pins.length || v.materials?.length).sort((a, b) => open(b) - open(a));

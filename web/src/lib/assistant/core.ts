@@ -13,7 +13,10 @@ import { addedFixture, applyEdits, fixtureSize } from "@/lib/plan/edits";
 import { kindFor, OBJECT_KINDS, specOf, topOf, bottomOf, weightOf, type Part } from "@/lib/plan/catalog";
 import { naturalFacing, partnerOf, supportOf, toward } from "@/lib/plan/arrange";
 import { MARK_COLORS, type Mark } from "@/lib/plan/pointing";
+import { markFor } from "@/lib/plan/places";
 import { today } from "@/lib/dates";
+import { RULES } from "@/lib/plan/rules";
+import { inches } from "@/lib/measure";
 
 /** `plan` is the plan as drawn; `edits` are the changes made in the app on top of it (moved, added, removed). */
 export interface JobBundle { job: Job; plan: Plan | null; edits: Record<string, ElementEdit>; pins: Pin[]; stages: JobStage[]; items: JobItem[]; states: { element_id: string; status: ElementStatus }[] }
@@ -132,8 +135,9 @@ export function instructions(me: AssistantBackend["me"], ctx: AssistantContext):
     "Changing the plan: you can add, move, turn, resize and remove furniture, appliances and fixtures, and rename rooms (room_layout first, then add_objects, change_object, remove_objects, rename_room). Walls, rooms' shapes, doors and windows can't be changed here yet: say so in one sentence and offer to add a task pin for it.",
     "Real things, real sizes: every object has a real width, depth, height, weight and mounting height, and drawings never show furniture heights, so add_objects fills in the usual ones for each kind. Pick the kind that is the actual thing (a computer is kind computer, never a box or other). A computer, monitor, laptop, printer, table lamp, microwave, coffee machine or TV sits on a desk, counter or sideboard, never on the floor: put it `on` that piece (add the desk first if the room has none, or ask). Chairs go at their desk or table facing it, bar stools at the counter or island facing it, sofas and armchairs face the TV, fireplace or coffee table, beds, cabinets, wardrobes and desks stand with their backs to a wall facing into the room, wall cabinets, mirrors, pictures and shelves hang on a wall at their usual height. Leave facing out and it is worked out that way; give it only when the person asks for something else.",
     "Something not in the kind list (a rowing machine, a pool table, a kayak rack): don't settle for a box. Work out from what you know (or look it up with web search when you can) what it really looks like, its real size and weight, then add it as kind other with its name and parts: simple boxes, cylinders and spheres at real sizes and colours that together look like the real thing. Only when you truly can't tell what it is, ask what it looks like.",
-    "Placing: the usual layouts (width x depth, mm): double bed 1400x2000, queen 1600x2000, king 1800x2000, single 900x2000 with a nightstand each side of a double; dining table 1600x900 for 6 or 1200x800 for 4 with a chair at each place; desk 1200x600 with an office chair; sofa facing the TV on a sideboard. Place things the way a designer would: keep about 900 mm of walking space and never block a door or doorway. Only add what fits; leave other things as they are unless asked.",
-    "Showing places: whenever you mention a room or spot the person has to pick between or find (\"which bedroom?\"), call point_at first so a coloured dot blinks on each one, then name them by where they are and by colour (\"the bedroom on the south side, blue dot, or the east one, green dot?\"). Rooms often share a name, so tell them apart by their side of the floor (find_in_plan says where each one is). After adding or moving something it is pointed at for you. Dots blink for 10 seconds and then go, so every time you refer to a place again (later in the chat too), call point_at again so it blinks again.",
+    "Sizes: always talk in feet and inches (13' 6\", a 36\" door) and square feet, never metres or millimetres. The tools work in millimetres: 1 inch is 25.4 mm and 1 foot is 304.8 mm, so turn what they say into mm for the tools and turn what the tools return into feet and inches (round to the nearest half inch) when you answer.",
+    "Placing: the usual US layouts (width x depth): twin bed 38x75 in (965x1905 mm), full 54x75 in (1372x1905), queen 60x80 in (1524x2032), king 76x80 in (1930x2032), with a nightstand each side of a full or bigger; dining table 72x36 in (1830x915) for 6 or 48x30 in (1220x760) for 4 with a chair at each place; desk 48x24 in (1220x610) with an office chair; sofa facing the TV on a sideboard. Place things the way a designer would: keep about 36 in (915 mm) of walking space and never block a door or doorway. Only add what fits; leave other things as they are unless asked.",
+    "Showing places: whenever you mention a room or spot the person has to pick between or find (\"which bedroom?\"), call point_at first so a coloured dot blinks on each one, then name them by where they are and by colour (\"the bedroom on the south side, blue dot, or the east one, green dot?\"). Rooms often share a name, so tell them apart by their side of the floor (find_in_plan says where each one is). After adding or moving something it is pointed at for you. Dots blink for 10 seconds and then go, so every time you refer to a place again (later in the chat too), call point_at again so it blinks again. Dots show in 2D and 3D on any floor, but the map doesn't move to them: when they're on a floor or view the person isn't looking at, the app adds a line saying where and a button to go there, so don't say you took them there.",
     // keep these two last: they change per request, and everything above them is cached
     `Today is ${today()}.`,
     ctx.jobId ? `They are looking at the job "${ctx.jobName ?? ctx.jobId}" (id ${ctx.jobId})${ctx.where ? `, at ${ctx.where}` : ""}${ctx.selected ? `, with ${ctx.selected} selected` : ""}. "This job", "here" and "this" refer to that.` : "They are on the jobs list.",
@@ -195,7 +199,7 @@ function around(plan: Plan, id: string) {
       const all = near.filter((x) => x.side === s).sort((p, q) => Math.abs(p.along) - Math.abs(q.along));
       return all.find((x) => x.up === refUp) ?? all[0] ?? null;
     };
-    const label = (x: { id: string; what: string; gap_mm: number } | null) => (x ? `${x.what} (${x.id}), ${x.gap_mm ? `${x.gap_mm} mm away` : "touching"}` : "nothing");
+    const label = (x: { id: string; what: string; gap_mm: number } | null) => (x ? `${x.what} (${x.id}), ${x.gap_mm ? `${inches(x.gap_mm)} away` : "touching"}` : "nothing");
     return {
       reference: `${ref ? ref.name : op!.name} (${id}), front faces ${heading(n[0], n[1])}`,
       how_to_read: "Left and right are as seen standing in front of it, facing it.",
@@ -292,17 +296,6 @@ function readParts(v: unknown): Part[] {
   });
 }
 
-/** Where a place is, for a dot on the plan. */
-function markFor(plan: Plan, id: string, label: string, color: string): Mark | null {
-  const e = findElement(plan, id);
-  if (!e) return null;
-  let pt: [number, number], z = 0;
-  if (e.kind === "fixture") { pt = e.el.center; z = topOf(e.el); }
-  else if (e.kind === "opening") { pt = [(e.el.a[0] + e.el.b[0]) / 2, (e.el.a[1] + e.el.b[1]) / 2]; z = 1000; }
-  else if (e.kind === "room") pt = labelPoint(e.el.polygon);
-  else { const b = bboxOf(e.el.polygon); pt = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]; z = e.kind === "wall" ? 1200 : 0; }
-  return { floor_id: e.floor.id, x: Math.round(pt[0]), y: Math.round(pt[1]), z: Math.round(z), label, color, id };
-}
 
 const date = (v: unknown) => { const s = str(v); if (!s) return undefined; if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error("Dates are YYYY-MM-DD."); return s; };
 
@@ -325,7 +318,7 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
         id: d.job.id, name: d.job.name, address: d.job.address, type: d.job.job_type, status: d.job.status,
         ...(admin ? { client: d.job.client_name, client_email: d.job.client_email, client_phone: d.job.client_phone } : {}),
         stages: d.stages.map((s) => ({ name: s.name, status: s.status })),
-        floors: d.plan?.floors.map((f) => ({ id: f.id, name: f.name, rooms: f.rooms.map((r) => ({ id: r.id, name: r.name, type: r.type, m2: Math.round(r.area_m2 * 10) / 10, where: partOf(f, labelPoint(r.polygon)) })) })) ?? [],
+        floors: d.plan?.floors.map((f) => ({ id: f.id, name: f.name, rooms: f.rooms.map((r) => ({ id: r.id, name: r.name, type: r.type, sq_ft: Math.round(r.area_m2 * 10.7639), where: partOf(f, labelPoint(r.polygon)) })) })) ?? [],
         open_pins: d.pins.filter((p) => p.status !== "done").map((p) => ({ number: p.number, kind: p.kind, title: p.title, status: p.status, due: p.due_date, tagged: names(p.tagged), where: where(d.plan, p) })),
         done_pins: d.pins.filter((p) => p.status === "done").length,
       };
@@ -444,7 +437,7 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
       const { f, r } = findRoom(d.plan, input.room);
       const [x0, y0, x1, y1] = bboxOf(r.polygon);
       return {
-        room: `${r.name} (${r.id})`, floor: f.name, type: r.type, where: partOf(f, labelPoint(r.polygon)), ceiling_mm: f.height_mm || 2700,
+        room: `${r.name} (${r.id})`, floor: f.name, type: r.type, where: partOf(f, labelPoint(r.polygon)), ceiling_mm: f.height_mm || RULES.ceiling,
         inside_edges_mm: { west_x: x0 + 60, east_x: x1 - 60, north_y: y0 + 60, south_y: y1 - 60 },
         corners_mm: r.polygon,
         walls: roomSides(f, r).map((s) => ({
@@ -456,7 +449,7 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
           const sup = supportOf(f.fixtures, x), bot = bottomOf(x);
           return {
             id: x.id, what: x.name, kind: x.kind, centre: x.center.map(Math.round), width_mm: Math.round(sz.width), depth_mm: Math.round(sz.depth), height_mm: Math.round(topOf(x) - bot), faces: heading(n[0], n[1]),
-            ...(sup ? { sits_on: `${sup.name} (${sup.id}), top at ${Math.round(bot)} mm` } : bot ? { bottom_above_floor_mm: Math.round(bot) } : {}), ...(weightOf(x) ? { weight_kg: weightOf(x) } : {}),
+            ...(sup ? { sits_on: `${sup.name} (${sup.id}), top at ${Math.round(bot)} mm (${inches(bot)})` } : bot ? { bottom_above_floor_mm: Math.round(bot) } : {}), ...(weightOf(x) ? { weight_kg: weightOf(x) } : {}),
           };
         }),
       };
@@ -545,9 +538,9 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
           x = fit(x, sup.bbox[0] + hx, sup.bbox[2] - hx); y = fit(y, sup.bbox[1] + hy, sup.bbox[3] - hy);
           elevation = topOf(sup);
           on = { id: sup.id, at: sup.center };
-          where = `on ${sup.name} (${sup.id}), ${Math.round(elevation)} mm up`;
+          where = `on ${sup.name} (${sup.id}), ${inches(elevation)} up`;
         } else if (spec?.mount === "wall" || spec?.mount === "ceiling" || (spec?.mount === "surface" && spec.at)) {
-          elevation = num(o.height_above_floor_mm) || (spec.mount === "ceiling" ? (f.height_mm || 2700) - height - 50 : spec.at ?? 1200);
+          elevation = num(o.height_above_floor_mm) || (spec.mount === "ceiling" ? (f.height_mm || RULES.ceiling) - height - 50 : spec.at ?? 1200);
           if (spec.mount !== "ceiling") {
             // flat against the nearest wall, facing into the room
             const px = x ?? (ex0 + ex1) / 2, py = y ?? ey0;
@@ -557,8 +550,8 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
             const { hx, hy } = dims(facing);
             x = facing === 0 ? ex0 + hx : facing === 180 ? ex1 - hx : fit(px, ex0 + hx, ex1 - hx);
             y = facing === 90 ? ey0 + hy : facing === -90 ? ey1 - hy : fit(py, ey0 + hy, ey1 - hy);
-            where = `on the ${heading(-vec(facing)[0], -vec(facing)[1])} wall, bottom ${Math.round(elevation)} mm up`;
-          } else where = `hanging from the ceiling, bottom ${Math.round(elevation)} mm up`;
+            where = `on the ${heading(-vec(facing)[0], -vec(facing)[1])} wall, bottom ${inches(elevation)} up`;
+          } else where = `hanging from the ceiling, bottom ${inches(elevation)} up`;
         } else {
           if (num(o.height_above_floor_mm)) elevation = num(o.height_above_floor_mm);
           const partner = str(o.face_toward) ? byRef(str(o.face_toward)) : spec?.face === "to" ? partnerOf(here, { ...addedFixture("probe", { floor_id: f.id, room_id: r.id, kind, name, center: [x ?? (ex0 + ex1) / 2, y ?? (ey0 + ey1) / 2], width, depth, facing: null }) }, spec.to ?? [], x == null ? 20000 : kind === "sofa" || kind === "armchair" ? 4000 : 1500) : null;
@@ -604,7 +597,7 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
         here.push(addedFixture(id, obj));
         fresh.push(id);
         const kg = obj.weight_kg ?? spec?.kg ?? null;
-        added.push({ id, what: name, kind, size_mm: `${obj.width} wide x ${obj.depth} deep x ${obj.height_mm} high`, ...(kg ? { weight_kg: kg } : {}), faces: facingWord(facing) ?? "no particular way", ...(where ? { where } : {}) });
+        added.push({ id, what: name, kind, size: `${inches(obj.width)} wide x ${inches(obj.depth)} deep x ${inches(obj.height_mm)} high`, ...(kg ? { weight_kg: kg } : {}), faces: facingWord(facing) ?? "no particular way", ...(where ? { where } : {}) });
         changed.marks = [...(changed.marks ?? []), { floor_id: f.id, x: obj.center[0], y: obj.center[1], z: obj.elevation_mm + obj.height_mm, label: name, color: MARK_COLORS[5][1], id }];
       } catch (e) {
         // one that can't go in doesn't stop the rest
@@ -695,7 +688,7 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
         const m = e ? markFor(d.plan!, id, str(q.label) || elementLabel(e), color) : null;
         if (!m || !e) { missing.push(id); return; }
         marks.push(m);
-        out.push({ id, what: elementLabel(e), dot: cname, where: partOf(e.floor, [m.x, m.y]) });
+        out.push({ id, what: elementLabel(e), dot: cname, floor: e.floor.name, where: partOf(e.floor, [m.x, m.y]) });
       });
       if (!marks.length) throw new Error(`None of ${missing.join(", ")} are in this plan. Use find_in_plan for ids.`);
       changed.marks = marks;

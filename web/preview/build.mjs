@@ -19,6 +19,8 @@ const js = await esbuild.build({
 });
 fs.mkdirSync(path.join(path.dirname(out), "pdfjs"), { recursive: true });
 for (const f of ["pdf.min.mjs", "pdf.worker.min.mjs"]) fs.copyFileSync(path.join(root, "node_modules/pdfjs-dist/build", f), path.join(path.dirname(out), "pdfjs", f));
+// the shared plan tests (Plan tests page) sit beside the page
+fs.cpSync(path.join(root, "bench/cases"), path.join(path.dirname(out), "cases"), { recursive: true });
 const cssFile = path.join(here, "dist", "styles.css");
 execFileSync(path.join(root, "node_modules/.bin/tailwindcss"), ["-i", path.join(here, "styles.css"), "-o", cssFile, "--minify"], { cwd: root, stdio: "inherit" });
 const css = fs.readFileSync(cssFile, "utf8");

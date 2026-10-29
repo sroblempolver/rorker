@@ -3,6 +3,7 @@
 import type { Draw, LineItem, Quote, QuoteOption, Unit } from "./types";
 import type { Fixture, Floor, Plan, Room } from "@/lib/plan/types";
 import { newId, nextNumber } from "./money";
+import { RULES } from "@/lib/plan/rules";
 
 const SQFT = 10.764;
 const PAINT_ROOMS = new Set(["bedroom", "living", "family", "dining", "study", "office"]);
@@ -109,6 +110,6 @@ function wallArea(r: Room, f: Floor) {
   const p = r.polygon;
   const perimMm = p.reduce((s, a, i) => { const b = p[(i + 1) % p.length]; return s + Math.hypot(b[0] - a[0], b[1] - a[1]); }, 0)
     || 4 * Math.sqrt(r.area_m2) * 1000;
-  const h = Math.min(f.height_mm || 2700, 2700);
+  const h = Math.min(f.height_mm || RULES.ceiling, RULES.ceiling);
   return (perimMm / 1000) * (h / 1000) * SQFT * 0.85;
 }

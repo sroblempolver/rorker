@@ -16,6 +16,7 @@ from shapely.ops import unary_union
 
 from . import __version__
 from .cad import NUMBER_RE, RawDrawing, RawFloor, classify_layer
+from .rules import ft2
 from .schema import (Building, DoorLeaf, Fixture, Flag, Floor, Opening, Plan, Room, SourceInfo, Stair,
                      Wall)
 
@@ -210,7 +211,7 @@ def build_plan(raw: RawDrawing, filename: str, kind: str = "dxf") -> Plan:
     _cross_floor_flags(plan)
     plan.flags.append(Flag(code="no_exterior", severity="info",
                            message="The drawing has floor plans only. The outside view is estimated from "
-                                   "the footprint and window positions with 3 m storeys."))
+                                   "the footprint and window positions with 10 ft storeys."))
     plan.stats = _stats(plan)
     return plan
 
@@ -379,7 +380,7 @@ def _name_room(plan: Plan, room: Room):
         room.label_source = "contents"
         room.confidence = 0.3
         plan.flags.append(Flag(code="room_no_label", severity="ask",
-                               message=f"{room.id} ({room.area_m2} m²) has no label in the drawing.",
+                               message=f"{room.id} ({ft2(room.area_m2)}) has no label in the drawing.",
                                element_ids=[room.id]))
 
 
@@ -402,12 +403,12 @@ def _room_flags(plan: Plan, floor: Floor, rooms_geo: list[Polygon]):
         if best:
             plan.flags.append(Flag(
                 code="room_split", severity="ask", element_ids=[r.id, best.id],
-                message=f"The drawing gives {r.name.lower()} {r.id} an area of {da:g} m², which matches "
-                        f"{r.id} and {best.id} together ({r.area_m2 + best.area_m2:.1f} m²). The walls show two rooms."))
+                message=f"The drawing gives {r.name.lower()} {r.id} an area of {ft2(da)}, which matches "
+                        f"{r.id} and {best.id} together ({ft2(r.area_m2 + best.area_m2)}). The walls show two rooms."))
         else:
             plan.flags.append(Flag(
                 code="area_mismatch", severity="warn", element_ids=[r.id],
-                message=f"{r.id} measures {r.area_m2} m² but the drawing says {da:g} m²."))
+                message=f"{r.id} measures {ft2(r.area_m2)} but the drawing says {ft2(da)}."))
 
 
 def _cross_floor_flags(plan: Plan):

@@ -111,3 +111,23 @@ export function furnishWhere(plan: Plan, current: Furnish | undefined, room: str
   else if (kind === "floor" && fl) on.add(fl.id);
   return places.every((x) => on.has(x.id)) ? "all" : places.filter((x) => on.has(x.id)).map((x) => x.id);
 }
+
+/** The homes on show, by unit name, for looking at one or a few homes of a row; null keeps them all.
+ *  Rooms with no home (a shared stair, the street) stay, and so does whatever stands in them. */
+export function homesPlan(plan: Plan, homes: string[] | null): Plan {
+  if (!homes) return plan;
+  const keep = new Set(homes);
+  return { ...plan, floors: plan.floors.map((fl) => {
+    const rooms = fl.rooms.filter((r) => !r.unit || keep.has(r.unit));
+    if (rooms.length === fl.rooms.length) return fl;
+    const ids = new Set(rooms.map((r) => r.id));
+    const mine = (x: { room_ids: string[] }) => !x.room_ids.length || x.room_ids.some((id) => ids.has(id));
+    const inside = (pt: Pt) => { const r = fl.rooms.find((q) => pointInPoly(pt, q.polygon)); return !r || ids.has(r.id); };
+    const mid = (ps: Pt[]): Pt => [ps.reduce((a, q) => a + q[0], 0) / ps.length, ps.reduce((a, q) => a + q[1], 0) / ps.length];
+    return {
+      ...fl, rooms, walls: fl.walls.filter(mine), openings: fl.openings.filter(mine),
+      fixtures: fl.fixtures.filter((x) => (x.room_id ? ids.has(x.room_id) : inside(x.center))),
+      stairs: fl.stairs.filter((st) => inside(mid(st.polygon))),
+    };
+  }) };
+}
