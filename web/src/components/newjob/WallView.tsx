@@ -37,7 +37,9 @@ export function wallFromInside(poly: Pt[], e: number): Seg {
   return ux * rx + uy * ry >= 0 ? [a, b] : [b, a];
 }
 
-export function WallView({ floor, room, edge, height = RULES.ceiling as number, units = "ft", addOnOpen, onAdded, onChange, onClose, onEdge, armed, onPlace }: {
+export function WallView({ floor, room, edge, height = RULES.ceiling as number, units = "ft", addOnOpen, onAdded, onChange, onClose, onEdge, armed, onPlace, nums }: {
+  /** each item's number in its room (lib/plan/numbers.ts) */
+  nums?: Map<SketchFixture, number>;
   floor: SketchFloor; room: number; edge: number; height?: number; units?: Units;
   /** add this as soon as the wall opens (picked from the plan's Doors & windows menu) */
   addOnOpen?: "balcony" | null; onAdded?: () => void;
@@ -276,7 +278,7 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
         {outside.map(([a, b], k) => <rect key={k} x={a} y={-height} width={b - a} height={height} fill="#d6c9b0" />)}
         <line x1={-pad} y1={0} x2={L + pad} y2={0} stroke="#9c978d" strokeWidth={20} />
         {things.map((it) => {
-          const f = floor.fixtures![it.i], b = bottomOf(f), t = topOf(f), on = !!sel && same(it, sel), label = f.name || CATALOG[f.kind]?.label || f.kind;
+          const f = floor.fixtures![it.i], b = bottomOf(f), t = topOf(f), on = !!sel && same(it, sel), label = `${nums?.has(f) ? `#${nums.get(f)} ` : ""}${f.name || CATALOG[f.kind]?.label || f.kind}`;
           return (
             <g key={`f${it.i}`} onPointerDown={(e) => down(e, it)} style={{ cursor: "move" }}>
               {f.cab ? <CabinetFront f={f} x0={it.x0} x1={it.x1} on={on} fs={fs} /> : <>
@@ -335,7 +337,7 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
         {!armed && !sel && !note && <span className="text-muted">Drag a door, window or piece of furniture along the wall (windows and furniture up and down too). Pick one to change its size or remove it.</span>}
         {selThing && (
           <>
-            <span className="font-medium">{selThing.name || CATALOG[selThing.kind]?.label || selThing.kind}</span>
+            <span className="font-medium">{nums?.has(selThing) ? `#${nums.get(selThing)} ` : ""}{selThing.name || CATALOG[selThing.kind]?.label || selThing.kind}</span>
             <Len label="Width" mm={selThing.width_mm ?? 600} units={units} onStart={() => onChange(floor)} onSet={(v) => v >= 100 && setThing({ width_mm: v })} />
             <Len label="Height" mm={topOf(selThing) - bottomOf(selThing)} units={units} onStart={() => onChange(floor)} onSet={(v) => v >= 50 && bottomOf(selThing) + v <= height && setThing({ height_mm: v })} />
             <Len label="Off the floor" mm={bottomOf(selThing)} units={units} onStart={() => onChange(floor)} onSet={(v) => topOf(selThing) - bottomOf(selThing) + v <= height && setThing({ elevation_mm: v || undefined })} />

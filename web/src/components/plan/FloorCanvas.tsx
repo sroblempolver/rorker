@@ -11,6 +11,8 @@ import { runOf, studsAlong, type BuildLook } from "@/lib/plan/build";
 import { FRAMING } from "@/lib/plan/rules";
 import { DraftFlag, MarkDot, PinFlag, PlanDefs, useHoldToPin, useWorldDrag } from "./svg";
 import { useMarks } from "@/lib/plan/marks";
+import { itemNumbers } from "@/lib/plan/numbers";
+import { ItemBadge, badgeSpot } from "./ItemBadge";
 import { HIDDEN_KINDS, TOP_FILL, fixtureBottom, fixtureTop, isWallMounted } from "./fixtures";
 import { ITEM_ICON } from "./items";
 import type { Controls, PinTarget, ScreenPoint } from "./target";
@@ -176,6 +178,7 @@ export function FloorCanvas(props: Props) {
 
   const [hover, setHover] = useState<string | null>(null);
   const { drag, start } = useWorldDrag(pz.toWorld);
+  const nums = useMemo(() => itemNumbers(floor.fixtures, (x) => x.room_id), [floor.fixtures]);
   const shapes = useMemo(() => new Map(floor.fixtures.map((f) => [f.id, footprint(f)])), [floor.fixtures]);
   const sides = useMemo(() => (room ? roomSides(floor, room) : []), [floor, room]);
   const floorPins = useMemo(
@@ -328,6 +331,12 @@ export function FloorCanvas(props: Props) {
               {live && <text x={f.center[0]} y={b[1] - 10 * lw} textAnchor="middle" fontSize={11 * lw} fontFamily="var(--font-mono)" fill="#55b2ff" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>moved {inches(Math.hypot(live.dx, live.dy))}</text>}
             </g>
           );
+        })}
+        {/* each item's number in its room */}
+        {floor.fixtures.filter((f) => !inert(f) && nums.has(f)).map((f) => {
+          const b = f.bbox, hung = isWallMounted(f);
+          if (Math.min(b[2] - b[0], b[3] - b[1]) < 9 * fs / 13 * 1.4) return null;
+          return <ItemBadge key={`n${f.id}`} n={nums.get(f)!} r={fs * 0.62} hung={hung} at={badgeSpot(f.center, [(b[2] - b[0]) / 2, (b[3] - b[1]) / 2], f.facing, hung)} />;
         })}
       </g>
 

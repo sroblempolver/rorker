@@ -16,6 +16,8 @@ import { MARK_COLORS, type Mark } from "@/lib/plan/pointing";
 import { markFor } from "@/lib/plan/places";
 import { today } from "@/lib/dates";
 import { RULES } from "@/lib/plan/rules";
+import { itemNumbers, numberIn } from "@/lib/plan/numbers";
+import { widthAxis } from "@/lib/plan/edits";
 import { inches } from "@/lib/measure";
 
 /** `plan` is the plan as drawn; `edits` are the changes made in the app on top of it (moved, added, removed). */
@@ -61,7 +63,7 @@ export interface Changes { any: boolean; marks?: Mark[]; focus?: string | null }
 export const TOOLS: ToolSpec[] = [
   { name: "list_jobs", description: "List the jobs this person can see: id, name, address, status, open pins and current stage.", input_schema: { type: "object", properties: {} } },
   { name: "job_overview", description: "One job at a glance: stages, floors and rooms (with ids), open pins (number, kind, title, status, due date, who is tagged, where).", input_schema: { type: "object", properties: { job: JOB } } },
-  { name: "find_in_plan", description: "Find rooms, walls, doors, windows and objects in a job's plan by name, kind, room or id (\"kitchen sink\", \"master bedroom\", \"G-F46\"). Returns ids to use with other tools.", input_schema: { type: "object", properties: { job: JOB, query: { type: "string" } }, required: ["query"] } },
+  { name: "find_in_plan", description: "Find rooms, walls, doors, windows and objects in a job's plan by name, kind, room, number or id (\"kitchen sink\", \"master bedroom\", \"kitchen #3\", \"G-F46\"). Every cabinet and item has a number in its room, shown on the plan. Returns ids to use with other tools.", input_schema: { type: "object", properties: { job: JOB, query: { type: "string" } }, required: ["query"] } },
   {
     name: "add_pin", description: "Add a pin (task, issue, note or material) to a job, on a room or object when given its id. Due date defaults to today. Tag people by name.",
     input_schema: { type: "object", properties: {
@@ -107,8 +109,8 @@ export const TOOLS: ToolSpec[] = [
     }, required: ["kind"] } } }, required: ["room", "objects"] },
   },
   {
-    name: "change_object", description: "Move, turn, resize, rename or re-seat one object. Move by mm east/south (negative for west/north), or to a new centre; turn it to face a side or another object; put it on something (`on`), or set its height above the floor.",
-    input_schema: { type: "object", properties: { job: JOB, element_id: { type: "string" }, move_east_mm: { type: "number" }, move_south_mm: { type: "number" }, to_x: { type: "number" }, to_y: { type: "number" },
+    name: "change_object", description: "Move, turn, resize, rename or re-seat one object. Name it by id, or by its number in its room (every cabinet and item has one, shown on the plan: element_id \"3\" with room \"kitchen\"). Move by mm east/south (negative for west/north), or to a new centre; turn it to face a side or another object; put it on something (`on`), or set its height above the floor. Width, depth and height can be changed on anything; a cabinet's height is its box height (without the countertop). A cabinet that would run into its neighbour or past the wall isn't changed: you get the room there is and the choices (the size that fits exactly, made to order, or a stock size with a filler); ask the person which, then call again with that width.",
+    input_schema: { type: "object", properties: { job: JOB, element_id: { type: "string", description: "Its id, or its number in the room (\"3\", \"#3\")" }, room: { type: "string", description: "The room, when naming it by number" }, move_east_mm: { type: "number" }, move_south_mm: { type: "number" }, to_x: { type: "number" }, to_y: { type: "number" },
       facing: SIDE, face_toward: { type: "string", description: "Id of what it should face" }, on: { type: "string", description: "Id of what it should sit on" }, height_above_floor_mm: { type: "number" },
       width_mm: { type: "number" }, depth_mm: { type: "number" }, height_mm: { type: "number" }, weight_kg: { type: "number" }, name: { type: "string" } }, required: ["element_id"] },
   },
@@ -132,6 +134,7 @@ export function instructions(me: AssistantBackend["me"], ctx: AssistantContext):
     "Never give out information beyond what the tools return for this person. Don't reveal anything about other companies, and don't repeat personal contact details unless this person is an admin and asked for them.",
     "Never say which AI model or company powers you; you are the Rorker assistant.",
     "Where things are: left and right of an object always mean as seen standing in front of it, facing it (the way you'd use a stove, a sink or a cabinet), not as seen on the plan. \"The cabinet right of the stove\" is the one at your right hand when you face the stove. Use whats_around to find it. Above and below mean height on the wall. North, south, east and west follow the plan (north is up). If two things still fit, ask one short question naming them by where they are.",
+    "Numbers: every cabinet and item has a number in its room, shown on the plan in a small round tag (orange for things on the floor, dark for wall cabinets). When the person says \"cabinet 3\" or \"number 3\", it's that number in the room they mean (the one they're looking at, or the kitchen for cabinets); call it by its number back to them (\"Cabinet #3 is now 34\" wide.\").",
     "Changing the plan: you can add, move, turn, resize and remove furniture, appliances and fixtures, and rename rooms (room_layout first, then add_objects, change_object, remove_objects, rename_room). Walls, rooms' shapes, doors and windows can't be changed here yet: say so in one sentence and offer to add a task pin for it.",
     "Real things, real sizes: every object has a real width, depth, height, weight and mounting height, and drawings never show furniture heights, so add_objects fills in the usual ones for each kind. Pick the kind that is the actual thing (a computer is kind computer, never a box or other). A computer, monitor, laptop, printer, table lamp, microwave, coffee machine or TV sits on a desk, counter or sideboard, never on the floor: put it `on` that piece (add the desk first if the room has none, or ask). Chairs go at their desk or table facing it, bar stools at the counter or island facing it, sofas and armchairs face the TV, fireplace or coffee table, beds, cabinets, wardrobes and desks stand with their backs to a wall facing into the room, wall cabinets, mirrors, pictures and shelves hang on a wall at their usual height. Leave facing out and it is worked out that way; give it only when the person asks for something else.",
     "Something not in the kind list (a rowing machine, a pool table, a kayak rack): don't settle for a box. Work out from what you know (or look it up with web search when you can) what it really looks like, its real size and weight, then add it as kind other with its name and parts: simple boxes, cylinders and spheres at real sizes and colours that together look like the real thing. Only when you truly can't tell what it is, ask what it looks like.",
@@ -146,6 +149,54 @@ export function instructions(me: AssistantBackend["me"], ctx: AssistantContext):
 
 
 // ---------------------------------------------------------------------------------------- where things are
+
+// ------------------------------------------------------------------------------------------- items by number
+
+/** An object's id from its id, or its number in a room ("3", "#3", "cabinet 3" with the room). */
+function itemId(plan: Plan | null | undefined, ref: string, room: string): string {
+  if (!plan || plan.floors.some((f) => f.fixtures.some((x) => x.id === ref))) return ref;
+  const n = numberIn(ref);
+  if (n == null) return ref;
+  const want = norm(room || ref.replace(/#?\s*\d+\s*$/, "").replace(/\b(cabinet|item|number|no)\b/gi, ""));
+  const hits: { id: string; where: string }[] = [];
+  for (const f of plan.floors) {
+    const nums = itemNumbers(f.fixtures, (x) => x.room_id);
+    for (const [x, k] of nums) {
+      if (k !== n) continue;
+      const r = f.rooms.find((q) => q.id === x.room_id);
+      if (want && !(r && (norm(r.name).includes(want) || norm(r.type).includes(want) || r.id.toLowerCase() === want))) continue;
+      hits.push({ id: x.id, where: `${x.name} in ${r?.name ?? "no room"}` });
+    }
+  }
+  if (hits.length === 1) return hits[0].id;
+  if (!hits.length) throw new Error(`No #${n}${want ? ` in ${want}` : ""}. Use find_in_plan or room_layout.`);
+  throw new Error(`There's a #${n} in more than one room (${hits.map((h) => h.where).join("; ")}). Say which room.`);
+}
+
+/** The room a cabinet has along its run: from the cabinet or wall on its one side to the one on the other. */
+function runRoom(f: Plan["floors"][number], x: Plan["floors"][number]["fixtures"][number], nums: Map<Plan["floors"][number]["fixtures"][number], number>) {
+  const call = (y: typeof x) => `${nums.has(y) ? `#${nums.get(y)} ` : ""}${y.name}`;
+  const ax = widthAxis(x), a = ax === "x" ? 0 : 1, o = 1 - a;
+  const hung = bottomOf(x) > 600;
+  const lo0 = x.bbox[a], hi0 = x.bbox[a + 2], c = (lo0 + hi0) / 2;
+  const r = f.rooms.find((q) => q.id === x.room_id);
+  const rb = r ? bboxOf(r.polygon) : null;
+  let lo = rb ? rb[a] + 60 : -Infinity, hi = rb ? rb[a + 2] - 60 : Infinity, left = "the wall", right = "the wall";
+  let lx: typeof x | null = null, rx: typeof x | null = null;
+  for (const y of f.fixtures) {
+    if (y === x || y.kind === "door_leaf" || y.kind === "part" || y.room_id !== x.room_id || y.on === x.id) continue;
+    if ((bottomOf(y) > 600) !== hung) continue;
+    // in the same run: overlapping it front to back
+    if (Math.min(y.bbox[o + 2], x.bbox[o + 2]) - Math.max(y.bbox[o], x.bbox[o]) < 50) continue;
+    if (y.bbox[a + 2] <= c && y.bbox[a + 2] > lo) { lo = y.bbox[a + 2]; left = call(y); lx = y; }
+    if (y.bbox[a] >= c && y.bbox[a] < hi) { hi = y.bbox[a]; right = call(y); rx = y; }
+  }
+  // the cabinets either side, which could give up some width
+  const next = [lx, rx].filter((y): y is typeof x => !!y?.cab).map((y) => ({ name: call(y), w: y.bbox[a + 2] - y.bbox[a] }));
+  if (!Number.isFinite(lo)) lo = lo0;
+  if (!Number.isFinite(hi)) hi = hi0;
+  return { lo, hi, c, w: hi0 - lo0, left, right, next };
+}
 
 const HEAD = ["east", "south", "west", "north"];
 /** A compass word for a direction in the plan frame (x right, y down, north up). */
@@ -326,7 +377,7 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
     case "find_in_plan": {
       const d = await resolveJob(b, ctx, input.job);
       if (!d.plan) return "This job has no plan yet.";
-      const q = norm(str(input.query));
+      const q = norm(str(input.query).replace(/#\s*(\d+)/g, " no$1 "));
       const words = q.split(" ").filter(Boolean);
       const out: { id: string; what: string; room: string | null; floor: string; score: number }[] = [];
       for (const f of d.plan.floors) {
@@ -337,7 +388,8 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
           if (score > 0 && score >= Math.min(words.length, 2)) out.push({ id, what: `${label}${kind && !norm(label).includes(norm(kind)) ? ` (${kind.replace(/_/g, " ")})` : ""}`, room, floor: f.name, score });
         };
         for (const r of f.rooms) consider(r.id, `${r.name}, in ${partOf(f, labelPoint(r.polygon))}`, `room ${r.type}`, null);
-        for (const x of f.fixtures) if (x.kind !== "door_leaf" && x.kind !== "part") { const n = frontOf(f, x); consider(x.id, `${x.name}, front faces ${heading(n[0], n[1])}`, x.kind, roomName(x.room_id)); }
+        const nums = itemNumbers(f.fixtures, (x) => x.room_id);
+        for (const x of f.fixtures) if (x.kind !== "door_leaf" && x.kind !== "part") { const n = frontOf(f, x), no = nums.get(x); consider(x.id, `${no ? `#${no} ` : ""}${x.name}, front faces ${heading(n[0], n[1])}`, `${x.kind}${no ? ` ${no} no${no}` : ""}`, roomName(x.room_id)); }
         for (const o of f.openings) consider(o.id, o.name, o.kind, o.room_ids.map(roomName).filter(Boolean).join(" / ") || null);
       }
       return out.sort((a, b2) => b2.score - a.score).slice(0, 15).map(({ score: _s, ...r }) => r); // eslint-disable-line @typescript-eslint/no-unused-vars
@@ -444,11 +496,11 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
           wall: s.label, runs_from: s.a.map(Math.round), to: s.b.map(Math.round), length_mm: Math.round(s.length),
           doors_and_windows: s.segments.filter((g) => g.kind === "opening").map((g) => ({ id: g.id, what: (g.el as { kind: string }).kind.replace(/_/g, " "), from_mm: Math.round(g.from), to_mm: Math.round(g.to) })),
         })),
-        objects: f.fixtures.filter((x) => x.room_id === r.id && x.kind !== "door_leaf" && x.kind !== "part").map((x) => {
+        objects: f.fixtures.filter((x) => x.room_id === r.id && x.kind !== "door_leaf" && x.kind !== "part").map((x, _i, all) => {
           const n = frontOf(f, x), sz = fixtureSize(x);
           const sup = supportOf(f.fixtures, x), bot = bottomOf(x);
           return {
-            id: x.id, what: x.name, kind: x.kind, centre: x.center.map(Math.round), width_mm: Math.round(sz.width), depth_mm: Math.round(sz.depth), height_mm: Math.round(topOf(x) - bot), faces: heading(n[0], n[1]),
+            id: x.id, number: itemNumbers(all, () => r.id).get(x), what: x.name, ...(x.spec ? { code: x.spec } : {}), kind: x.kind, centre: x.center.map(Math.round), width_mm: Math.round(sz.width), depth_mm: Math.round(sz.depth), height_mm: Math.round(topOf(x) - bot), faces: heading(n[0], n[1]),
             ...(sup ? { sits_on: `${sup.name} (${sup.id}), top at ${Math.round(bot)} mm (${inches(bot)})` } : bot ? { bottom_above_floor_mm: Math.round(bot) } : {}), ...(weightOf(x) ? { weight_kg: weightOf(x) } : {}),
           };
         }),
@@ -611,10 +663,42 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
     }
     case "change_object": {
       const d = await resolveJob(b, ctx, input.job);
-      const id = str(input.element_id);
+      const id = itemId(d.plan, str(input.element_id), str(input.room));
       const fl = d.plan?.floors.find((q) => q.fixtures.some((x) => x.id === id));
       const hit = fl?.fixtures.find((x) => x.id === id);
       if (!fl || !hit) throw new Error(`No object ${id} in this plan. Use find_in_plan or room_layout.`);
+      const no = itemNumbers(fl.fixtures, (x) => x.room_id).get(hit);
+      // a cabinet fits its run: a new width that runs into the next one or past the wall isn't made, the person picks
+      const fit = hit.cab && num(input.width_mm) > 0 ? runRoom(fl, hit, itemNumbers(fl.fixtures, (x) => x.room_id)) : null;
+      let shiftAlong = 0, gapNote: string | null = null;
+      if (fit) {
+        const want = Math.round(num(input.width_mm)), free = fit.hi - fit.lo;
+        if (want > free + 2) {
+          const stock = Math.floor(free / 76.2) * 76.2;
+          return {
+            not_changed: `${no ? `Cabinet #${no}` : hit.name} (${id}) can't be ${inches(want)} wide: there's ${inches(free)} for it between ${fit.left} and ${fit.right}.`,
+            choices: [
+              ...(free - fit.w > 6 ? [`Make it ${inches(free)} wide, made to order (fits exactly)`] : []),
+              ...fit.next.filter((y) => y.w - (want - free) >= 228).map((y) => `Make ${y.name} ${inches(want - free)} narrower (${inches(y.w - (want - free))}) to make room`),
+              ...(stock >= 228 && free - stock > 6 ? [`A stock ${inches(stock)} cabinet and a ${inches(free - stock)} filler`] : []),
+              "Leave it as it is",
+            ],
+            ask: "Ask the person which they want, then call change_object again with that width.",
+          };
+        }
+        // centred where it is when that fits, else slid to stay inside its run
+        const c = fit.c, lo = Math.max(fit.lo, Math.min(c - want / 2, fit.hi - want));
+        shiftAlong = Math.round(lo + want / 2 - c);
+        const gap = Math.round(free - want);
+        if (want < fit.w - 2 && gap > 6) gapNote = `leaves ${inches(gap)} open in the run: offer a filler, or to slide the cabinets next to it over`;
+      }
+      if (shiftAlong) {
+        const ax = widthAxis(hit);
+        input = { ...input, [ax === "x" ? "move_east_mm" : "move_south_mm"]: num(input[ax === "x" ? "move_east_mm" : "move_south_mm"]) + shiftAlong };
+      }
+      if (hit.cab && num(input.height_mm) > 0 && bottomOf(hit) + num(input.height_mm) > (fl.height_mm || RULES.ceiling)) {
+        return { not_changed: `${no ? `Cabinet #${no}` : hit.name} can't be ${inches(num(input.height_mm))} tall: it would go through the ceiling (${inches((fl.height_mm || RULES.ceiling) - bottomOf(hit))} above its bottom).` };
+      }
       const find = (ref: string) => fl.fixtures.find((x) => x.id === ref) ?? null;
       const prev = d.edits?.[id] ?? {};
       const next: ElementEdit = { ...prev };
@@ -657,7 +741,7 @@ export async function runTool(b: AssistantBackend, ctx: AssistantContext, name: 
       changed.any = true;
       changed.marks = [{ floor_id: fl.id, x: Math.round(hit.center[0] + dx), y: Math.round(hit.center[1] + dy), z: Math.round(lift ?? bottomOf(hit)) + Math.round(topOf(hit) - bottomOf(hit)), label: hit.name, color: MARK_COLORS[5][1], id }];
       changed.focus = id;
-      return { changed: `${hit.name} (${id})`, ...(dx || dy ? { moved_east_mm: Math.round(dx), moved_south_mm: Math.round(dy) } : {}), ...(facing != null ? { faces: facingWord(facing) } : {}), ...(sup ? { now_on: `${sup.name} (${sup.id})` } : {}), ...(lift != null ? { bottom_above_floor_mm: Math.round(lift) } : {}) };
+      return { changed: `${no ? `#${no} ` : ""}${hit.name} (${id})`, ...(num(input.width_mm) > 0 || num(input.depth_mm) > 0 || num(input.height_mm) > 0 ? { size: [num(input.width_mm) > 0 && `${inches(num(input.width_mm))} wide`, num(input.depth_mm) > 0 && `${inches(num(input.depth_mm))} deep`, num(input.height_mm) > 0 && `${inches(num(input.height_mm))} tall`].filter(Boolean).join(", ") } : {}), ...(gapNote ? { note: gapNote } : {}), ...(dx || dy ? { moved_east_mm: Math.round(dx), moved_south_mm: Math.round(dy) } : {}), ...(facing != null ? { faces: facingWord(facing) } : {}), ...(sup ? { now_on: `${sup.name} (${sup.id})` } : {}), ...(lift != null ? { bottom_above_floor_mm: Math.round(lift) } : {}) };
     }
     case "remove_objects": {
       const d = await resolveJob(b, ctx, input.job);

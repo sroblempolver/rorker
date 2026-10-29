@@ -1,5 +1,6 @@
 // Changes made in the app (an object moved, resized, renamed, given a product link) applied on top of
 // the plan as read, so every view draws the job as it is now.
+import { cabBoxHeight, cabinetFixture } from "./cabinets";
 import type { AddedObject, ElementEdit } from "@/lib/data/types";
 import { arrange, linkSupports } from "./arrange";
 import { applyHouseEdits } from "./house";
@@ -25,7 +26,7 @@ function turned(f: Fixture, facing: number): Fixture {
   const { width, depth } = fixtureSize(f);
   return { ...addedFixture(f.id, { floor_id: "", room_id: f.room_id, kind: f.kind, name: f.name, center: f.center, width, depth, facing, height_mm: f.height_mm }), ...pick(f), facing };
 }
-const pick = (f: Fixture) => ({ source: f.source, source_ref: f.source_ref, confidence: f.confidence, elevation_mm: f.elevation_mm, front: f.front, spec: f.spec, product_name: f.product_name, product_url: f.product_url, notes: f.notes, weight_kg: f.weight_kg, parts: f.parts, on: f.on, on_at: f.on_at });
+const pick = (f: Fixture) => ({ cab: f.cab, no: f.no, source: f.source, source_ref: f.source_ref, confidence: f.confidence, elevation_mm: f.elevation_mm, front: f.front, spec: f.spec, product_name: f.product_name, product_url: f.product_url, notes: f.notes, weight_kg: f.weight_kg, parts: f.parts, on: f.on, on_at: f.on_at });
 
 /** Which plan axis a fixture's width runs along: across its front when it faces somewhere. */
 export function widthAxis(f: Fixture): "x" | "y" {
@@ -71,6 +72,13 @@ function editFixture(f0: Fixture, e: ElementEdit): Fixture {
   }
   if (e.dz) out.elevation_mm = Math.max(0, (f.elevation_mm ?? 0) + e.dz);
   if (e.height_mm) out.height_mm = e.height_mm;
+  // a cabinet is made again at its new size: its doors, drawers, toe kick and its code (B33, W3630)
+  if (f.cab && (e.width || e.depth || e.height_mm)) {
+    const h = e.height_mm ?? cabBoxHeight(f.cab, f.height_mm ?? 900);
+    Object.assign(out, cabinetFixture(f.cab, e.width ?? width, e.depth ?? depth, h));
+    // a name that is its code ("B27 base") takes the new code
+    if (!e.name && f.spec && out.spec && out.name.startsWith(f.spec)) out.name = out.spec + out.name.slice(f.spec.length);
+  }
   if (e.name) out.name = e.name;
   if (e.kind) out.kind = e.kind;
   if (e.spec) out.spec = e.spec;
