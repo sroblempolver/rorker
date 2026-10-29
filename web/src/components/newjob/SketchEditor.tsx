@@ -18,6 +18,9 @@ import { tidyStroke } from "@/lib/plan/pen";
 import { INCH, fmtArea, fmtLen, parseLength, roundLen, type Units } from "@/lib/plan/units";
 import type { IntakePart } from "@/lib/intake/files";
 import { StandardsPanel } from "./StandardsPanel";
+import { CabinetEdit, CabinetPanel } from "./CabinetPanel";
+import { DEFAULT_PICK, cabinetClick, slideCabinet, type CabPick } from "@/lib/plan/cabinetLayout";
+import { cabCode, defaults } from "@/lib/plan/cabinets";
 
 /** A picture of the drawing to trace over. `mmPerPx` when its scale is known (an AutoCAD drawing). */
 export interface Picture { name: string; url: string; mmPerPx?: number }
@@ -46,7 +49,7 @@ const DOOR_KINDS = [["door", "Door"], ["double_door", "Double door"], ["sliding_
 const SIDES: Side[] = ["north", "east", "south", "west"];
 const OPP: Record<Side, Side> = { north: "south", south: "north", east: "west", west: "east" };
 
-type Tool = "select" | "room" | "pen" | "split" | "door" | "window" | "balcony" | "thing" | "scale" | "match" | "picture";
+type Tool = "select" | "room" | "pen" | "split" | "door" | "window" | "balcony" | "thing" | "cabinet" | "scale" | "match" | "picture";
 const TOOLS: { id: Tool; label: string; key: string; help: string; menu?: boolean; picture?: boolean; more?: boolean }[] = [
   { id: "select", label: "Select", key: "v", help: "Click a room, door, window or piece of furniture to change it. Drag a room to move it, a corner to reshape it, or a wall to slide it (the room next door follows). Click a wall of the picked room to see it from the side. Arrow keys nudge. Drag empty space to look around, scroll to zoom." },
   { id: "pen", label: "Walls", key: "e", help: "Draw a room's walls with the mouse or your finger, all the way round. Wobbly lines come out straight and nearly square corners come out square; a wall drawn on a slant keeps its slant. Then type the exact sizes." },
@@ -55,6 +58,7 @@ const TOOLS: { id: Tool; label: string; key: string; help: string; menu?: boolea
   { id: "window", label: "Window", key: "w", menu: true, help: "Click an outside wall of a room to add a window there. Click again for another." },
   { id: "balcony", label: "Balcony", key: "b", menu: true, help: "Click an outside wall of a room. Upstairs that adds a balcony with a patio door onto it; on the ground floor, a patio door out to the garden." },
   { id: "thing", label: "Furniture", key: "f", help: "Cabinets, sinks, toilets, beds, appliances. Pick one, then click where it goes. Near a wall it backs onto the wall and faces the room." },
+  { id: "cabinet", label: "Cabinets", key: "c", help: "Kitchen and bath cabinets at stock sizes (B18, W3030, SB36, vanities). Pick one and click near a wall, or fill a whole wall in one click." },
   { id: "scale", label: "Set scale", key: "k", picture: true, more: true, help: "Make the drawing underneath the right size: click both ends of something you know the length of (a wall, a dimension line), then type how long it is." },
   { id: "match", label: "Line up", key: "l", picture: true, more: true, help: "Lines the drawing up with the rooms: click a corner on the picture, then the room corner it should sit on. Do it for two corners far apart." },
   { id: "picture", label: "Move picture", key: "p", picture: true, more: true, help: "Drag the picture underneath to move it." },
@@ -97,6 +101,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   const [wallAdd, setWallAdd] = useState<"balcony" | null>(null);
   const [sel, setSel] = useState<Sel>(null);
   const [thing, setThing] = useState("kitchen_sink");
+  // what the Cabinets tool puts down next
+  const [cabPick, setCabPick] = useState<CabPick>(DEFAULT_PICK);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [clicks, setClicks] = useState<Pt[]>([]);
   const [lengthText, setLengthText] = useState("");
@@ -402,6 +408,9 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       const f0 = (floor.fixtures ?? [])[drag.i], ri = roomAt(c);
       // slides along a wall it's dragged near, back to the wall
       const hug = f0 && ri >= 0 && CATALOG[f0.kind]?.mount !== "ceiling" ? hugWall(floor.rooms[ri].polygon, c, f0.width_mm ?? 600, f0.depth_mm ?? 600, 250) : null;
+      // a cabinet slides along the wall's inside face and lines up with its neighbours
+      const slid = f0?.cab ? slideCabinet(floor, drag.i, c) : null;
+      if (slid) { setFloor({ ...floor, fixtures: (floor.fixtures ?? []).map((f, i) => (i === drag.i ? slid : f)) }, false); return; }
       setFloor({ ...floor, fixtures: (floor.fixtures ?? []).map((f, i) => (i === drag.i ? { ...f, center: hug?.center ?? c, ...(hug ? { facing: hug.facing } : {}), room: ri >= 0 ? floor.rooms[ri].name : f.room } : f)) }, false);
     } else if (drag.k === "picture" && bg) {
       setBgs({ ...bgs, [fi]: { ...bg, at: [drag.orig[0] + p[0] - drag.from[0], drag.orig[1] + p[1] - drag.from[1]] } });
@@ -498,6 +507,13 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       const fx = { kind: thing, name: spec?.label, room: ri >= 0 ? floor.rooms[ri].name : undefined, center: hug?.center ?? c, width_mm: w, depth_mm: dp, facing: hug?.facing ?? facingFor(c, ri) };
       setFloor({ ...floor, fixtures: [...(floor.fixtures ?? []), fx] });
       setSel({ t: "thing", i: (floor.fixtures ?? []).length });
+    } else if (tool === "cabinet") {
+      // a click on a cabinet picks it; anywhere else puts one in
+      const ti = thingAt(p);
+      if (cabPick.mode === "place" && ti >= 0 && floor.fixtures![ti].cab) { setSel({ t: "thing", i: ti }); return; }
+      const r = cabinetClick(floor, p, cabPick);
+      if (r.note) setNote(r.note);
+      if (r.floor) { setFloor(r.floor); setSel(r.sel != null ? { t: "thing", i: r.sel } : null); }
     } else if (tool === "scale") {
       setClicks((c) => (c.length >= 2 ? [p] : [...c, p]));
     } else if (tool === "match") {
@@ -639,9 +655,9 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
               const tip: Pt = f.facing === "north" ? [cx, cy - d / 2] : f.facing === "south" ? [cx, cy + d / 2] : f.facing === "east" ? [cx + w / 2, cy] : f.facing === "west" ? [cx - w / 2, cy] : [cx, cy];
               return (
                 <g key={i}>
-                  <rect x={cx - w / 2} y={cy - d / 2} width={w} height={d} fill="#f4efe6" fillOpacity={0.85} stroke={on ? "#ff6a1f" : "#17181b"} strokeWidth={(on ? 3 : 1.5) * px} />
-                  {f.facing && <line x1={cx} y1={cy} x2={tip[0]} y2={tip[1]} stroke="#ff6a1f" strokeWidth={2 * px} />}
-                  {Math.min(w, d) / px > 26 && <text x={cx} y={cy} fontSize={fontMm * 0.7} textAnchor="middle" dominantBaseline="middle" fill="#17181b" style={{ pointerEvents: "none" }}>{(CATALOG[f.kind]?.label ?? f.kind).split(" ")[0]}</text>}
+                  <rect x={cx - w / 2} y={cy - d / 2} width={w} height={d} fill="#f4efe6" fillOpacity={f.cab && f.elevation_mm ? 0.25 : 0.85} stroke={on ? "#ff6a1f" : "#17181b"} strokeWidth={(on ? 3 : 1.5) * px} strokeDasharray={f.cab && f.elevation_mm ? `${5 * px} ${3 * px}` : undefined} />
+                  {f.facing && (!f.cab || on) && <line x1={cx} y1={cy} x2={tip[0]} y2={tip[1]} stroke="#ff6a1f" strokeWidth={2 * px} />}
+                  {Math.min(w, d) / px > 26 && <text x={f.cab && !f.elevation_mm ? (cx + tip[0]) / 2 : cx} y={f.cab && !f.elevation_mm ? (cy + tip[1]) / 2 : cy} fontSize={fontMm * 0.7} fillOpacity={f.cab && f.elevation_mm ? 0.7 : 1} textAnchor="middle" dominantBaseline="middle" fill="#17181b" style={{ pointerEvents: "none" }}>{f.cab ? cabCode(f.cab, f.width_mm ?? 600, f.depth_mm ?? 600, f.height_mm ?? defaults(f.cab.fam).h) : (CATALOG[f.kind]?.label ?? f.kind).split(" ")[0]}</text>}
                 </g>
               );
             })}
@@ -675,6 +691,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           <p className="text-muted leading-snug">{TOOLS.find((t) => t.id === tool)?.help}</p>
           {note && <p className="text-amber">{note}</p>}
 
+          {tool === "cabinet" && !fix && <CabinetPanel pick={cabPick} onPick={setCabPick} floor={floor} units={lu} />}
           {tool === "thing" && (
             <div className="space-y-2">
               {THINGS.map((g) => (
@@ -762,7 +779,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
               <button className="btn btn-sm btn-ghost text-red" onClick={deleteSel}>Delete windows</button>
             </div>
           )}
-          {fix && sel && (
+          {fix && sel && fix.cab && <CabinetEdit fx={fix} units={lu} onDelete={deleteSel} onChange={(nx) => setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? nx : f)) })} />}
+          {fix && sel && !fix.cab && (
             <div className="space-y-2">
               <p className="eyebrow">{CATALOG[fix.kind]?.label ?? fix.kind}</p>
               <select className="input !h-9" value={fix.kind} aria-label="What it is" onChange={(e) => { const s = CATALOG[e.target.value]; setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? { ...f, kind: e.target.value, name: s?.label, width_mm: s?.w ?? f.width_mm, depth_mm: s?.d ?? f.depth_mm } : f)) }); }}>
