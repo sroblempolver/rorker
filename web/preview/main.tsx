@@ -104,7 +104,7 @@ function seed(owner: Owner = { name: "Company owner", email: "owner@demobuilders
     body: "Three samples are on the counter. Tell us which one by Friday so we can order it.", status: "open", priority: 1, due_date: null, tagged: [client], close_requirement: "confirm",
     stage_id: null, links: [], created_by: null, created_at: now(), closed_at: null, comment_count: 0 });
   if (materials.lines[0]) materials.lines.push({ ...materials.lines[0], id: "mlc", job_id: jobId, name: "Cabinet pulls (your pick)", qty: 22, unit: "ea", unit_cost: null, store: null, link: null, sku: null,
-    status: "to_buy", buyer: client, installer: null, task_id: null, pin_id: null, note: "128 mm centers", receipts: [], created_at: now() });
+    status: "to_buy", buyer: client, installer: null, task_id: null, pin_id: null, note: "5\" centers", receipts: [], created_at: now() });
   messages.set(jobId, [
     { id: "msg1", job_id: jobId, from: "contractor", author_name: owner.name, body: "Framing passed inspection today. Drywall starts Monday.", photos: [], created_at: new Date(Date.now() - 3_600_000).toISOString() },
     { id: "msg2", job_id: jobId, from: "client", author_name: "Sam and Priya Okafor", body: "@Bedroom 1 › Bed needs to be replaced, the frame is cracked. Can you take it out with the old carpet?", photos: [], created_at: now(),
