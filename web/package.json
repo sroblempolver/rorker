@@ -8,6 +8,7 @@
     "start": "next start -p ${PORT:-3000}",
     "lint": "eslint",
     "preview": "node preview/build.mjs",
+    "site": "node site/build.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

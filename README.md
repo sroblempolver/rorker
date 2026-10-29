@@ -94,3 +94,11 @@ schema but has not run against a live project yet; expect a short shakedown when
 
 `npm run preview` in `web/` builds the same screens into one HTML file on the sample house, with data
 in memory. It is what the shared preview link shows until the Railway site is up.
+
+## rorker.com (the marketing site)
+
+`web/site/` is the public website: one page with the app's own 3D house behind it. At the top a scripted
+cursor runs a 30-second explainer on the real house (`site/explainer.ts`); visitors can take the controls,
+and every section below changes the house live. `npm run site` in `web/` builds it into
+`web/site/dist/index.html` (plus icons). To show a new feature, add one entry at the top of
+`web/site/features.ts`: the feature cards, "What's new" and the counts all come from that list.

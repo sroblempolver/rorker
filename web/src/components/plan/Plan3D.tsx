@@ -873,6 +873,10 @@ export function Plan3D(p: Props) {
         camera.position.copy(controls.target).add(off);
       },
       home: () => frame(true),
+      rig: () => {
+        const t = three.current;
+        return t?.built ? { camera: t.camera, orbit: t.controls, canvas: t.renderer.domElement, floors: t.built.floors, centre: t.built.centre, radius: t.built.radius } : null;
+      },
     });
   }, [p.controls]); // eslint-disable-line react-hooks/exhaustive-deps
 
