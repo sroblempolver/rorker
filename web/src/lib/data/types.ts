@@ -88,7 +88,11 @@ export interface ItemInput { kind: ItemKind; label?: string | null; floor_id: st
 export type PinKind = "task" | "issue" | "note" | "material";
 /** A pin placed outside the floor plans: on the site, the front elevation, one wall seen from inside, or
  *  a point on the 3D building (roof, outside walls): `point` has x, y on the plan and z mm above the ground. */
-export interface PinAnchor { view: "site" | "exterior" | "wall" | "point"; side?: string; x: number; y: number; z?: number }
+export interface PinAnchor {
+  view: "site" | "exterior" | "wall" | "point"; side?: string; x: number; y: number; z?: number;
+  /** in 3D, the way the surface faces where the pin went in (x, y on the plan, z up), so it stands out of it */
+  n?: [number, number, number];
+}
 export type PinStatus = "open" | "in_progress" | "done";
 export interface Pin {
   id: string; job_id: string; number: number; element_id: string | null; floor_id: string | null;
