@@ -6,7 +6,8 @@ import type { Level } from "./PlanViewer";
 
 export function pinLevel(plan: Plan, pin: Pin): Level | null {
   if (pin.anchor?.view === "site" || pin.anchor?.view === "exterior") return { kind: pin.anchor.view };
-  if (pin.anchor?.view === "point") return { kind: "exterior" };
+  // a spot in 3D: the floor it was dropped on, or the outside for the roof
+  if (pin.anchor?.view === "point") return pin.floor_id && plan.floors.some((f) => f.id === pin.floor_id) ? { kind: "floor", floorId: pin.floor_id } : { kind: "exterior" };
   if (pin.anchor?.view === "wall" && pin.anchor.side) {
     const roomId = pin.anchor.side.split(":")[0];
     const f = plan.floors.find((x) => x.rooms.some((r) => r.id === roomId));
