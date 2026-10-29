@@ -58,6 +58,8 @@ export function ShareDialog({ api, members, pins, plan, onClose }: { api: Worksp
 
   const toggle = (id: string) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const scope = (l: ShareLink) => {
+    if (l.audience === "contractor") return l.taken_by ? `Your contractor: taken on by ${l.taken_by}` : "Your contractor: not opened yet";
+    if (l.audience === "client") return "Client page";
     const n = linkPins(l, pins).length;
     return `${n} task${n === 1 ? "" : "s"}${l.member_id ? ", plus new ones tagged to them" : ""}`;
   };
@@ -71,6 +73,7 @@ export function ShareDialog({ api, members, pins, plan, onClose }: { api: Worksp
         </header>
         <div className="flex-1 min-h-0 overflow-y-auto scroll-thin p-4 space-y-4">
           <p className="text-[13.5px] text-muted">They open a link, no sign-in and nothing to download. They see the plan and only their own tasks: no client details, no prices, nobody else&apos;s work.</p>
+          {api.contractorLink && <ToContractor api={api} copy={copy} copied={copied} />}
 
           <div className="space-y-2">
             <label className="eyebrow !text-[11.5px] block" htmlFor="share-who">Who is it for?</label>
@@ -141,6 +144,33 @@ export function ShareDialog({ api, members, pins, plan, onClose }: { api: Worksp
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+/** A homeowner's own project: one link for their contractor, who takes it on into their Rorker account
+ *  (the full job), while the homeowner keeps the client page of that same job in theirs. */
+function ToContractor({ api, copy, copied }: { api: WorkspaceApi; copy: (l: ShareLink) => Promise<void>; copied: string | null }) {
+  const [l, setL] = useState<ShareLink | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const make = async () => {
+    setBusy(true); setErr(null);
+    try { const x = await api.contractorLink!(); setL(x); void copy(x); } catch (e) { setErr(e instanceof Error ? e.message : "Couldn't make the link."); }
+    setBusy(false);
+  };
+  return (
+    <div className="rounded-[4px] border border-line p-3 space-y-2">
+      <p className="text-[13.5px]"><span className="font-semibold">Your own home?</span> Send this project to your contractor. They take it on in their Rorker account, and you keep following it from yours: progress, messages and their bills.</p>
+      {l ? (
+        <div className="flex items-center gap-2">
+          <input readOnly value={api.shareUrl?.(l.token) ?? ""} aria-label="Link for your contractor" className="input !h-8 text-[12.5px] flex-1" onFocus={(e) => e.currentTarget.select()} />
+          <button className="btn btn-sm" onClick={() => copy(l)}>{copied === l.id ? "Copied" : "Copy"}</button>
+        </div>
+      ) : (
+        <button className="btn btn-sm" onClick={make} disabled={busy}>{busy ? "Making the link…" : "Send to my contractor"}</button>
+      )}
+      {err && <p className="text-red text-[12.5px]">{err}</p>}
     </div>
   );
 }

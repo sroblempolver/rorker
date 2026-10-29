@@ -2,10 +2,10 @@
 // supabase/build/). The page turns its jobs into rows to save them and back into jobs when it loads;
 // the `build` edge function reads the same rows to open crew and client links.
 import type { Billing, Brand } from "@/lib/billing/types";
-import type { ElementEdit, ElementState, Job, JobItem, JobMessage, JobPhoto, JobStage, Member, Pin, PinComment, PlanRow, PlanRun, ShareLink, ShareAccess, TeamMessage } from "@/lib/data/types";
+import type { ElementEdit, ElementState, Job, JobItem, JobMessage, JobPhoto, JobStage, Member, Pin, PinComment, PlanRow, PlanRun, ShareLink, ShareAccess, ShareHandoff, TeamMessage } from "@/lib/data/types";
 import type { MaterialLine } from "@/lib/materials/types";
 
-export type RecordKind = "job" | "plan" | "stage" | "pin" | "item" | "edits" | "states" | "run" | "billing" | "material" | "member" | "share" | "comment" | "message" | "note" | "team" | "access" | "photo" | "settings";
+export type RecordKind = "job" | "plan" | "stage" | "pin" | "item" | "edits" | "states" | "run" | "billing" | "material" | "member" | "share" | "comment" | "message" | "note" | "team" | "access" | "photo" | "handoff" | "referral" | "settings";
 export interface Rec { kind: RecordKind; id: string; job_id: string | null; data: unknown }
 
 /** One job as the page holds it (the parts that are saved). */
@@ -29,11 +29,14 @@ export interface SavedAccount {
   access: ShareAccess[];
   /** photos added straight to a job's Photos; src is a stored file path */
   photos: JobPhoto[];
+  /** this account's projects that a contractor took on (a homeowner's account) */
+  handoffs: ShareHandoff[];
 }
 /** Kinds saved one by one as they're posted (from the page or a link), never by the page's saver. */
-export const POSTED: RecordKind[] = ["comment", "message", "note", "team", "access", "photo"];
+// (a referral is who sent a contractor their project, for the credits; the page only keeps it)
+export const POSTED: RecordKind[] = ["comment", "message", "note", "team", "access", "photo", "handoff", "referral"];
 /** What the page's saver writes. */
-export type PageSaved = Omit<SavedAccount, "comments" | "messages" | "notes" | "team" | "access" | "photos">;
+export type PageSaved = Omit<SavedAccount, "comments" | "messages" | "notes" | "team" | "access" | "photos" | "handoffs">;
 
 /** Rows for everything but what's posted one by one (comments, messages, clients' notes, photos). */
 export function toRecords(a: PageSaved): Rec[] {
@@ -93,6 +96,7 @@ export function fromRecords(rows: Rec[]): SavedAccount {
     messages: of("message").map((r) => r.data as JobMessage).sort((a, b) => a.created_at.localeCompare(b.created_at)),
     team: of("team").map((r) => r.data as TeamMessage).sort((a, b) => a.created_at.localeCompare(b.created_at)),
     access: of("access").map((r) => r.data as ShareAccess),
+    handoffs: of("handoff").map((r) => r.data as ShareHandoff),
     materials: of("material").map((r) => r.data as MaterialLine),
     shares: of("share").map((r) => r.data as ShareLink).sort((a, b) => b.created_at.localeCompare(a.created_at)),
     settings: (of("settings")[0]?.data as Settings | undefined) ?? null,

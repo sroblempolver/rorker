@@ -31,7 +31,7 @@ export function Problem({ title, body }: { title: string; body: string }) {
 }
 
 /** Sign in, make an account, or look around on sample data. */
-export function AuthScreen({ error, onSession, onDemo, saving }: { error?: string; onSession(s: Session | null): void; onDemo(): void; saving?: boolean }) {
+export function AuthScreen({ error, onSession, onDemo, saving }: { error?: string; onSession(s: Session | null): void; onDemo(): void; saving?: "save" | "adopt" }) {
   const [mode, setMode] = useState<"in" | "up">("in");
   const [f, setF] = useState({ email: "", password: "", name: "", company: "" });
   const [busy, setBusy] = useState(false);
@@ -51,12 +51,12 @@ export function AuthScreen({ error, onSession, onDemo, saving }: { error?: strin
       <div className="w-full max-w-[420px]">
         <div className="mb-8"><Logo /></div>
         <h1 className="font-display text-[34px] font-extrabold uppercase leading-none tracking-[0.01em] mb-1">{mode === "in" ? "Sign in" : "New account"}</h1>
-        <p className="text-muted mb-6">{saving ? "Sign in or make a free account, and the job you were sent goes into it, with every other job shared with you." : mode === "in" ? "Your jobs, plans and tasks, saved and on every device." : "For contractors, subs, employees and clients. Jobs people share with you show up in it. Anyone without an account can still open a link you send."}</p>
+        <p className="text-muted mb-6">{saving === "adopt" ? "Sign in or make your free contractor account, and the homeowner's project goes straight into it." : saving ? "Sign in or make a free account, and the job you were sent goes into it, with every other job shared with you." : mode === "in" ? "Your jobs, plans and tasks, saved and on every device." : "For contractors, subs, employees and clients. Jobs people share with you show up in it. Anyone without an account can still open a link you send."}</p>
         <form onSubmit={submit} className="card p-6 border-t-[3px] !border-t-accent space-y-4">
           {mode === "up" && (
             <>
               <div><label className="label" htmlFor="name">Your name</label><input id="name" className="input" value={f.name} onChange={set("name")} required autoComplete="name" /></div>
-              <div><label className="label" htmlFor="company">Company</label><input id="company" className="input" value={f.company} onChange={set("company")} required autoComplete="organization" placeholder="Diaz Remodeling" /></div>
+              <div><label className="label" htmlFor="company">Company</label><input id="company" className="input" value={f.company} onChange={set("company")} required={saving === "adopt"} autoComplete="organization" placeholder={saving === "adopt" ? "Diaz Remodeling" : "Diaz Remodeling, or leave blank for your own home"} /></div>
             </>
           )}
           <div><label className="label" htmlFor="email">Email</label><input id="email" type="email" className="input" value={f.email} onChange={set("email")} required autoComplete="email" /></div>
@@ -121,7 +121,7 @@ function useLink<T>(token: string) {
 
 /** What a crew member (employee or sub) opens from their link. No sign-in. */
 export function CrewLinkPage({ token, pin }: { token: string; pin: string | null }) {
-  const { data, error } = useLink<({ kind: "crew"; work: SharedWork; person?: boolean } | { kind: "client" }) & Mine>(token);
+  const { data, error } = useLink<({ kind: "crew"; work: SharedWork; person?: boolean } | { kind: "client" } | { kind: "handoff" }) & Mine>(token);
   useEffect(() => { document.title = data?.kind === "crew" ? `${data.work.label} · ${data.work.company.name}` : "Rorker"; }, [data]);
   // the team board, on a person's own link
   const inbox = useMemo<TeamInboxApi>(() => ({
@@ -131,6 +131,7 @@ export function CrewLinkPage({ token, pin }: { token: string; pin: string | null
   if (error) return <Problem title="This link doesn't open" body={error} />;
   if (!data) return <Loading text="Opening your tasks…" />;
   if (data.kind === "client") { location.hash = `#/c/${token}`; return null; }
+  if (data.kind === "handoff") { location.hash = `#/h/${token}`; return null; }
   return (
     <div className="h-full flex flex-col lg:overflow-hidden overflow-y-auto">
       <SaveBar token={token} kind="s" mine={data} />
@@ -144,7 +145,7 @@ export function CrewLinkPage({ token, pin }: { token: string; pin: string | null
 
 /** What the contractor's client opens: their project, their thread with the contractor, their money. */
 export function ClientLinkPage({ token, open, pin }: { token: string; open: string | null; pin: string | null }) {
-  const { data, error } = useLink<({ kind: "client"; view: ClientView } | { kind: "crew" }) & Mine>(token);
+  const { data, error } = useLink<({ kind: "client"; view: ClientView } | { kind: "crew" } | { kind: "handoff" }) & Mine>(token);
   const [err, setErr] = useState<string | null>(null);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => { if (data?.kind === "client") document.title = `${data.view.job.name} · ${data.view.company.name}`; }, [data]);
@@ -166,6 +167,7 @@ export function ClientLinkPage({ token, open, pin }: { token: string; open: stri
   if (error) return <Problem title="This link doesn't open" body={error} />;
   if (!data) return <Loading text="Opening your project…" />;
   if (data.kind === "crew") { location.hash = `#/s/${token}`; return null; }
+  if (data.kind === "handoff") { location.hash = `#/h/${token}`; return null; }
   const [kind, id] = (open ?? "").split(":");
   const start: ClientStart = id && (kind === "quote" || kind === "invoice" || kind === "change") ? { kind, id } : null;
   return (
@@ -205,5 +207,43 @@ export function SharedWithYou({ note }: { note?: string | null }) {
         ))}
       </div>
     </section>
+  );
+}
+
+interface Handoff { kind: "handoff"; from: string; job: { name: string; address: string | null }; rooms: number; tasks: number; signedIn: boolean }
+
+/** What a contractor opens from a homeowner's "send to my contractor" link: the project, and taking it
+ *  on into their own account (where they get the full job, and the homeowner keeps the client page). */
+export function HandoffPage({ token }: { token: string }) {
+  const { data, error } = useLink<Handoff | { kind: "crew" } | { kind: "client" }>(token);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { if (data?.kind === "handoff") document.title = `${data.job.name} · from ${data.from}`; }, [data]);
+  if (error) return <Problem title="This link doesn't open" body={error} />;
+  if (!data) return <Loading text="Opening the project…" />;
+  if (data.kind !== "handoff") { location.hash = `#/${data.kind === "client" ? "c" : "s"}/${token}`; return null; }
+  const take = async () => {
+    setBusy(true); setErr(null);
+    try { const r = await cloud.adoptLink(token); location.href = accountsHref(`#/job/${r.job}`); }
+    catch (e) { setErr(e instanceof Error ? e.message : "That didn't work. Try again."); setBusy(false); }
+  };
+  return (
+    <main className="h-full overflow-y-auto grid place-items-center px-4 py-10" style={BG}>
+      <div className="w-full max-w-[460px]">
+        <div className="mb-8"><Logo /></div>
+        <p className="eyebrow">From {data.from}</p>
+        <h1 className="font-display text-[30px] font-extrabold uppercase leading-none tracking-[0.01em] mb-1">{data.job.name}</h1>
+        {data.job.address && <p className="text-muted mb-4">{data.job.address}</p>}
+        <div className="card p-5 border-t-[3px] !border-t-accent space-y-3">
+          <p className="text-[14px]">{data.from} planned this project on Rorker and wants you to take it on{data.rooms ? `: ${data.rooms} room${data.rooms === 1 ? "" : "s"} drawn` : ""}{data.tasks ? `, ${data.tasks} task${data.tasks === 1 ? "" : "s"} and notes` : ""}.</p>
+          <p className="text-[13px] text-muted">It goes into your Rorker account as a job, with {data.from} as the client. You get the plan, the 3D house and everything they added. They keep their client page: progress, messages and their bills from you.</p>
+          {err && <p className="text-red text-sm">{err}</p>}
+          {data.signedIn
+            ? <button className="btn btn-primary w-full" onClick={take} disabled={busy}>{busy ? "Bringing it over…" : "Take on this project"}</button>
+            : <a className="btn btn-primary w-full text-center" href={accountsHref(`#/adopt/${token}`)}>Take on this project</a>}
+          {!data.signedIn && <p className="text-[12px] text-muted text-center">You&apos;ll sign in, or make a free contractor account, first.</p>}
+        </div>
+      </div>
+    </main>
   );
 }
