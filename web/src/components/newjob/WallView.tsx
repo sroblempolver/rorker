@@ -10,13 +10,10 @@ import { RULES } from "@/lib/plan/rules";
 import { fmtLen, parseLength, roundLen, type Units } from "@/lib/plan/units";
 import { doorSpot, doorWall, doorWidth, edgesOf, outsidePieces, param, pointInPoly, sameLine, segLen, sideOf, wallAt, windowSpots, windowWall, type Seg } from "@/lib/plan/sketchEdit";
 
-// standard sizes: what a new door or window starts as, and what one without its own numbers is drawn at
-const WIN = { width: 1200, height: 1200, sill: 900 };
-export const DOOR_W: Record<string, number> = { door: 820, double_door: 1500, sliding_door: 1800, opening: 1200, garage_door: 2400 };
-const DOOR_H: Record<string, number> = { opening: 2400, garage_door: 2300 };
-const doorH = (d: SketchDoor) => d.height_mm ?? DOOR_H[d.kind ?? "door"] ?? 2100;
-const BALCONY_DEPTH = 1500;
-const DOOR_KINDS = [["door", "Door"], ["double_door", "Double door"], ["sliding_door", "Patio door"], ["opening", "Opening"], ["garage_door", "Garage door"]] as const;
+import { BALCONY_DEPTH, DOOR_KINDS, DOOR_W, WIN, doorHeight } from "@/lib/plan/standard";
+
+export { DOOR_W };
+const doorH = (d: SketchDoor) => doorHeight(d.kind ?? "door", d.height_mm);
 type Item = { t: "door" | "thing"; i: number; x0: number; x1: number } | { t: "window"; i: number; k: number; x0: number; x1: number };
 const same = (a: Item, b: Item) => a.t === b.t && a.i === b.i && (a.t !== "window" || (b.t === "window" && a.k === b.k));
 const OPP: Record<string, string> = { north: "south", south: "north", east: "west", west: "east" };
@@ -335,7 +332,7 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
 }
 
 /** A length typed in feet and inches (or metres); set on Enter or when you leave the box, to the nearest ½ inch (or cm). */
-function Len({ label, mm, units, onStart, onSet }: { label: string; mm: number; units: Units; onStart: () => void; onSet: (mm: number) => void }) {
+export function Len({ label, mm, units, onStart, onSet }: { label: string; mm: number; units: Units; onStart: () => void; onSet: (mm: number) => void }) {
   return (
     <label className="flex items-center gap-1.5">
       <span className="text-muted">{label}</span>

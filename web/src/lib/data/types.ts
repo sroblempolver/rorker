@@ -49,7 +49,22 @@ export interface ElementEdit {
   added?: AddedObject;
   /** job-wide, under the "@job" key: which floors are furnished, and the build stages the contractor added */
   furnish?: Furnish; stage_looks?: Record<string, BuildLook>;
+  /** Build mode. A door or window: its bottom above the floor, and how far it slid along its wall (mm) */
+  sill_mm?: number; slide?: number;
+  /** a wall moved straight across: the side of a room it is (which way it faces, a point on it as
+   *  drawn) and how far, mm, out of the room (negative: into it). The rooms either side follow. */
+  move?: { room_id: string; heading: Heading; at: [number, number]; by: number; /** when, so changes replay in order */ t?: number };
+  /** a door or window added in the app: the edit's key is its new id */
+  opening?: AddedOpening;
+  /** a room cut in two by a new wall across it, at x (axis "x") or y (axis "y") on the plan */
+  split?: { axis: "x" | "y"; at: number; name?: string; t?: number };
+  /** a straight wall separated into two pieces at this point, so each moves on its own */
+  cut?: { floor_id: string; at: [number, number]; t: number };
 }
+export type Heading = "north" | "east" | "south" | "west";
+/** A door or window put in a wall in Build mode: the side of the room it's on (which way that wall
+ *  faces) and the point on it where its middle is, so it follows the wall when the wall moves. */
+export interface AddedOpening { floor_id: string; room_id: string; heading: Heading; kind: string; at: [number, number]; width: number; height_mm?: number | null; sill_mm?: number | null }
 /** Something added to the plan in the app (furniture, an appliance): where it stands, its size and front. */
 export interface AddedObject {
   floor_id: string; room_id: string | null; kind: string; name: string; center: [number, number]; width: number; depth: number; facing: number | null; height_mm?: number | null;
