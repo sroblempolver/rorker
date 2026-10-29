@@ -7,7 +7,9 @@ import type { Pt } from "@/lib/plan/types";
 import type { SketchDoor, SketchFixture, SketchFloor, SketchWindow } from "@/lib/plan/sketch";
 import { CATALOG, bottomOf, topOf } from "@/lib/plan/catalog";
 import { RULES } from "@/lib/plan/rules";
-import { fillWall } from "@/lib/plan/cabinetLayout";
+import { faceOf, fillWall, fitOnFace } from "@/lib/plan/cabinetLayout";
+import { famOf } from "@/lib/plan/cabinets";
+import { TRAY_DRAG } from "./CatalogTray";
 import { CabinetFront } from "./CabinetFront";
 import { fmtLen, parseLength, roundLen, type Units } from "@/lib/plan/units";
 import { doorSpot, doorWall, doorWidth, edgesOf, outsidePieces, param, pointInPoly, sameLine, segLen, sideOf, wallAt, windowSpots, windowWall, type Seg } from "@/lib/plan/sketchEdit";
@@ -19,6 +21,8 @@ const doorH = (d: SketchDoor) => doorHeight(d.kind ?? "door", d.height_mm);
 type Item = { t: "door" | "thing"; i: number; x0: number; x1: number } | { t: "window"; i: number; k: number; x0: number; x1: number };
 const same = (a: Item, b: Item) => a.t === b.t && a.i === b.i && (a.t !== "window" || (b.t === "window" && a.k === b.k));
 const OPP: Record<string, string> = { north: "south", south: "north", east: "west", west: "east" };
+/** appliances and fixtures that stand in a cabinet run like a cabinet */
+const RUN = new Set(["range", "cooktop", "oven", "dishwasher", "fridge", "range_hood", "kitchen_sink", "washing_machine", "dryer"]);
 
 /** The wall's two ends as seen from inside the room: left end first. */
 export function wallFromInside(poly: Pt[], e: number): Seg {
@@ -33,12 +37,16 @@ export function wallFromInside(poly: Pt[], e: number): Seg {
   return ux * rx + uy * ry >= 0 ? [a, b] : [b, a];
 }
 
-export function WallView({ floor, room, edge, height = RULES.ceiling as number, units = "ft", addOnOpen, onAdded, onChange, onClose, onEdge }: {
+export function WallView({ floor, room, edge, height = RULES.ceiling as number, units = "ft", addOnOpen, onAdded, onChange, onClose, onEdge, armed, onPlace }: {
   floor: SketchFloor; room: number; edge: number; height?: number; units?: Units;
   /** add this as soon as the wall opens (picked from the plan's Doors & windows menu) */
   addOnOpen?: "balcony" | null; onAdded?: () => void;
   /** `history`: false while dragging (the change before the drag was already kept for undo) */
   onChange: (f: SketchFloor, history?: boolean) => void; onClose: () => void; onEdge: (e: number) => void;
+  /** the name of what the furniture tray has picked, when it's open: dropped or clicked onto this wall */
+  armed?: string | null;
+  /** put the tray's pick on this wall: `x` from the wall's left end, its middle `mid` mm off the floor */
+  onPlace?: (x: number, mid: number) => void;
 }) {
   const r = floor.rooms[room];
   const m = (mm: number) => fmtLen(mm, units);
@@ -87,6 +95,9 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
   // the picture keeps its shape: work out the drawn width from the box's height
   const scale = () => { const b = svg.current!.getBoundingClientRect(); return Math.max(W / b.width, H / b.height); };
   const toX = (e: { clientX: number }) => { const b = svg.current!.getBoundingClientRect(); const k = Math.max(W / b.width, H / b.height); return L / 2 + (e.clientX - (b.left + b.width / 2)) * k; };
+  /** how high off the floor a point on the picture is */
+  const toUp = (e: { clientY: number }) => { const b = svg.current!.getBoundingClientRect(); const k = Math.max(W / b.width, H / b.height); return -(-H + 350 + H / 2 + (e.clientY - (b.top + b.height / 2)) * k); };
+  const dropIn = (e: { clientX: number; clientY: number }) => { const x = toX(e); if (onPlace && x >= 0 && x <= L) onPlace(x, Math.max(0, Math.min(height, toUp(e)))); };
 
   // what can go up and down the wall: furniture, and windows (their sill)
   const bottomAt = (it: Item) => (it.t === "thing" ? bottomOf(floor.fixtures![it.i]) : it.t === "window" ? floor.windows![it.i].sill_mm ?? WIN.sill : null);
@@ -131,7 +142,21 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
       bottom = Math.max(0, Math.min(height - tallOf(d.item), roundLen(d.b0 + dy, units)));
       if (bottom < 50) bottom = 0;
     }
-    moveTo(d.item, roundLen(d.c0 + dx, units), false, bottom);
+    let c = roundLen(d.c0 + dx, units);
+    // a cabinet or appliance lines up with its neighbours and never goes through one; a base cabinet stays on the floor
+    const f = d.item.t === "thing" ? floor.fixtures![d.item.i] : null;
+    if (f && d.item.t === "thing" && (f.cab || RUN.has(f.kind))) {
+      if (f.cab && famOf(f.cab.fam).zone !== "wall") bottom = undefined;
+      const fc = faceOf(floor, room, edge);
+      if (fc) {
+        const w = d.item.x1 - d.item.x0, z = bottom ?? bottomOf(f), h = topOf(f) - bottomOf(f);
+        const fit = fitOnFace(floor, fc, c, w, z, h, d.item.i, f.depth_mm ?? 600);
+        if (!("x" in fit)) { setNote(`No room for it there: ${m(fit.room)} free.`); return; }
+        c = fit.x;
+        setNote(null);
+      }
+    }
+    moveTo(d.item, c, false, bottom);
   };
   const up = () => { drag.current = null; };
 
@@ -243,7 +268,10 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
           <button className="btn btn-sm btn-ghost" onClick={onClose} aria-label="Close the wall view">✕</button>
         </span>
       </div>
-      <svg ref={svg} viewBox={`${L / 2 - W / 2} ${-H + 350} ${W} ${H}`} className="w-full h-[220px] touch-none select-none bg-ink" onPointerMove={move} onPointerUp={up} onPointerCancel={up} onPointerDown={() => setSel(null)}>
+      <svg ref={svg} viewBox={`${L / 2 - W / 2} ${-H + 350} ${W} ${H}`} className={`w-full h-[220px] touch-none select-none bg-ink ${armed ? "cursor-copy" : ""}`} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+        onPointerDown={(e) => { setSel(null); if (armed) dropIn(e); }}
+        onDragOver={(e) => { if (e.dataTransfer.types.includes(TRAY_DRAG)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
+        onDrop={(e) => { if (!e.dataTransfer.types.includes(TRAY_DRAG)) return; e.preventDefault(); dropIn(e); }}>
         <rect x={0} y={-height} width={L} height={height} fill="#e3d9c6" stroke="#0a0a0b" strokeWidth={20} />
         {outside.map(([a, b], k) => <rect key={k} x={a} y={-height} width={b - a} height={height} fill="#d6c9b0" />)}
         <line x1={-pad} y1={0} x2={L + pad} y2={0} stroke="#9c978d" strokeWidth={20} />
@@ -303,7 +331,8 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
       </svg>
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px] min-h-[44px]">
         {note && <span className="text-amber">{note}</span>}
-        {!sel && !note && <span className="text-muted">Drag a door, window or piece of furniture along the wall (windows and furniture up and down too). Pick one to change its size or remove it.</span>}
+        {armed && !sel && !note && <span className="text-accent">Drag {armed} from the furniture list onto this wall, or click the wall where it goes. Then drag it along the wall, and up or down.</span>}
+        {!armed && !sel && !note && <span className="text-muted">Drag a door, window or piece of furniture along the wall (windows and furniture up and down too). Pick one to change its size or remove it.</span>}
         {selThing && (
           <>
             <span className="font-medium">{selThing.name || CATALOG[selThing.kind]?.label || selThing.kind}</span>

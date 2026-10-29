@@ -5,7 +5,8 @@
 // width, height and depth in feet and inches, and trim. Sizes start at the company's standards.
 import type { SketchFixture, SketchFloor } from "@/lib/plan/sketch";
 import { FAMILIES, FRONTS, bottomFor, cabCode, cabinetList, defaultConfig, defaults, famOf, frontsOf, isStock, newSpec, snapWidth, type CabFamily } from "@/lib/plan/cabinets";
-import { resized, type CabPick } from "@/lib/plan/cabinetLayout";
+import { FILL_KINDS, plainOf, resized, type CabPick } from "@/lib/plan/cabinetLayout";
+import { plumbingFor } from "@/lib/plan/plumbing";
 import { INCH, fmtLen, parseLength, roundLen, type Units } from "@/lib/plan/units";
 import { std, useStandards } from "@/lib/plan/standards";
 
@@ -20,10 +21,17 @@ export function CabinetPanel({ pick, onPick, floor, units, onCatalog }: { pick: 
     <div className="space-y-3">
       <div className="space-y-2">
         <p className="eyebrow">Fill a wall</p>
-        <p className="leading-snug">Click near a wall of the kitchen. It fills the wall from corner to corner with stock cabinets, leaves doors, windows and appliances clear, puts a sink base under the window and fillers at the walls.</p>
+        <div className="grid gap-1">
+          {FILL_KINDS.map((k) => (
+            <button key={k.id} className={`text-left rounded-md border px-2.5 py-1.5 ${(pick.fillKind ?? "regular") === k.id ? "border-accent text-accent" : "border-line hover:border-muted"}`} onClick={() => set({ fillKind: k.id })} aria-pressed={(pick.fillKind ?? "regular") === k.id}>
+              <span className="font-medium block">{k.label}</span><span className="text-muted text-[12.5px]">{k.hint}</span>
+            </button>
+          ))}
+        </div>
+        <p className="leading-snug">Then click near a wall of the kitchen. It fills the wall from corner to corner with stock cabinets, leaves doors, windows and appliances clear and puts fillers at the walls.</p>
         <label className="flex items-center gap-2"><input type="checkbox" checked={pick.fillBase} onChange={(e) => set({ fillBase: e.target.checked })} /> Base cabinets</label>
         <label className="flex items-center gap-2"><input type="checkbox" checked={pick.fillWall} onChange={(e) => set({ fillWall: e.target.checked })} /> Wall cabinets above (none over a window or the range)</label>
-        <p className="text-muted text-[12.5px] leading-snug">Put the range, dishwasher and fridge in first, and the fill works around them. Filling again replaces that wall&apos;s base and wall cabinets.</p>
+        <p className="text-muted text-[12.5px] leading-snug">Anything already on the wall (a range, the fridge) stays and the fill works around it. A range or cooktop always gets a hood above it. Filling again replaces that wall&apos;s base and wall cabinets.</p>
       </div>
       <div className="space-y-1.5 pt-2 border-t border-line">
         <p className="eyebrow pt-1">One at a time</p>
@@ -72,6 +80,14 @@ export function CabinetEdit({ fx, units, onChange, onDelete }: { fx: SketchFixtu
     const moved = resized(fx, { w: nw, d: nd.d, h: nd.h });
     save({ ...moved, kind: G.kind, cab: spec, elevation_mm: nd.z || undefined });
   };
+  /** a base cabinet swapped for an appliance of the same zone: its left end stays put */
+  const swapTo = (id: string) => {
+    const it = plainOf(id);
+    if (!it) return;
+    const sz = it.size(), moved = resized(fx, { w: sz.w, d: sz.d, h: sz.h });
+    onChange({ ...moved, kind: it.kind, name: it.label, cab: undefined, elevation_mm: sz.z || undefined });
+  };
+  const plumb = plumbingFor(fx);
   const single = frontsOf({ ...c, hinge: "L" }, w, h).filter((x) => x.t === "door" || x.t === "glass" || x.t === "mirror" || x.t === "blind").length === 1;
   const zone = F.zone;
   return (
@@ -84,6 +100,13 @@ export function CabinetEdit({ fx, units, onChange, onDelete }: { fx: SketchFixtu
       <select className="input !h-9" aria-label="Kind of cabinet" value={c.fam} onChange={(e) => setFam(e.target.value as CabFamily)}>
         {FAMILIES.filter((x) => x.zone === zone || (zone !== "wall" && x.zone !== "wall")).map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
       </select>
+      {zone === "base" && !F.id.startsWith("filler") && !F.id.startsWith("panel") && (
+        <select className="input !h-9" aria-label="Swap for an appliance" value="" onChange={(e) => swapTo(e.target.value)}>
+          <option value="" disabled>Swap for an appliance…</option>
+          {["dishwasher", "range", "cooktop_base", "oven_base"].map((id) => plainOf(id)).filter((x): x is NonNullable<typeof x> => !!x).map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+        </select>
+      )}
+      {plumb && <p className="text-[12.5px] leading-snug"><span className="text-[#55b2ff]">● Plumbing:</span> {plumb.needs}.</p>}
       {F.configs.length > 1 && (
         <select className="input !h-9" aria-label="Doors and drawers" value={c.config ?? defaultConfig(c.fam, w)} onChange={(e) => setCab({ config: e.target.value })}>
           {F.configs.map((k) => <option key={k} value={k}>{FRONTS[k]}</option>)}

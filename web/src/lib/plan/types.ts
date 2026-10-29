@@ -1,5 +1,6 @@
 // Mirror of agent/rorker_agent/schema.py. Millimetres, x right, y down, one frame for all floors.
 import type { Part } from "./catalog";
+import type { Sketch } from "./sketch";
 export type Pt = [number, number];
 export type BBox = [number, number, number, number];
 
@@ -74,6 +75,9 @@ export interface Plan {
   flags: { code: string; message: string; element_ids: string[]; severity: string }[];
   source: { kind: string; filename: string; pipeline_version: string; model: string | null; ai_used: boolean };
   stats: Record<string, unknown>;
+  /** the drawing this plan was built from (drawn by hand or read from a file), so the Plan page can open
+   *  it again in the drawing tool and every wall, door and piece of furniture stays editable */
+  sketch?: Sketch;
 }
 
 export type ElementKind = "room" | "wall" | "opening" | "fixture" | "stair";

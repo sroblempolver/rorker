@@ -18,15 +18,16 @@ import { INCH, fmtArea, fmtLen, parseLength, roundLen, type Units } from "@/lib/
 import type { IntakePart } from "@/lib/intake/files";
 import { StandardsPanel } from "./StandardsPanel";
 import { CabinetEdit, CabinetPanel } from "./CabinetPanel";
-import { DEFAULT_PICK, cabinetClick, slideCabinet, type CabPick } from "@/lib/plan/cabinetLayout";
+import { DEFAULT_PICK, addHood, cabinetClick, faceOf, fitOnFace, fixtureAt, placeOnFace, slideCabinet, type CabPick, type FitAsk } from "@/lib/plan/cabinetLayout";
+import { plumbingPoints } from "@/lib/plan/plumbing";
 import { cabCode, defaults } from "@/lib/plan/cabinets";
 import { Live3D, type Walls } from "./Live3D";
 import { RoofPanel } from "./RoofPanel";
 import { std, useStandards } from "@/lib/plan/standards";
 import { halfSize, moveRoom, outward, pushWall, turnRoom, turnSide } from "@/lib/plan/roomEdit";
 import { cleanOutline, cornerAt, nextCorner } from "@/lib/plan/corners";
-import { tabForRoom, type TrayItem } from "@/lib/plan/tray";
-import { CatalogTray, openTrayAt } from "./CatalogTray";
+import { itemLabel, tabForRoom, type TrayItem } from "@/lib/plan/tray";
+import { CatalogTray, TRAY_DRAG, openTrayAt } from "./CatalogTray";
 import { StairHole, StairPanel, StairSymbol, onStair } from "./StairPlan";
 import { ChecksPanel, NUDGE_COLOR } from "./ChecksPanel";
 import { floorBelow, floorRise, newStair, stairGeom } from "@/lib/plan/stairs";
@@ -128,6 +129,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   const [wallAdd, setWallAdd] = useState<"balcony" | null>(null);
   const [sel, setSel] = useState<Sel>(null);
   const [thing, setThing] = useState<TrayItem>({ kind: "kitchen_sink" });
+  /** a cabinet that didn't fit where it was put: the smaller ones on offer, applied when picked */
+  const [ask, setAsk] = useState<FitAsk | null>(null);
   // corner by corner: the corners so far, a typed wall length, where the pointer is
   const [corners, setCorners] = useState<Pt[]>([]);
   const [typed, setTyped] = useState("");
@@ -698,6 +701,55 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     }
   };
 
+  /** the tray's pick as a Cabinets-tool pick (a stock cabinet, or something that goes in a run) */
+  const pickOf = (it: TrayItem): CabPick | null => (it.cab || it.run ? { item: it.cab?.fam ?? it.run!, w: it.w, d: it.run ? it.d : undefined, h: it.h, config: it.cab?.config, hinge: it.cab?.hinge, mode: "place", fillBase: false, fillWall: false } : null);
+  /** what a cabinet placement said: put it in, or ask before shrinking it to fit */
+  const placed = (r: { floor?: SketchFloor; sel?: number; note?: string; ask?: FitAsk }) => {
+    setAsk(r.ask ?? null);
+    if (r.note) setNote(r.note); else if (r.ask) setNote(null);
+    if (r.floor) { setFloor(r.floor); setSel(r.sel != null ? { t: "thing", i: r.sel } : null); }
+    return !!r.floor;
+  };
+  /** the tray's pick put down at p on the plan (clicked or dropped there). True when it went in. */
+  const placeThing = (p: Pt): boolean => {
+    const pk = pickOf(thing);
+    // a stock cabinet (or a range, toilet, tub) goes onto the nearest wall, beside its neighbours
+    if (pk) return placed(cabinetClick(floor, p, pk));
+    const spec = CATALOG[thing.kind];
+    const ri = roomAt(p);
+    const c: Pt = [r10(p[0]), r10(p[1])];
+    const w = thing.w ?? spec?.w ?? 600, dp = thing.d ?? spec?.d ?? 600;
+    // against a wall when it's put near one: back flat to the wall, facing the room
+    const hug = ri >= 0 && spec?.mount !== "ceiling" ? hugWall(floor.rooms[ri].polygon, c, w, dp, 600) : null;
+    const fx = { kind: thing.kind, name: thing.label ?? spec?.label, room: ri >= 0 ? floor.rooms[ri].name : undefined, center: hug?.center ?? c, width_mm: w, depth_mm: dp, facing: hug?.facing ?? facingFor(c, ri), ...(thing.h ? { height_mm: thing.h } : {}) };
+    const h = addHood({ ...floor, fixtures: [...(floor.fixtures ?? []), fx] }, (floor.fixtures ?? []).length);
+    setFloor(h.floor);
+    setAsk(null);
+    setNote(h.added ? "A hood went in over it: the code wants one over a range or cooktop." : null);
+    setSel({ t: "thing", i: (floor.fixtures ?? []).length });
+    return true;
+  };
+  /** the tray's pick dropped (or clicked) on the open wall view: `x` along the wall from its left end as
+   *  you face it, `mid` how high off the floor it was let go */
+  const placeOnWall = (x: number, mid: number) => {
+    if (!seen) return;
+    const fc = faceOf(floor, seen.room, seen.edge);
+    if (!fc) { setNote("Things go on straight, square walls. This one is on a slant."); return; }
+    const pk = pickOf(thing);
+    if (pk) { placed(placeOnFace(floor, fc, x, pk, mid)); return; }
+    // furniture: its back on the wall at x; a picture, shelf or TV hangs where it was let go
+    const spec = CATALOG[thing.kind];
+    const w = thing.w ?? spec?.w ?? 600, dp = thing.d ?? spec?.d ?? 600, h = thing.h ?? spec?.h ?? 600;
+    const z = spec?.mount === "wall" ? Math.max(0, Math.round(mid - h / 2)) : 0;
+    const fit = fitOnFace(floor, fc, x, w, z, h, -1, dp);
+    const at = "x" in fit ? fit.x : x;
+    const fx = fixtureAt(floor, fc, at, { w, d: dp, h, z }, thing.kind, thing.label ?? spec?.label ?? thing.kind);
+    const r = addHood({ ...floor, fixtures: [...(floor.fixtures ?? []), fx] }, (floor.fixtures ?? []).length);
+    setFloor(r.floor);
+    setAsk(null);
+    setNote(r.added ? "A hood went in over it: the code wants one over a range or cooktop." : null);
+    setSel({ t: "thing", i: (floor.fixtures ?? []).length });
+  };
   const up = (e: RPointerEvent<SVGSVGElement>) => {
     const d = drag;
     setDrag(null);
@@ -822,30 +874,14 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           setNote(`Copied ${label(r.type ?? "other").toLowerCase()}. Now click the rooms that should be the same.`);
         }
       } else setNote("Click a piece of furniture or a room to copy it.");
-    } else if (tool === "thing" && (thing.cab || thing.run)) {
-      // a stock cabinet (or a range, toilet, tub) from the tray goes onto the nearest wall, beside its neighbours
-      const r = cabinetClick(floor, p, { item: thing.cab?.fam ?? thing.run!, w: thing.w, d: thing.run ? thing.d : undefined, h: thing.h, config: thing.cab?.config, hinge: thing.cab?.hinge, mode: "place", fillBase: false, fillWall: false });
-      if (r.note) setNote(r.note);
-      if (r.floor) { setFloor(r.floor); setSel(r.sel != null ? { t: "thing", i: r.sel } : null); if (!e.shiftKey) setTool("select"); }
     } else if (tool === "thing") {
-      const spec = CATALOG[thing.kind];
-      const ri = roomAt(p);
-      const c: Pt = [r10(p[0]), r10(p[1])];
-      const w = thing.w ?? spec?.w ?? 600, dp = thing.d ?? spec?.d ?? 600;
-      // against a wall when it's put near one: back flat to the wall, facing the room
-      const hug = ri >= 0 && spec?.mount !== "ceiling" ? hugWall(floor.rooms[ri].polygon, c, w, dp, 600) : null;
-      const fx = { kind: thing.kind, name: thing.label ?? spec?.label, room: ri >= 0 ? floor.rooms[ri].name : undefined, center: hug?.center ?? c, width_mm: w, depth_mm: dp, facing: hug?.facing ?? facingFor(c, ri), ...(thing.h ? { height_mm: thing.h } : {}) };
-      setFloor({ ...floor, fixtures: [...(floor.fixtures ?? []), fx] });
-      setSel({ t: "thing", i: (floor.fixtures ?? []).length });
       // Shift-click keeps placing the same thing; a plain click puts it down and picks it to adjust
-      if (!e.shiftKey) setTool("select");
+      if (placeThing(p) && !e.shiftKey) setTool("select");
     } else if (tool === "cabinet") {
       // a click on a cabinet picks it; anywhere else puts one in
       const ti = thingAt(p);
       if (cabPick.mode === "place" && ti >= 0 && floor.fixtures![ti].cab) { setSel({ t: "thing", i: ti }); return; }
-      const r = cabinetClick(floor, p, cabPick);
-      if (r.note) setNote(r.note);
-      if (r.floor) { setFloor(r.floor); setSel(r.sel != null ? { t: "thing", i: r.sel } : null); }
+      placed(cabinetClick(floor, p, cabPick));
     } else if (tool === "scale") {
       setClicks((c) => (c.length >= 2 ? [p] : [...c, p]));
     } else if (tool === "match") {
@@ -967,6 +1003,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           <svg ref={svg} className="absolute inset-0 w-full h-full touch-none select-none" viewBox={`${v.x} ${v.y} ${v.w} ${vh}`}
             style={{ cursor: drag?.k === "pan" ? "grabbing" : tool === "select" ? "default" : tool === "picture" ? "move" : "crosshair" }}
             onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrag(null)} onPointerLeave={() => setHover(null)}
+            onDragOver={(e) => { if (e.dataTransfer.types.includes(TRAY_DRAG)) { e.preventDefault(); setHover(toMm(e)); } }}
+            onDrop={(e) => { if (!e.dataTransfer.types.includes(TRAY_DRAG)) return; e.preventDefault(); placeThing(toMm(e)); }}
             onDoubleClick={() => { if (tool === "corners" && corners.length >= 3) closeCorners(); }} onContextMenu={(e) => { e.preventDefault(); if (!corners.length && !drag) separateAt(toMm(e)); }}>
             {bg && sizes[bg.pic] && (
               <image href={pictures[bg.pic].url} x={bg.at[0]} y={bg.at[1]} width={sizes[bg.pic][0] * bg.mmPerPx} height={sizes[bg.pic][1] * bg.mmPerPx} opacity={bg.opacity} preserveAspectRatio="none" style={{ pointerEvents: "none" }} />
@@ -1008,6 +1046,14 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             {holeGs.map((g, i) => <StairHole key={`h${i}`} g={g} px={px} fontMm={fontMm} />)}
             {stairGs.map((g, i) => <StairSymbol key={`st${i}`} g={g} px={px} fontMm={fontMm} on={sel?.t === "stair" && sel.i === i} />)}
             {drag?.k === "stair" && <StairSymbol g={stairGeom(newStair(drag.a, stairTurn(drag)), rise)} px={px} fontMm={fontMm} on ghost />}
+            {/* where the plumber is needed: water and drain at sinks, the dishwasher, toilets, tubs, showers */}
+            {plumbingPoints(floor).map((q) => (
+              <g key={`pl${q.i}`} transform={`translate(${q.at[0]} ${q.at[1]})`}>
+                <title>{`Plumbing: ${q.what}. ${q.needs}.`}</title>
+                <circle r={7 * px} fill="#55b2ff" stroke="#17181b" strokeWidth={1.5 * px} />
+                <path d={`M0 ${-4 * px} C ${2.6 * px} ${-0.6 * px} ${3 * px} ${1 * px} ${3 * px} ${1.6 * px} A ${3 * px} ${3 * px} 0 0 1 ${-3 * px} ${1.6 * px} C ${-3 * px} ${1 * px} ${-2.6 * px} ${-0.6 * px} 0 ${-4 * px} Z`} fill="#fff" />
+              </g>
+            ))}
             {doorSpots.map((s, i) => s && <line key={`d${i}`} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "door" && sel.i === i ? "#fff" : "#ff6a1f"} strokeWidth={7 * px} strokeLinecap="butt" />)}
             {winSpots.map((list, i) => list.map((s, k) => <line key={`w${i}-${k}`} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "window" && sel.i === i ? "#fff" : "#8fd3f0"} strokeWidth={6 * px} />))}
             {room && !room.loose && room.polygon.map((q, k) => <rect key={k} x={q[0] - 5 * px} y={q[1] - 5 * px} width={10 * px} height={10 * px} fill="#ff6a1f" stroke="#fff" strokeWidth={px} />)}
@@ -1115,7 +1161,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         )}
         </div>
         {tool === "thing" && <CatalogTray armed={thing} units={lu} startRoom={tabForRoom((sel?.t === "room" ? floor.rooms[sel.i] : hover ? floor.rooms[roomAt(hover)] : undefined)?.type)} onPick={(it) => { setThing(it); setNote(null); }} />}
-        {seen && <WallView key={`${seen.room}-${seen.edge}`} floor={floor} room={seen.room} edge={seen.edge} height={floor.height_mm ?? std("house.ceiling")} units={lu} addOnOpen={wallAdd} onAdded={() => setWallAdd(null)} onChange={(f, h) => setFloor(f, h ?? true)} onClose={() => setWall(null)} onEdge={(edge) => setWall({ room: seen.room, edge })} />}
+        {seen && <WallView key={`${seen.room}-${seen.edge}`} floor={floor} room={seen.room} edge={seen.edge} height={floor.height_mm ?? std("house.ceiling")} units={lu} addOnOpen={wallAdd} onAdded={() => setWallAdd(null)} onChange={(f, h) => setFloor(f, h ?? true)} onClose={() => setWall(null)} onEdge={(edge) => setWall({ room: seen.room, edge })}
+          armed={tool === "thing" ? itemLabel(thing) : null} onPlace={placeOnWall} />}
         </div>
 
         <aside className="border-t lg:border-t-0 lg:border-l border-line p-3 space-y-3 text-[13.5px] max-h-[62vh] overflow-y-auto scroll-thin">
@@ -1132,6 +1179,13 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           {lib.placing && <p className="text-accent leading-snug">Click on the plan where {lib.placing.item.name} goes. It snaps to the walls beside it. Esc to stop.</p>}
           <p className="text-muted leading-snug">{TOOLS.find((t) => t.id === tool)?.help}</p>
           {note && <p className="text-amber">{note}</p>}
+          {ask && (
+            <div className="rounded-md border border-amber p-2.5 space-y-1.5">
+              <p className="text-amber leading-snug">{ask.text} Want it smaller?</p>
+              {ask.options.map((o) => <button key={o.label} className="btn btn-sm w-full" onClick={() => { setFloor(o.floor); setSel({ t: "thing", i: o.sel }); setAsk(null); setNote(null); }}>{o.label}</button>)}
+              <button className="btn btn-sm btn-ghost w-full" onClick={() => setAsk(null)}>Leave it out</button>
+            </div>
+          )}
 
           {tool === "cabinet" && !fix && <CabinetPanel pick={cabPick} onPick={setCabPick} floor={floor} units={lu} onCatalog={(at) => { openTrayAt(at); setTool("thing"); }} />}
           {tool === "thing" && (
@@ -1233,7 +1287,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
               onJoin={(() => { const w = floor.walls![sel.i], ri = floor.rooms.findIndex((r) => r.loose && onOutline(w, r.polygon)); return ri >= 0 ? () => { setFloor(joinRoom(floor, ri)); setSel({ t: "room", i: ri }); } : null; })()}
               onCopy={() => { const w = floor.walls![sel.i], L = dist(w.a, w.b) || 1, o = 24 * INCH, n: Pt = [-(w.b[1] - w.a[1]) / L * o, (w.b[0] - w.a[0]) / L * o]; const c = { ...w, room: undefined, a: [w.a[0] + n[0], w.a[1] + n[1]] as Pt, b: [w.b[0] + n[0], w.b[1] + n[1]] as Pt }; setWalls([...floor.walls!, c]); setSel({ t: "wall", i: floor.walls!.length }); }} />
           )}
-          {fix && sel && fix.cab && <CabinetEdit fx={fix} units={lu} onDelete={deleteSel} onChange={(nx) => setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? nx : f)) })} />}
+          {fix && sel && fix.cab && <CabinetEdit fx={fix} units={lu} onDelete={deleteSel} onChange={(nx) => { const h = addHood({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? nx : f)) }, sel.i); setFloor(h.floor); if (h.added) setNote("A hood went in over it: the code wants one over a range or cooktop."); }} />}
           {fix && sel && !fix.cab && (
             <div className="space-y-2">
               <p className="eyebrow">{CATALOG[fix.kind]?.label ?? fix.kind}</p>
