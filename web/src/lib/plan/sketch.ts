@@ -40,6 +40,8 @@ export interface Sketch {
   questions?: { text: string; options?: string[]; rooms?: string[] }[];
   /** checks the contractor chose to ignore, by check id (lib/plan/checks.ts) */
   ignored_checks?: string[];
+  /** what the job is (lib/plan/trades.ts), and the steps of its list ticked off by hand */
+  trade?: string; trade_done?: string[];
 }
 export interface SketchSource { kind: string; filename: string }
 
