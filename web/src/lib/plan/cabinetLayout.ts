@@ -129,7 +129,7 @@ export function onFace(f: SketchFloor, fc: Face): OnFace[] {
 }
 
 /** A fixture centred `x` along the face, its back on the face. */
-function fixtureAt(f: SketchFloor, fc: Face, x: number, size: { w: number; d: number; h: number; z: number }, kind: string, name: string, cab?: CabSpec): SketchFixture {
+export function fixtureAt(f: SketchFloor, fc: Face, x: number, size: { w: number; d: number; h: number; z: number }, kind: string, name: string, cab?: CabSpec): SketchFixture {
   const k = fc.t / 2 + size.d / 2;
   const c: Pt = [Math.round(fc.A[0] + fc.u[0] * x + fc.n[0] * k), Math.round(fc.A[1] + fc.u[1] * x + fc.n[1] * k)];
   return { kind, name, room: f.rooms[fc.ri].name, center: c, width_mm: Math.round(size.w * 10) / 10, depth_mm: Math.round(size.d * 10) / 10, height_mm: Math.round(size.h * 10) / 10, facing: fc.facing, ...(size.z > 0 ? { elevation_mm: Math.round(size.z) } : {}), ...(cab ? { cab } : {}) };
@@ -187,6 +187,62 @@ export function slot(f: SketchFloor, fc: Face, x: number, w: number, z: number, 
   return best;
 }
 
+/** The free stretch of the face around `x` at heights [z, z + h]: between the inside corners and whatever
+ *  stands there (on this wall, or round the corner on the next). Null when `x` itself is taken. */
+export function freeSpan(f: SketchFloor, fc: Face, x: number, z: number, h: number, skip = -1, depth = 600): { lo: number; hi: number } | null {
+  const on = onFace(f, fc);
+  const others = [...on.filter((o) => o.i !== skip && inZone(z, z + h, o.bottom, o.top)), ...crossBlocks(f, fc, z, z + h, depth, new Set([skip, ...on.map((o) => o.i)]))];
+  if (others.some((o) => x > o.x0 + 1 && x < o.x1 - 1)) return null;
+  const lo = Math.max(fc.s0, ...others.filter((o) => o.x1 <= x + 1).map((o) => o.x1));
+  const hi = Math.min(fc.s1, ...others.filter((o) => o.x0 >= x - 1).map((o) => o.x0));
+  return hi > lo ? { lo, hi } : null;
+}
+
+/** Where a thing `w` wide goes on the face near `x`: snapped edge to edge with its neighbours and kept
+ *  off them, or, when the free stretch there is narrower than it, how wide that stretch is (it isn't
+ *  squeezed in or pushed somewhere else). */
+export function fitOnFace(f: SketchFloor, fc: Face, x: number, w: number, z: number, h: number, skip = -1, depth = 600): { x: number } | { room: number; lo: number } {
+  const sx = slot(f, fc, x, w, z, h, skip, 6 * INCH, depth);
+  const span = freeSpan(f, fc, sx, z, h, skip, depth) ?? freeSpan(f, fc, x, z, h, skip, depth);
+  if (span && span.hi - span.lo >= w - 0.5) return { x: Math.min(span.hi - w / 2, Math.max(span.lo + w / 2, sx)) };
+  const near = freeSpan(f, fc, x, z, h, skip, depth);
+  return near ? { room: near.hi - near.lo, lo: near.lo } : { room: 0, lo: x };
+}
+
+/** What a placement that doesn't fit offers: the biggest stock width that fits (with the gap left for a
+ *  filler), or the cabinet cut down to the stretch exactly. Each is applied only when picked. */
+export interface FitAsk { text: string; options: { label: string; floor: SketchFloor; sel: number }[] }
+
+/** Put the pick on face `fc` at `x` (and, for something that hangs, as high as `mid` says). */
+export function placeOnFace(f: SketchFloor, fc: Face, x: number, pick: CabPick, mid?: number): { floor?: SketchFloor; sel?: number; note?: string; ask?: FitAsk } {
+  const { size, kind, name, cab } = pickSize(pick);
+  // something that hangs goes where it was let go (`mid` its middle off the floor), at its usual height when near it
+  const hangs = cab ? famOf(cab.fam).zone === "wall" : size.z > 0;
+  const want = mid != null ? mid - size.h / 2 : size.z;
+  const z = hangs && Math.abs(want - size.z) > 6 * INCH ? Math.max(0, Math.round(want)) : size.z;
+  const s = { ...size, z };
+  const list = f.fixtures ?? [];
+  const put = (w: number, at: number, c?: CabSpec, nm = name) => {
+    const fx = fixtureAt(f, fc, at, { ...s, w }, kind, nm, c);
+    const h = addHood({ ...f, fixtures: [...list, fx] }, list.length);
+    return { floor: h.floor, sel: list.length, ...(h.added ? { note: `${nm} in, with a hood above it (the code wants one over a range or cooktop).` } : {}) };
+  };
+  const fit = fitOnFace(f, fc, x, s.w, s.z, s.h, -1, s.d);
+  if ("x" in fit) return put(s.w, fit.x, cab);
+  if (fit.room < 3 * INCH) return { note: `There's no room for the ${name} there. Move or take out what's in the way first.` };
+  // offer smaller: the widest stock width that fits, and the exact width of the gap
+  const options: FitAsk["options"] = [];
+  const stock = cab ? famOf(cab.fam).widths.map((v) => v * INCH).filter((v) => v <= fit.room + 0.5).sort((a, b) => b - a)[0] : undefined;
+  const label = (w: number, c?: CabSpec) => (c ? `${cabCode(c, w, s.d, s.h)} ${famOf(c.fam).label.toLowerCase()}` : name);
+  const exact = !!stock && Math.abs(stock - fit.room) <= 0.5;
+  if (cab && stock) { const c: CabSpec = { ...cab, config: defaultConfig(cab.fam, stock) }; options.push({ label: exact ? `Use a ${cabCode(c, stock, s.d, s.h)} (fits exactly)` : `Use a stock ${cabCode(c, stock, s.d, s.h)} (${fmtLen(stock, "ft", true)}) and a filler`, ...put(stock, fit.lo + stock / 2, c, label(stock, c)) }); }
+  if (!exact) {
+    const c2: CabSpec | undefined = cab ? { ...cab, config: defaultConfig(cab.fam, fit.room) } : undefined;
+    options.push({ label: `Shrink it to ${fmtLen(fit.room, "ft", true)}${cab ? " (made to order)" : ""}`, ...put(fit.room, fit.lo + fit.room / 2, c2, label(fit.room, c2)) });
+  }
+  return { ask: { text: `The ${name} is ${fmtLen(s.w, "ft", true)} wide, but there's only ${fmtLen(fit.room, "ft", true)} free there.`, options } };
+}
+
 /** The size, kind and name of what the pick puts down. */
 export function pickSize(pick: CabPick) {
   const plain = plainOf(pick.item);
@@ -202,21 +258,16 @@ export function pickSize(pick: CabPick) {
 }
 
 /** A click with the Cabinets tool: put the picked cabinet against the nearest wall, or fill that wall. */
-export function cabinetClick(f: SketchFloor, p: Pt, pick: CabPick): { floor?: SketchFloor; sel?: number; note?: string } {
+export function cabinetClick(f: SketchFloor, p: Pt, pick: CabPick): { floor?: SketchFloor; sel?: number; note?: string; ask?: FitAsk } {
   if (pick.mode === "fill") {
     const fc = faceNear(f, p, 900);
     if (!fc) return { note: "Click inside the kitchen, close to the wall you want filled." };
     return fillWall(f, fc.ri, fc.edge, { base: pick.fillBase, wall: pick.fillWall, kind: pick.fillKind ?? "regular" });
   }
-  const { size, kind, name, cab } = pickSize(pick);
+  const { size } = pickSize(pick);
   const fc = faceNear(f, p, Math.max(900, size.d + 600));
   if (!fc) return { note: "Click inside a room, near the wall it goes on. It backs onto the wall and lines up with the cabinets beside it." };
-  const x = slot(f, fc, dot(sub(p, fc.A), fc.u), size.w, size.z, size.h, -1, 6 * INCH, size.d);
-  const fx = fixtureAt(f, fc, x, size, kind, name, cab);
-  const list = f.fixtures ?? [];
-  const placed: SketchFloor = { ...f, fixtures: [...list, fx] };
-  const h = addHood(placed, list.length);
-  return { floor: h.floor, sel: list.length, ...(h.added ? { note: `${name} in, with a hood above it (the code wants one over a range or cooktop).` } : {}) };
+  return placeOnFace(f, fc, dot(sub(p, fc.A), fc.u), pick);
 }
 
 /** A cabinet (or appliance) dragged to `c`: along the nearest wall, snapping to its neighbours. Null when
@@ -228,7 +279,10 @@ export function slideCabinet(f: SketchFloor, i: number, c: Pt): SketchFixture | 
   const fc = faceNear(f, c, d + 450);
   if (!fc) return null;
   const z = bottomOf(x0), h = topOf(x0) - z;
-  const x = slot(f, fc, dot(sub(c, fc.A), fc.u), w, z, h, i, 6 * INCH, d);
+  const fit = fitOnFace(f, fc, dot(sub(c, fc.A), fc.u), w, z, h, i, d);
+  // no room where it's being dragged: it stays where it was rather than going through a neighbour
+  if (!("x" in fit)) return x0;
+  const x = fit.x;
   const k = fc.t / 2 + d / 2;
   return { ...x0, facing: fc.facing, room: f.rooms[fc.ri].name, center: [Math.round(fc.A[0] + fc.u[0] * x + fc.n[0] * k), Math.round(fc.A[1] + fc.u[1] * x + fc.n[1] * k)] };
 }
