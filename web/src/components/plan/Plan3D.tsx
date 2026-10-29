@@ -52,6 +52,10 @@ interface Props {
   look?: BuildLook;
   /** look but don't move anything (shared links, the new-project review) */
   locked?: boolean;
+  /** the drawing tool's live view of the building: a click picks a room instead of opening its floor,
+   *  zoom goes right in, `open` sets the cutaway (0 walls up, 1 the walls facing you down) instead of
+   *  the zoom, and the roof shows only when `roof` */
+  live?: { open: number; roof: boolean };
   controls: Controls;
   onSelect: (id: string | null) => void;
   onSelectPin: (id: string) => void;
@@ -226,7 +230,7 @@ function buildScene(p: Props, mt: Materials): Built {
   const finish = outside || skin;
   // trim, porches and the dressed outside once it's finished; the roof is on from sheetrock
   const dressed = skin && p.wallMode === "full";
-  const roofed = outside && p.wallMode === "full" && (dressed || look === "drywall");
+  const roofed = outside && p.wallMode === "full" && (dressed || look === "drywall") && (p.live?.roof ?? true);
   const pick = (o: THREE.Object3D, data: Pick) => { o.userData.pick = data; picks.push(o); byId.set(data.id, o); };
 
   const roomBox = p.room ? p.room.polygon.reduce((a, q) => [Math.min(a[0], q[0] - 300), Math.min(a[1], q[1] - 300), Math.max(a[2], q[0] + 300), Math.max(a[3], q[1] + 300)], [Infinity, Infinity, -Infinity, -Infinity]) : [0, 0, 0, 0];
@@ -719,7 +723,7 @@ export function Plan3D(p: Props) {
     dir.normalize();
     const building = cb.current.mode === "building";
     // 0 = closed up, 1 = fully open
-    const open = building ? THREE.MathUtils.clamp((R * 2.7 - dist) / (R * 1.1), 0, 1) : polar < 0.3 ? 0 : THREE.MathUtils.clamp((polar - 0.3) / 0.4, 0, 1);
+    const open = building && cb.current.live ? cb.current.live.open : building ? THREE.MathUtils.clamp((R * 2.7 - dist) / (R * 1.1), 0, 1) : polar < 0.3 ? 0 : THREE.MathUtils.clamp((polar - 0.3) / 0.4, 0, 1);
     const focus = t.focus;
     for (const f of built.fades) {
       let o = 1;
@@ -745,7 +749,7 @@ export function Plan3D(p: Props) {
   }
 
   // (re)build the model when the job changes
-  const key = useMemo(() => ({}), [p.plan, p.mode, p.floor, p.room, p.items, p.pins, p.states, p.colorMode, p.wallMode, p.empty, p.look, p.draft, p.selectedPin, p.selectedItem]); // eslint-disable-line react-hooks/exhaustive-deps
+  const key = useMemo(() => ({}), [p.plan, p.mode, p.floor, p.room, p.items, p.pins, p.states, p.colorMode, p.wallMode, p.empty, p.look, p.draft, p.selectedPin, p.selectedItem, p.live?.roof]); // eslint-disable-line react-hooks/exhaustive-deps
   const framed = useRef<string>("");
   useEffect(() => {
     const t = three.current;
@@ -772,7 +776,7 @@ export function Plan3D(p: Props) {
       framed.current = where;
       frame(true);
       t.focus = 0;
-    }
+    } else frame(false); // the camera stays put; only its zoom limits follow the model's size
     highlight();
     placeDots();
   }, [key]);  
@@ -818,7 +822,7 @@ export function Plan3D(p: Props) {
     const building = cb.current.mode === "building";
     // in the building, zoom heads for the middle so it opens evenly; inside a floor, toward the cursor
     controls.zoomToCursor = !building;
-    controls.minDistance = building ? R * 1.45 : cb.current.room ? 0.6 : 1.2;
+    controls.minDistance = building ? (cb.current.live ? 1.5 : R * 1.45) : cb.current.room ? 0.6 : 1.2;
     controls.maxDistance = building ? R * 6 : cb.current.room ? Math.max(R, 2.6) * 5 : R * 3.4;
     if (!reset) return;
     // a scroll that was still going when the level changed shouldn't carry on into the new one
@@ -831,9 +835,9 @@ export function Plan3D(p: Props) {
     const fv = building ? frontView(cb.current.plan) : null;
     // look at the front of the house from a little above, or at a floor from a high corner
     const az = building ? (fv?.side === "top" ? Math.PI : 0) + 0.55 : 0.6;
-    const pol = building ? 1.12 : cb.current.room ? 0.3 : 0.75;
+    const pol = building ? (cb.current.live ? 0.95 : 1.12) : cb.current.room ? 0.3 : 0.75;
     // a room is small next to its own walls: stand back far enough to see all of it over them
-    const r = building ? R * 3.3 : cb.current.room ? Math.max(R, 2.6) * 3.4 : R * 2.3;
+    const r = building ? R * (cb.current.live ? 4.8 : 3.3) : cb.current.room ? Math.max(R, 2.6) * 3.4 : R * 2.3;
     camera.position.set(built.centre.x + r * Math.sin(pol) * Math.sin(az), built.centre.y + r * Math.cos(pol), built.centre.z + r * Math.sin(pol) * Math.cos(az));
     controls.update();
   }
@@ -883,7 +887,7 @@ export function Plan3D(p: Props) {
     const t = three.current;
     if (dir === "out" && cb.current.mode === "floor") cb.current.onLimitOut();
     else if (dir === "out") cb.current.onLimitOut();
-    else if (dir === "in" && cb.current.mode === "building" && t?.built) {
+    else if (dir === "in" && cb.current.mode === "building" && !cb.current.live && t?.built) {
       const f = t.built.floors[t.focus] ?? t.built.floors[0];
       if (f) cb.current.onOpenFloor(f.id);
     }
@@ -1048,6 +1052,7 @@ export function Plan3D(p: Props) {
         return;
       }
       const h = cast(e);
+      if (P.mode === "building" && P.live) return P.onSelect(h ? h.pick.id : null);
       if (P.mode === "building") {
         if (h?.pick.type === "pin") return P.onSelectPin(h.pick.id);
         if (h) P.onOpenFloor(floorAtY(h.point.y, h.pick.floorId));

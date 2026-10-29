@@ -10,6 +10,7 @@ import { CATALOG, bottomOf, topOf } from "./catalog";
 import { RULES } from "./rules";
 import { std } from "./standards";
 import { INCH, fmtLen } from "./units";
+import { addTrayGroup } from "./tray";
 import { FAMILIES, bottomFor, cabCode, defaultConfig, defaults, famOf, newSpec, wallTop, type CabFamily, type CabSpec } from "./cabinets";
 
 // wall thicknesses the plan is built with (sketch.ts): the room outline runs down the middle of each wall
@@ -350,3 +351,18 @@ export const PANEL_GROUPS: { group: string; items: { id: string; label: string }
   { group: "Appliances", items: PLAIN.filter((p) => p.group === "Appliances").map((p) => ({ id: p.id, label: p.label })) },
   { group: "Bath", items: [...FAMILIES.filter((x) => x.group === "Bath").map((x) => ({ id: x.id as string, label: x.label })), ...PLAIN.filter((p) => p.group === "Bath").map((p) => ({ id: p.id, label: p.label }))] },
 ];
+
+// the tray's Cabinets tab: every stock cabinet by its code (fillers and panels are in the Cabinets tool)
+const TRAY_FAMS: CabFamily[] = ["base", "drawer", "sink", "blind", "susan", "wall", "fridge_wall", "wall_end", "wall_corner", "wall_blind", "tall", "oven", "vanity", "vanity_drawer", "linen", "medicine"];
+addTrayGroup({
+  id: "cabinets", label: "Cabinets", by: "kind",
+  items: TRAY_FAMS.flatMap((fam) => {
+    const F = famOf(fam), d = defaults(fam);
+    // wall cabinets at their usual heights, the rest at the one they come in
+    const hs = fam === "wall" ? [30, 36, 42] : fam === "fridge_wall" ? [12, 15] : [d.h / INCH];
+    return hs.flatMap((hIn) => F.widths.map((wIn) => {
+      const w = wIn * INCH, h = hIn * INCH, cab = { ...newSpec(fam, w), config: defaultConfig(fam, w) };
+      return { kind: F.kind, label: `${cabCode(cab, w, d.d, h)} ${F.label.toLowerCase()}`, w, ...(F.heights ? { h } : {}), cab };
+    }));
+  }),
+});

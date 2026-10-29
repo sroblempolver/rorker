@@ -6,11 +6,10 @@
 // length you know. The result is the same sketch the reader makes, so the plan is built the same way.
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import type { Pt } from "@/lib/plan/types";
-import type { Side, Sketch, SketchDoor, SketchFloor, SketchRoom } from "@/lib/plan/sketch";
-import { OUTSIDE, doorSpot, hugWall, trimOverlap, outsidePieces, edgesOf, flatten, moveCorner, moveWall, nearSeg, pointInPoly, roomArea, sideOf, snapTo, splitPoly, wallAt, windowSpots, type Seg } from "@/lib/plan/sketchEdit";
+import type { Side, Sketch, SketchDoor, SketchFloor } from "@/lib/plan/sketch";
+import { OUTSIDE, doorSpot, hugWall, trimOverlap, outsidePieces, edgesOf, flatten, moveCorner, nearSeg, pointInPoly, roomArea, sideOf, snapTo, splitPoly, wallAt, windowSpots, type Seg } from "@/lib/plan/sketchEdit";
 import { bboxOf, centroid } from "@/lib/plan/geometry";
 import { CATALOG } from "@/lib/plan/catalog";
-import { RULES } from "@/lib/plan/rules";
 import { MATERIAL_BASE, ROOM_MATERIAL } from "@/components/plan/style";
 import { useEscape, editable } from "@/components/ui/hotkeys";
 import { DOOR_W, WallView } from "./WallView";
@@ -21,6 +20,13 @@ import { StandardsPanel } from "./StandardsPanel";
 import { CabinetEdit, CabinetPanel } from "./CabinetPanel";
 import { DEFAULT_PICK, cabinetClick, slideCabinet, type CabPick } from "@/lib/plan/cabinetLayout";
 import { cabCode, defaults } from "@/lib/plan/cabinets";
+import { Live3D, type Walls } from "./Live3D";
+import { RoofPanel } from "./RoofPanel";
+import { std, useStandards } from "@/lib/plan/standards";
+import { halfSize, moveRoom, outward, pushWall, turnRoom, turnSide } from "@/lib/plan/roomEdit";
+import { cleanOutline, cornerAt, nextCorner } from "@/lib/plan/corners";
+import { tabForRoom, type TrayItem } from "@/lib/plan/tray";
+import { CatalogTray } from "./CatalogTray";
 
 /** A picture of the drawing to trace over. `mmPerPx` when its scale is known (an AutoCAD drawing). */
 export interface Picture { name: string; url: string; mmPerPx?: number }
@@ -39,26 +45,25 @@ export function picturesFrom(parts: IntakePart[]): Picture[] {
 const ROOM_TYPES = ["kitchen", "bathroom", "wc", "bedroom", "living", "dining", "family", "study", "office", "hallway", "foyer", "stair_hall", "laundry", "utility", "closet", "garage", "storage", "balcony", "porch", "terrace", "other"] as const;
 const TYPE_LABEL: Record<string, string> = { wc: "WC", stair_hall: "Stair hall" };
 const label = (t: string) => TYPE_LABEL[t] ?? t.charAt(0).toUpperCase() + t.slice(1).replace(/_/g, " ");
-const THINGS: { group: string; kinds: string[] }[] = [
-  { group: "Kitchen", kinds: ["base_cabinet", "kitchen_sink", "range", "fridge", "dishwasher", "island", "wall_cabinet", "tall_cabinet"] },
-  { group: "Bath", kinds: ["toilet", "washbasin", "vanity", "bathtub", "shower"] },
-  { group: "Rooms", kinds: ["bed", "sofa", "armchair", "dining_table", "table", "desk", "wardrobe", "tv", "fireplace"] },
-  { group: "Other", kinds: ["washing_machine", "dryer", "water_heater", "car"] },
-];
+// every kind in the catalogue, by name, for changing what a placed thing is
+const ALL_KINDS = Object.keys(CATALOG).sort((a, b) => CATALOG[a].label.localeCompare(CATALOG[b].label));
 const DOOR_KINDS = [["door", "Door"], ["double_door", "Double door"], ["sliding_door", "Sliding door"], ["garage_door", "Garage door"], ["opening", "Open passage"]] as const;
 const SIDES: Side[] = ["north", "east", "south", "west"];
 const OPP: Record<Side, Side> = { north: "south", south: "north", east: "west", west: "east" };
 
-type Tool = "select" | "room" | "pen" | "split" | "door" | "window" | "balcony" | "thing" | "cabinet" | "scale" | "match" | "picture";
+type Tool = "select" | "room" | "pen" | "corners" | "split" | "door" | "window" | "balcony" | "thing" | "cabinet" | "eyedrop" | "remove" | "scale" | "match" | "picture";
 const TOOLS: { id: Tool; label: string; key: string; help: string; menu?: boolean; picture?: boolean; more?: boolean }[] = [
-  { id: "select", label: "Select", key: "v", help: "Click a room, door, window or piece of furniture to change it. Drag a room to move it, a corner to reshape it, or a wall to slide it (the room next door follows). Click a wall of the picked room to see it from the side. Arrow keys nudge. Drag empty space to look around, scroll to zoom." },
+  { id: "select", label: "Select", key: "v", help: "Click a room, door, window or piece of furniture to change it. Drag a room to move it with everything in it, a corner to reshape it, or an arrow on a wall to push or pull that wall (the room next door and the furniture against it follow). Q turns the picked room or thing a quarter turn (Shift+Q the other way). Click a wall of the picked room to see it from the side. Arrow keys nudge. Drag empty space to look around, scroll to zoom." },
   { id: "pen", label: "Walls", key: "e", help: "Draw a room's walls with the mouse or your finger, all the way round. Wobbly lines come out straight and nearly square corners come out square; a wall drawn on a slant keeps its slant. Then type the exact sizes." },
   { id: "split", label: "Split room", key: "s", more: true, help: "Drag a line across a room to cut it in two (for two rooms read as one)." },
   { id: "door", label: "Door", key: "d", menu: true, help: "Click a wall between two rooms to put a door in it, or an outside wall for an outside door." },
   { id: "window", label: "Window", key: "w", menu: true, help: "Click an outside wall of a room to add a window there. Click again for another." },
   { id: "balcony", label: "Balcony", key: "b", menu: true, help: "Click an outside wall of a room. Upstairs that adds a balcony with a patio door onto it; on the ground floor, a patio door out to the garden." },
-  { id: "thing", label: "Furniture", key: "f", help: "Cabinets, sinks, toilets, beds, appliances. Pick one, then click where it goes. Near a wall it backs onto the wall and faces the room." },
-  { id: "cabinet", label: "Cabinets", key: "c", help: "Kitchen and bath cabinets at stock sizes (B18, W3030, SB36, vanities). Pick one and click near a wall, or fill a whole wall in one click." },
+  { id: "thing", label: "Furniture", key: "f", help: "Cabinets, sinks, toilets, beds, appliances. Pick one in the tray under the plan, then click where it goes. Near a wall it backs onto the wall and faces the room. Shift-click to keep placing the same thing." },
+  { id: "cabinet", label: "Cabinets", key: "j", help: "Kitchen and bath cabinets at stock sizes (B18, W3030, SB36, vanities). Pick one and click near a wall, or fill a whole wall in one click." },
+  { id: "corners", label: "Corners", key: "c", more: true, help: "Click each corner of the room in turn. Walls turn in steady steps and lock onto other rooms' corners and walls. Type a length (like 12'6) and press Enter to make the wall that long. Click the first corner, double-click or press Enter to finish; Backspace takes back a corner, Esc stops." },
+  { id: "eyedrop", label: "Copy", key: "i", more: true, help: "Click a piece of furniture to pick up another one just like it, same size, then click where it goes. Or click a room to copy its kind (kitchen, bedroom), then click the rooms that should be the same." },
+  { id: "remove", label: "Remove", key: "x", more: true, help: "Click a room, door, window or piece of furniture to take it out. Undo brings it back." },
   { id: "scale", label: "Set scale", key: "k", picture: true, more: true, help: "Make the drawing underneath the right size: click both ends of something you know the length of (a wall, a dimension line), then type how long it is." },
   { id: "match", label: "Line up", key: "l", picture: true, more: true, help: "Lines the drawing up with the rooms: click a corner on the picture, then the room corner it should sit on. Do it for two corners far apart." },
   { id: "picture", label: "Move picture", key: "p", picture: true, more: true, help: "Drag the picture underneath to move it." },
@@ -77,9 +82,9 @@ type Drag =
   | { k: "newRoom"; a: Pt; b: Pt }
   | { k: "split"; a: Pt; b: Pt }
   | { k: "pen"; pts: Pt[] }
-  | { k: "move"; i: number; from: Pt; orig: Pt[]; moved: boolean }
+  | { k: "move"; i: number; from: Pt; orig: Pt[]; of: SketchFloor; moved: boolean }
   | { k: "corner"; i: number; v: number; orig: Pt[] }
-  | { k: "wall"; s: Seg; from: Pt; orig: SketchRoom[]; i: number; e: number; moved: boolean }
+  | { k: "wall"; s: Seg; from: Pt; of: SketchFloor; i: number; e: number; moved: boolean; by: number }
   | { k: "thing"; i: number; from: Pt; orig: Pt }
   | { k: "picture"; from: Pt; orig: Pt };
 interface View { x: number; y: number; w: number }
@@ -100,7 +105,13 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   const [doorKind, setDoorKind] = useState<NonNullable<SketchDoor["kind"]>>("door");
   const [wallAdd, setWallAdd] = useState<"balcony" | null>(null);
   const [sel, setSel] = useState<Sel>(null);
-  const [thing, setThing] = useState("kitchen_sink");
+  const [thing, setThing] = useState<TrayItem>({ kind: "kitchen_sink" });
+  // corner by corner: the corners so far, a typed wall length, where the pointer is
+  const [corners, setCorners] = useState<Pt[]>([]);
+  const [typed, setTyped] = useState("");
+  const [hover, setHover] = useState<Pt | null>(null);
+  // the room kind the Copy tool picked up, put on each room clicked next
+  const [pickedType, setPickedType] = useState<string | null>(null);
   // what the Cabinets tool puts down next
   const [cabPick, setCabPick] = useState<CabPick>(DEFAULT_PICK);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -114,6 +125,11 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   const [addingFloor, setAddingFloor] = useState(false);
   // the company's standards, open in the side panel
   const [showStd, setShowStd] = useState(false);
+  // the live 3D beside the plan, its walls, and the roof panel
+  const [show3d, setShow3d] = useState(false);
+  const [walls3d, setWalls3d] = useState<Walls>("up");
+  const [showRoof, setShowRoof] = useState(false);
+  useStandards();
   // lengths are shown and typed in feet and inches
   const lu: Units = "ft";
   const svg = useRef<SVGSVGElement>(null);
@@ -244,7 +260,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     const r = floor.rooms[i], b = bboxOf(r.polygon);
     if (!(size >= 300)) return;
     const s: Seg = axis === 0 ? [[b[2], b[1]], [b[2], b[3]]] : [[b[0], b[3]], [b[2], b[3]]];
-    setFloor({ ...floor, rooms: moveWall(floor.rooms, s, size - (b[axis + 2] - b[axis])) }, false);
+    setFloor(pushWall(floor, s, size - (b[axis + 2] - b[axis])).floor, false);
   };
   const duplicate = (i: number) => {
     const r = floor.rooms[i], b = bboxOf(r.polygon), w = b[2] - b[0];
@@ -277,6 +293,13 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   };
   const doorSpots = useMemo(() => (floor.doors ?? []).map((d) => doorSpot(floor, d)), [floor]);
   const winSpots = useMemo(() => (floor.windows ?? []).map((w) => windowSpots(floor, w)), [floor]);
+  // the push and pull arrows of the picked room: one just outside the middle of each straight wall
+  const handles = (() => {
+    const r = tool === "select" && sel?.t === "room" ? floor.rooms[sel.i] : null;
+    if (!r) return [];
+    return edgesOf(r.polygon).map((s, e) => ({ s, e })).filter(({ s }) => (Math.abs(s[0][0] - s[1][0]) < 1 || Math.abs(s[0][1] - s[1][1]) < 1) && dist(s[0], s[1]) > 40 * px)
+      .map(({ s, e }) => { const n = outward(r.polygon, s); return { e, n, at: [(s[0][0] + s[1][0]) / 2 + n[0] * 16 * px, (s[0][1] + s[1][1]) / 2 + n[1] * 16 * px] as Pt }; });
+  })();
 
   const renameRoom = (f: SketchFloor, from: string, to: string): SketchFloor => {
     const same = (n?: string) => !!n && n.trim().toLowerCase() === from.trim().toLowerCase();
@@ -295,18 +318,65 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     return near ? OPP[sideOf(poly, near.s)] : undefined;
   };
 
-  const deleteSel = () => {
-    if (!sel) return;
-    if (sel.t === "room") {
-      const name = floor.rooms[sel.i].name.toLowerCase();
-      setFloor({ ...floor, rooms: floor.rooms.filter((_, i) => i !== sel.i),
+  const removeIt = (it: NonNullable<Sel>) => {
+    if (it.t === "room") {
+      const name = floor.rooms[it.i].name.toLowerCase();
+      setFloor({ ...floor, rooms: floor.rooms.filter((_, i) => i !== it.i),
         doors: (floor.doors ?? []).filter((d) => !d.rooms.some((n) => n.toLowerCase() === name)),
         windows: (floor.windows ?? []).filter((w) => w.room.toLowerCase() !== name) });
       setWall(null);
-    } else if (sel.t === "door") setFloor({ ...floor, doors: (floor.doors ?? []).filter((_, i) => i !== sel.i) });
-    else if (sel.t === "window") setFloor({ ...floor, windows: (floor.windows ?? []).filter((_, i) => i !== sel.i) });
-    else setFloor({ ...floor, fixtures: (floor.fixtures ?? []).filter((_, i) => i !== sel.i) });
+    } else if (it.t === "door") setFloor({ ...floor, doors: (floor.doors ?? []).filter((_, i) => i !== it.i) });
+    else if (it.t === "window") setFloor({ ...floor, windows: (floor.windows ?? []).filter((_, i) => i !== it.i) });
+    else setFloor({ ...floor, fixtures: (floor.fixtures ?? []).filter((_, i) => i !== it.i) });
     setSel(null);
+  };
+  const deleteSel = () => { if (sel) removeIt(sel); };
+  const pickTool = (t: Tool) => { setTool(t); setClicks([]); setCorners([]); setTyped(""); setPickedType(null); if (t === "remove" || t === "eyedrop" || t === "corners") setSel(null); };
+  // what a click at p lands on: furniture first, then doors, windows, the room
+  const hitAt = (p: Pt): Sel => {
+    const ti = thingAt(p);
+    if (ti >= 0) return { t: "thing", i: ti };
+    const di = doorSpots.findIndex((s) => s && nearSeg(p, s).d < 9 * px);
+    if (di >= 0) return { t: "door", i: di };
+    const wi = winSpots.findIndex((list) => list.some((s) => nearSeg(p, s).d < 9 * px));
+    if (wi >= 0) return { t: "window", i: wi };
+    const ri = roomAt(p);
+    return ri >= 0 ? { t: "room", i: ri } : null;
+  };
+  // a quarter turn of the picked room (with its furniture and windows) or the picked thing
+  const turn = (cw: boolean) => {
+    if (sel?.t === "room") setFloor(turnRoom(floor, sel.i, cw));
+    else if (sel?.t === "thing") setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? { ...f, facing: f.facing ? turnSide(f.facing, cw) : cw ? "east" : "west" } : f)) });
+  };
+
+  // corner by corner: the next corner the pointer would put down, locked onto corners, walls and steady angles
+  const cornerSnap = (p: Pt): Pt => {
+    const c = snapCorner(p);
+    if (c !== p) return c;
+    if (!corners.length) return snapPt(p);
+    const last = corners[corners.length - 1], q = nextCorner(last, p, std("draw.snapAngle"));
+    // a square wall also lines up with the other rooms' walls
+    if (Math.abs(q[0] - last[0]) < 1) return [last[0], snapPt(q)[1]];
+    if (Math.abs(q[1] - last[1]) < 1) return [snapPt(q)[0], last[1]];
+    return q;
+  };
+  const closeCorners = (pts = corners) => {
+    const poly = cleanOutline(pts);
+    setCorners([]);
+    setTyped("");
+    if (poly.length < 3 || roomArea({ name: "", polygon: poly }) < 0.3) { setNote("A room needs at least three corners around some floor."); return; }
+    const name = uniqueName(`Room ${floor.rooms.length + 1}`);
+    // rooms never overlap: where it runs into a neighbour it stops at the neighbour's wall
+    const fit = trimOverlap(poly, floor.rooms.map((r) => r.polygon));
+    if (!fit) { setNote("That's on top of another room. Draw it next to it (or use Split room to divide a room)."); return; }
+    setFloor({ ...floor, rooms: [...floor.rooms, { name, type: "other", polygon: fit }] });
+    setSel({ t: "room", i: floor.rooms.length });
+  };
+  const addCorner = (q: Pt) => {
+    if (corners.length >= 3 && dist(q, corners[0]) < 10 * px) { closeCorners(); return; }
+    if (corners.length && dist(q, corners[corners.length - 1]) < 5) return;
+    setCorners([...corners, [Math.round(q[0]), Math.round(q[1])]]);
+    setTyped("");
   };
 
   // keys: the tool letters, Delete, Ctrl+Z
@@ -316,38 +386,55 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { e.preventDefault(); redo(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); return; }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // corner by corner: type a wall's length, Enter puts it down (or finishes), Backspace takes back
+      if (tool === "corners" && corners.length) {
+        if (/^[\d'".½ ]$/.test(e.key) || (typed && /^[a-z]$/i.test(e.key) && /^(f|ft|i|in|m|mm|c|cm)$/i.test((typed.match(/[a-z]*$/i)?.[0] ?? "") + e.key))) { e.preventDefault(); setTyped(typed + e.key); return; }
+        if (e.key === "Backspace") { e.preventDefault(); if (typed) setTyped(typed.slice(0, -1)); else setCorners(corners.slice(0, -1)); return; }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const len = typed ? parseLength(typed, lu) : null;
+          if (len && hover) addCorner(cornerAt(corners[corners.length - 1], hover, len, std("draw.snapAngle")));
+          else if (typed) setNote("Type a length like 12'6 or 150 in.");
+          else closeCorners();
+          return;
+        }
+      }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); return; }
+      if (e.key.toLowerCase() === "q" && (sel?.t === "room" || sel?.t === "thing")) { e.preventDefault(); turn(!e.shiftKey); return; }
       // arrows nudge the picked room or thing: 100 mm, 10 mm with Shift
       const dir: Record<string, Pt> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
       if (dir[e.key] && (sel?.t === "room" || sel?.t === "thing")) {
         e.preventDefault();
         const st = e.shiftKey ? INCH / 2 : 6 * INCH, [dx, dy] = [dir[e.key][0] * st, dir[e.key][1] * st];
-        if (sel.t === "room") setFloor({ ...floor, rooms: floor.rooms.map((r, i) => (i === sel.i ? { ...r, polygon: r.polygon.map(([x, y]) => [x + dx, y + dy] as Pt) } : r)) });
+        if (sel.t === "room") setFloor(moveRoom(floor, sel.i, [dx, dy]));
         else setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? { ...f, center: [f.center[0] + dx, f.center[1] + dy] as Pt } : f)) });
         return;
       }
       const t = TOOLS.find((x) => x.key === e.key.toLowerCase());
-      if (t) { setTool(t.id); setClicks([]); }
+      if (t) pickTool(t.id);
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   });
-  useEscape(() => { if (drag) setDrag(null); else if (clicks.length) setClicks([]); else if (sel) setSel(null); else if (wall) setWall(null); else setTool("select"); });
+  useEscape(() => { if (drag) setDrag(null); else if (typed) setTyped(""); else if (corners.length) setCorners([]); else if (pickedType) setPickedType(null); else if (clicks.length) setClicks([]); else if (sel) setSel(null); else if (wall) setWall(null); else setTool("select"); });
 
   const down = (e: RPointerEvent<SVGSVGElement>) => {
     if (e.button === 2) return;
     (e.target as Element).setPointerCapture?.(e.pointerId);
     const p = toMm(e);
     setNote(null);
-    if (e.button === 1 || e.shiftKey && tool !== "room") { setDrag({ k: "pan", c: [e.clientX, e.clientY], v }); return; }
+    if (e.button === 1 || e.shiftKey && tool !== "room" && tool !== "thing" && tool !== "corners") { setDrag({ k: "pan", c: [e.clientX, e.clientY], v }); return; }
     if (tool === "select") {
       if (sel?.t === "room") {
         const poly = floor.rooms[sel.i].polygon;
         const vi = poly.findIndex((q) => dist(q, p) < 9 * px);
         if (vi >= 0) { past.current.push(sk); setDrag({ k: "corner", i: sel.i, v: vi, orig: poly }); return; }
         const es = edgesOf(poly);
-        const ei = es.findIndex((s) => nearSeg(p, s).d < 7 * px && nearSeg(p, s).t > 0.08 && nearSeg(p, s).t < 0.92);
-        if (ei >= 0) { setDrag({ k: "wall", s: es[ei], from: p, orig: floor.rooms, i: sel.i, e: ei, moved: false }); return; }
+        // the push and pull arrows first, then anywhere along the wall
+        let ei = handles.findIndex((h) => dist(h.at, p) < 11 * px);
+        if (ei < 0) ei = es.findIndex((s) => nearSeg(p, s).d < 7 * px && nearSeg(p, s).t > 0.08 && nearSeg(p, s).t < 0.92);
+        else ei = handles[ei].e;
+        if (ei >= 0) { setDrag({ k: "wall", s: es[ei], from: p, of: floor, i: sel.i, e: ei, moved: false, by: 0 }); return; }
       }
       const ti = thingAt(p);
       if (ti >= 0) { setSel({ t: "thing", i: ti }); past.current.push(sk); setDrag({ k: "thing", i: ti, from: p, orig: floor.fixtures![ti].center }); return; }
@@ -356,7 +443,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       const wi = winSpots.findIndex((list) => list.some((s) => nearSeg(p, s).d < 9 * px));
       if (wi >= 0) { setSel({ t: "window", i: wi }); return; }
       const ri = roomAt(p);
-      if (ri >= 0) { setSel({ t: "room", i: ri }); setDrag({ k: "move", i: ri, from: p, orig: floor.rooms[ri].polygon, moved: false }); return; }
+      if (ri >= 0) { setSel({ t: "room", i: ri }); setDrag({ k: "move", i: ri, from: p, orig: floor.rooms[ri].polygon, of: floor, moved: false }); return; }
       setSel(null);
       setDrag({ k: "pan", c: [e.clientX, e.clientY], v });
     } else if (tool === "room") {
@@ -372,6 +459,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   };
 
   const move = (e: RPointerEvent<SVGSVGElement>) => {
+    if (!drag && (tool === "corners" || tool === "remove" || tool === "eyedrop" || tool === "thing")) { setHover(toMm(e)); return; }
     if (!drag) return;
     const p = toMm(e);
     if (drag.k === "pan") {
@@ -389,7 +477,9 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       const ref = moved.reduce((a, b) => (dist(a, p) < dist(b, p) ? a : b));
       const s = snapPt(ref, drag.i);
       const d: Pt = [s[0] - ref[0] + raw[0], s[1] - ref[1] + raw[1]];
-      setFloor({ ...floor, rooms: floor.rooms.map((r, i) => (i === drag.i ? { ...r, polygon: drag.orig.map((q) => [r10(q[0] + d[0]), r10(q[1] + d[1])] as Pt) } : r)) }, false);
+      // its furniture comes along; the outline lands on the 10 mm grid like before
+      const q0 = drag.orig[0];
+      setFloor(moveRoom(drag.of, drag.i, [r10(q0[0] + d[0]) - q0[0], r10(q0[1] + d[1]) - q0[1]]), false);
     } else if (drag.k === "corner") {
       const to = snapPt(p, drag.i);
       setFloor({ ...floor, rooms: floor.rooms.map((r, i) => (i === drag.i ? { ...r, polygon: moveCorner(drag.orig, drag.v, to) } : r)) }, false);
@@ -397,12 +487,14 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       if (!drag.moved && dist(p, drag.from) < 4 * px) return;
       if (!drag.moved) { past.current.push(sk); setDrag({ ...drag, moved: true }); }
       const h = Math.abs(drag.s[0][1] - drag.s[1][1]) < 1;
-      const { xs, ys } = snapLines();
+      // snap to the other walls where they were before this push
+      const xs = [...drag.of.rooms, ...(below?.rooms ?? [])].flatMap((r) => r.polygon.map((q) => q[0])), ys = [...drag.of.rooms, ...(below?.rooms ?? [])].flatMap((r) => r.polygon.map((q) => q[1]));
       const line = h ? drag.s[0][1] : drag.s[0][0];
       const want = (h ? p[1] - drag.from[1] : p[0] - drag.from[0]) + line;
       const others = (h ? ys : xs).filter((x) => Math.abs(x - line) > 1);
-      const by = snapTo(want, others, 12 * px, 10) - line;
-      setFloor({ ...floor, rooms: moveWall(drag.orig, drag.s, by) }, false);
+      const res = pushWall(drag.of, drag.s, snapTo(want, others, 12 * px, 10) - line);
+      setDrag({ ...drag, moved: true, by: res.by });
+      setFloor(res.floor, false);
     } else if (drag.k === "thing") {
       const c: Pt = [r10(drag.orig[0] + p[0] - drag.from[0]), r10(drag.orig[1] + p[1] - drag.from[1])];
       const f0 = (floor.fixtures ?? [])[drag.i], ri = roomAt(c);
@@ -497,16 +589,48 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         setFloor({ ...floor, windows: [...list, { room, side: w.side, count: 1 }] });
         setSel({ t: "window", i: list.length });
       }
+    } else if (tool === "corners") {
+      if (corners.length >= 3 && dist(p, corners[0]) < 10 * px) closeCorners();
+      else addCorner(cornerSnap(p));
+    } else if (tool === "remove") {
+      const it = hitAt(p);
+      if (!it) { setNote("Click a room, door, window or piece of furniture to take it out."); return; }
+      removeIt(it);
+    } else if (tool === "eyedrop") {
+      const it = hitAt(p);
+      if (it?.t === "thing") {
+        // pick up one just like it: the same kind at the same size
+        const f = floor.fixtures![it.i];
+        setThing({ kind: f.kind, label: f.name && f.name !== CATALOG[f.kind]?.label ? f.name : undefined, w: f.width_mm, d: f.depth_mm, h: f.height_mm, ...(f.cab ? { cab: f.cab } : {}) });
+        setTool("thing");
+        setNote(`Picked up a ${(f.name ?? CATALOG[f.kind]?.label ?? f.kind).toLowerCase()}. Click where the next one goes (Shift-click for several).`);
+      } else if (it?.t === "room") {
+        const r = floor.rooms[it.i];
+        if (pickedType) {
+          setFloor({ ...floor, rooms: floor.rooms.map((q, i) => (i === it.i ? { ...q, type: pickedType } : q)) });
+          setNote(`${r.name} is now a ${label(pickedType).toLowerCase()}. Click more rooms, or Esc to stop.`);
+        } else {
+          setPickedType(r.type ?? "other");
+          setNote(`Copied ${label(r.type ?? "other").toLowerCase()}. Now click the rooms that should be the same.`);
+        }
+      } else setNote("Click a piece of furniture or a room to copy it.");
+    } else if (tool === "thing" && thing.cab) {
+      // a stock cabinet from the tray goes in like one from the Cabinets tool: onto the wall, beside its neighbours
+      const r = cabinetClick(floor, p, { item: thing.cab.fam, w: thing.w, h: thing.h, config: thing.cab.config, hinge: thing.cab.hinge, mode: "place", fillBase: false, fillWall: false });
+      if (r.note) setNote(r.note);
+      if (r.floor) { setFloor(r.floor); setSel(r.sel != null ? { t: "thing", i: r.sel } : null); if (!e.shiftKey) setTool("select"); }
     } else if (tool === "thing") {
-      const spec = CATALOG[thing];
+      const spec = CATALOG[thing.kind];
       const ri = roomAt(p);
       const c: Pt = [r10(p[0]), r10(p[1])];
-      const w = spec?.w ?? 600, dp = spec?.d ?? 600;
+      const w = thing.w ?? spec?.w ?? 600, dp = thing.d ?? spec?.d ?? 600;
       // against a wall when it's put near one: back flat to the wall, facing the room
       const hug = ri >= 0 && spec?.mount !== "ceiling" ? hugWall(floor.rooms[ri].polygon, c, w, dp, 600) : null;
-      const fx = { kind: thing, name: spec?.label, room: ri >= 0 ? floor.rooms[ri].name : undefined, center: hug?.center ?? c, width_mm: w, depth_mm: dp, facing: hug?.facing ?? facingFor(c, ri) };
+      const fx = { kind: thing.kind, name: thing.label ?? spec?.label, room: ri >= 0 ? floor.rooms[ri].name : undefined, center: hug?.center ?? c, width_mm: w, depth_mm: dp, facing: hug?.facing ?? facingFor(c, ri), ...(thing.h ? { height_mm: thing.h } : {}) };
       setFloor({ ...floor, fixtures: [...(floor.fixtures ?? []), fx] });
       setSel({ t: "thing", i: (floor.fixtures ?? []).length });
+      // Shift-click keeps placing the same thing; a plain click puts it down and picks it to adjust
+      if (!e.shiftKey) setTool("select");
     } else if (tool === "cabinet") {
       // a click on a cabinet picks it; anywhere else puts one in
       const ti = thingAt(p);
@@ -575,7 +699,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       )}
       <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b border-line bg-panel">
         {TOOLS.filter((t) => !t.menu && !t.more).flatMap((t) => [
-          <button key={t.id} onClick={() => { setTool(t.id); setClicks([]); }} title={`${t.label} (${t.key.toUpperCase()})`}
+          <button key={t.id} onClick={() => pickTool(t.id)} title={`${t.label} (${t.key.toUpperCase()})`}
             className={`btn btn-sm ${tool === t.id ? "btn-primary" : "btn-ghost"}`}>{t.label}</button>,
           // doors, windows and balconies in one menu, after Split room
           ...(t.id === "pen" ? [
@@ -589,7 +713,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           ] : []),
         ])}
         <select aria-label="More tools" className={`btn btn-sm !pr-2 ${TOOLS.find((x) => x.id === tool)?.more ? "btn-primary" : "btn-ghost"}`}
-          value={TOOLS.find((x) => x.id === tool)?.more ? tool : ""} onChange={(e) => { setTool(e.target.value as Tool); setClicks([]); }}>
+          value={TOOLS.find((x) => x.id === tool)?.more ? tool : ""} onChange={(e) => pickTool(e.target.value as Tool)}>
           <option value="" disabled>More</option>
           {TOOLS.filter((t) => t.more && (pictures.length || !t.picture)).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
         </select>
@@ -600,7 +724,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(0.75)} aria-label="Zoom in">+</button>
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(1.33)} aria-label="Zoom out">−</button>
         <button className="btn btn-sm btn-ghost" onClick={() => setView(fitView())}>Fit</button>
-        <button className={`btn btn-sm ml-auto ${showStd ? "btn-primary" : "btn-ghost"}`} onClick={() => setShowStd((x) => !x)} title="Your default sizes and the limits the checks use">Standards</button>
+        <button className={`btn btn-sm ml-auto ${show3d ? "btn-primary" : "btn-ghost"}`} onClick={() => setShow3d((x) => !x)} title="See the house in 3D as you draw">3D</button>
+        <button className={`btn btn-sm ${showStd ? "btn-primary" : "btn-ghost"}`} onClick={() => setShowStd((x) => !x)} title="Your default sizes and the limits the checks use">Standards</button>
       </div>
       <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 border-b border-line text-[13px]">
         {sk.floors.map((f, i) => (
@@ -622,10 +747,12 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       </div>
       <div className="grid lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0">
-        <div className={`relative ${seen ? "h-[42vh] min-h-[300px]" : "h-[62vh] min-h-[420px]"} bg-ink`}>
+        <div className={show3d ? "grid xl:grid-cols-2" : ""}>
+        <div className={`relative ${seen ? "h-[42vh] min-h-[300px]" : tool === "thing" ? "h-[48vh] min-h-[340px]" : "h-[62vh] min-h-[420px]"} bg-ink`}>
           <svg ref={svg} className="absolute inset-0 w-full h-full touch-none select-none" viewBox={`${v.x} ${v.y} ${v.w} ${vh}`}
             style={{ cursor: drag?.k === "pan" ? "grabbing" : tool === "select" ? "default" : tool === "picture" ? "move" : "crosshair" }}
-            onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrag(null)} onContextMenu={(e) => e.preventDefault()}>
+            onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrag(null)} onPointerLeave={() => setHover(null)}
+            onDoubleClick={() => { if (tool === "corners" && corners.length >= 3) closeCorners(); }} onContextMenu={(e) => e.preventDefault()}>
             {bg && sizes[bg.pic] && (
               <image href={pictures[bg.pic].url} x={bg.at[0]} y={bg.at[1]} width={sizes[bg.pic][0] * bg.mmPerPx} height={sizes[bg.pic][1] * bg.mmPerPx} opacity={bg.opacity} preserveAspectRatio="none" style={{ pointerEvents: "none" }} />
             )}
@@ -664,7 +791,30 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             {doorSpots.map((s, i) => s && <line key={`d${i}`} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "door" && sel.i === i ? "#fff" : "#ff6a1f"} strokeWidth={7 * px} strokeLinecap="butt" />)}
             {winSpots.map((list, i) => list.map((s, k) => <line key={`w${i}-${k}`} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "window" && sel.i === i ? "#fff" : "#8fd3f0"} strokeWidth={6 * px} />))}
             {room && room.polygon.map((q, k) => <rect key={k} x={q[0] - 5 * px} y={q[1] - 5 * px} width={10 * px} height={10 * px} fill="#ff6a1f" stroke="#fff" strokeWidth={px} />)}
-            {room && edgesOf(room.polygon).map((s, k) => <circle key={`m${k}`} cx={(s[0][0] + s[1][0]) / 2} cy={(s[0][1] + s[1][1]) / 2} r={4 * px} fill="#fff" stroke="#ff6a1f" strokeWidth={1.5 * px} />)}
+            {/* push and pull: an arrow out of the room on each straight wall */}
+            {handles.map((h) => {
+              const on = drag?.k === "wall" && drag.e === h.e, ang = (Math.atan2(h.n[1], h.n[0]) * 180) / Math.PI;
+              return (
+                <g key={`h${h.e}`} transform={`translate(${h.at[0]} ${h.at[1]}) rotate(${ang}) scale(${px})`} style={{ cursor: Math.abs(h.n[0]) > 0.5 ? "ew-resize" : "ns-resize" }}>
+                  <circle r={10} fill={on ? "#fff" : "#ff6a1f"} stroke={on ? "#ff6a1f" : "#fff"} strokeWidth={1.5} />
+                  <path d="M-4.5 -5.5 L5.5 0 L-4.5 5.5 Z" fill={on ? "#ff6a1f" : "#fff"} />
+                </g>
+              );
+            })}
+            {drag?.k === "wall" && drag.moved && room && (() => {
+              // live size of the room, and how far the wall has gone
+              const b = bboxOf(room.polygon), c = centroid(room.polygon), h = handles.find((x) => x.e === drag.e), f = fontMm * 1.5;
+              const size = `${fmtLen(b[2] - b[0], lu, true)} × ${fmtLen(b[3] - b[1], lu, true)}`;
+              const by = h ? `${drag.by * (h.n[0] + h.n[1]) >= 0 ? "pulled out" : "pushed in"} ${fmtLen(Math.abs(drag.by), lu, true)}` : "";
+              const w = Math.max(size.length, by.length) * f * 0.56;
+              return (
+                <g style={{ pointerEvents: "none" }} textAnchor="middle" dominantBaseline="middle">
+                  <rect x={c[0] - w / 2} y={c[1] - f * 3.3} width={w} height={f * 2.5} rx={f * 0.3} fill="#17181b" fillOpacity={0.88} stroke="#ff6a1f" strokeWidth={1.5 * px} />
+                  <text x={c[0]} y={c[1] - f * 2.6} fontSize={f} fill="#ff6a1f" fontWeight={700}>{size}</text>
+                  <text x={c[0]} y={c[1] - f * 1.5} fontSize={f * 0.75} fill="#efe8da">{by}</text>
+                </g>
+              );
+            })()}
             {drag?.k === "pen" && <polyline points={drag.pts.map((q) => q.join(",")).join(" ")} fill="none" stroke="#ff6a1f" strokeWidth={2.5 * px} strokeLinejoin="round" strokeLinecap="round" />}
             {drag?.k === "newRoom" && <rect x={Math.min(drag.a[0], drag.b[0])} y={Math.min(drag.a[1], drag.b[1])} width={Math.abs(drag.b[0] - drag.a[0])} height={Math.abs(drag.b[1] - drag.a[1])} fill="#ff6a1f" fillOpacity={0.2} stroke="#ff6a1f" strokeWidth={2 * px} />}
             {drag?.k === "newRoom" && <text x={Math.max(drag.a[0], drag.b[0])} y={Math.max(drag.a[1], drag.b[1]) + fontMm} fontSize={fontMm} fill="#ff6a1f" textAnchor="end">{fmtLen(Math.abs(drag.b[0] - drag.a[0]), lu, true)} × {fmtLen(Math.abs(drag.b[1] - drag.a[1]), lu)}</text>}
@@ -678,30 +828,71 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
               return <text key={`len${k}`} x={mx + ((c[0] - mx) / d) * off} y={my + ((c[1] - my) / d) * off} fontSize={fontMm * 0.8} textAnchor="middle" dominantBaseline="middle" fill="#ff6a1f" stroke="#000" strokeWidth={fontMm * 0.12} paintOrder="stroke" style={{ pointerEvents: "none" }}>{fmtLen(Math.hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]), lu, true)}</text>;
             })}
             {seen && (() => { const [a, b] = edgesOf(floor.rooms[seen.room].polygon)[seen.edge]; return <line x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="#ff6a1f" strokeWidth={6 * px} strokeOpacity={0.8} style={{ pointerEvents: "none" }} />; })()}
+            {tool === "corners" && (() => {
+              // the walls so far, the one being drawn (with its length) and where it would end
+              const last = corners[corners.length - 1], len = typed ? parseLength(typed, lu) : null;
+              const next = hover && (last && len ? cornerAt(last, hover, len, std("draw.snapAngle")) : corners.length >= 3 && dist(hover, corners[0]) < 10 * px ? corners[0] : cornerSnap(hover));
+              const mid: Pt | null = last && next ? [(last[0] + next[0]) / 2, (last[1] + next[1]) / 2] : null;
+              return (
+                <g style={{ pointerEvents: "none" }}>
+                  {corners.length > 1 && <polyline points={corners.map((q) => q.join(",")).join(" ")} fill="none" stroke="#ff6a1f" strokeWidth={3 * px} strokeLinejoin="round" />}
+                  {last && next && <line x1={last[0]} y1={last[1]} x2={next[0]} y2={next[1]} stroke="#ff6a1f" strokeWidth={2 * px} strokeDasharray={`${6 * px} ${4 * px}`} />}
+                  {corners.length >= 2 && next && <line x1={next[0]} y1={next[1]} x2={corners[0][0]} y2={corners[0][1]} stroke="#55b2ff" strokeWidth={1.2 * px} strokeDasharray={`${3 * px} ${5 * px}`} />}
+                  {corners.map((q, k) => <circle key={k} cx={q[0]} cy={q[1]} r={(k === 0 && corners.length >= 3 ? 7 : 4.5) * px} fill={k === 0 ? "#ff6a1f" : "#fff"} stroke={k === 0 ? "#fff" : "#ff6a1f"} strokeWidth={1.5 * px} />)}
+                  {next && <circle cx={next[0]} cy={next[1]} r={4 * px} fill="none" stroke="#fff" strokeWidth={1.5 * px} />}
+                  {mid && last && next && dist(last, next) > 1 && (
+                    <text x={mid[0]} y={mid[1] - fontMm * 1.1} fontSize={fontMm * 1.35} fontWeight={700} textAnchor="middle" fill="#ff6a1f" stroke="#000" strokeWidth={fontMm * 0.2} paintOrder="stroke">{typed ? `${typed}▏` : fmtLen(dist(last, next), lu, true)}</text>
+                  )}
+                </g>
+              );
+            })()}
+            {hover && (tool === "remove" || tool === "eyedrop") && (() => {
+              // what a click would take out, or copy
+              const it = hitAt(hover), col = tool === "remove" ? "#ff4d3d" : "#55b2ff";
+              if (!it) return null;
+              if (it.t === "room") return <polygon points={floor.rooms[it.i].polygon.map((q) => q.join(",")).join(" ")} fill={col} fillOpacity={0.18} stroke={col} strokeWidth={3 * px} style={{ pointerEvents: "none" }} />;
+              if (it.t === "thing") { const f = floor.fixtures![it.i], [hw, hd] = halfSize(f); return <rect x={f.center[0] - hw} y={f.center[1] - hd} width={2 * hw} height={2 * hd} fill={col} fillOpacity={0.3} stroke={col} strokeWidth={3 * px} style={{ pointerEvents: "none" }} />; }
+              const segs = it.t === "door" ? [doorSpots[it.i]].filter(Boolean) as Seg[] : winSpots[it.i];
+              return <g style={{ pointerEvents: "none" }}>{segs.map((s, k) => <line key={k} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={col} strokeWidth={9 * px} />)}</g>;
+            })()}
+            {hover && tool === "thing" && !drag && (() => {
+              // where the picked-up thing would go
+              const spec = CATALOG[thing.kind], ri = roomAt(hover), c: Pt = [r10(hover[0]), r10(hover[1])];
+              const w = thing.w ?? spec?.w ?? 600, dp = thing.d ?? spec?.d ?? 600;
+              const hug = ri >= 0 && spec?.mount !== "ceiling" ? hugWall(floor.rooms[ri].polygon, c, w, dp, 600) : null;
+              const [hw, hd] = halfSize({ kind: thing.kind, center: c, width_mm: w, depth_mm: dp, facing: hug?.facing ?? facingFor(c, ri) });
+              const at = hug?.center ?? c;
+              return <rect x={at[0] - hw} y={at[1] - hd} width={2 * hw} height={2 * hd} fill={spec?.fill ?? "#f4efe6"} fillOpacity={0.55} stroke="#ff6a1f" strokeWidth={2 * px} strokeDasharray={`${5 * px} ${3 * px}`} style={{ pointerEvents: "none" }} />;
+            })()}
           </svg>
-          {!floor.rooms.length && !bg && (
+          {!floor.rooms.length && !bg && !corners.length && (
             <p className="absolute inset-x-0 top-1/3 text-center text-muted text-[14px] pointer-events-none px-6">Pick Walls and draw around the first room. Rooms that touch share a wall.</p>
           )}
         </div>
-        {seen && <WallView key={`${seen.room}-${seen.edge}`} floor={floor} room={seen.room} edge={seen.edge} height={RULES.ceiling} units={lu} addOnOpen={wallAdd} onAdded={() => setWallAdd(null)} onChange={(f, h) => setFloor(f, h ?? true)} onClose={() => setWall(null)} onEdge={(edge) => setWall({ room: seen.room, edge })} />}
+        {show3d && (
+          <div className="h-[44vh] xl:h-auto">
+            <Live3D sketch={sk} fi={fi} sel={sel?.t === "room" || sel?.t === "thing" ? { t: sel.t, i: sel.i } : null} walls={walls3d} onWalls={setWalls3d}
+              onPick={(f, s) => { if (f !== fi) { setFi(f); setClicks([]); setWall(null); } setSel(s); }}
+              onFloor={(i) => { setFi(i); setSel(null); setClicks([]); setWall(null); }} roofOn={showRoof} onRoof={() => { setShowRoof((x) => !x); setShowStd(false); }} />
+          </div>
+        )}
+        </div>
+        {tool === "thing" && <CatalogTray armed={thing} units={lu} startRoom={tabForRoom((sel?.t === "room" ? floor.rooms[sel.i] : hover ? floor.rooms[roomAt(hover)] : undefined)?.type)} onPick={(it) => { setThing(it); setNote(null); }} />}
+        {seen && <WallView key={`${seen.room}-${seen.edge}`} floor={floor} room={seen.room} edge={seen.edge} height={floor.height_mm ?? std("house.ceiling")} units={lu} addOnOpen={wallAdd} onAdded={() => setWallAdd(null)} onChange={(f, h) => setFloor(f, h ?? true)} onClose={() => setWall(null)} onEdge={(edge) => setWall({ room: seen.room, edge })} />}
         </div>
 
         <aside className="border-t lg:border-t-0 lg:border-l border-line p-3 space-y-3 text-[13.5px] max-h-[62vh] overflow-y-auto scroll-thin">
-          {showStd ? <StandardsPanel units={lu} onClose={() => setShowStd(false)} /> : <>
+          {showStd ? <StandardsPanel units={lu} onClose={() => setShowStd(false)} />
+            : showRoof ? <RoofPanel sketch={sk} units={lu} onChange={(s, h) => (h === false ? setSk(s) : commit(s))} onClose={() => setShowRoof(false)} /> : <>
           <p className="text-muted leading-snug">{TOOLS.find((t) => t.id === tool)?.help}</p>
           {note && <p className="text-amber">{note}</p>}
 
           {tool === "cabinet" && !fix && <CabinetPanel pick={cabPick} onPick={setCabPick} floor={floor} units={lu} />}
           {tool === "thing" && (
-            <div className="space-y-2">
-              {THINGS.map((g) => (
-                <div key={g.group}>
-                  <p className="label !mb-1">{g.group}</p>
-                  <div className="flex flex-wrap gap-1">{g.kinds.filter((k) => CATALOG[k]).map((k) => <button key={k} onClick={() => setThing(k)} className={`chip !h-7 ${thing === k ? "!text-accent !border-accent" : ""}`}>{CATALOG[k].label}</button>)}</div>
-                </div>
-              ))}
-            </div>
+            <p><span className="text-muted">Placing </span><span className="text-accent">{thing.label ?? CATALOG[thing.kind]?.label ?? thing.kind}</span>
+              <span className="text-muted">, {fmtLen(thing.w ?? CATALOG[thing.kind]?.w ?? 600, lu)} × {fmtLen(thing.d ?? CATALOG[thing.kind]?.d ?? 600, lu)}</span></p>
           )}
+          {tool === "eyedrop" && pickedType && <p>Copying <span className="text-accent">{label(pickedType).toLowerCase()}</span> to each room you click. Esc to stop.</p>}
 
           {tool === "scale" && clicks.length === 2 && (
             <div className="space-y-2">
@@ -751,6 +942,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
               </div>
               <div className="flex gap-2">
                 <button className="btn btn-sm" onClick={() => duplicate(sel.i)}>Duplicate</button>
+                <button className="btn btn-sm" onClick={() => turn(true)} title="Turn the room and everything in it a quarter turn (Q, Shift+Q the other way)">Turn 90°</button>
                 <button className="btn btn-sm btn-ghost text-red" onClick={deleteSel}>Delete room</button>
               </div>
             </div>
@@ -784,8 +976,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             <div className="space-y-2">
               <p className="eyebrow">{CATALOG[fix.kind]?.label ?? fix.kind}</p>
               <select className="input !h-9" value={fix.kind} aria-label="What it is" onChange={(e) => { const s = CATALOG[e.target.value]; setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? { ...f, kind: e.target.value, name: s?.label, width_mm: s?.w ?? f.width_mm, depth_mm: s?.d ?? f.depth_mm } : f)) }); }}>
-                {THINGS.flatMap((g) => g.kinds).filter((k) => CATALOG[k]).map((k) => <option key={k} value={k}>{CATALOG[k].label}</option>)}
-                {!THINGS.some((g) => g.kinds.includes(fix.kind)) && <option value={fix.kind}>{CATALOG[fix.kind]?.label ?? fix.kind}</option>}
+                {ALL_KINDS.map((k) => <option key={k} value={k}>{CATALOG[k].label}</option>)}
+                {!CATALOG[fix.kind] && <option value={fix.kind}>{fix.kind}</option>}
               </select>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-muted">Faces</span>
@@ -797,7 +989,10 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
                     <input type="number" className="input !h-9" value={fix[k] ?? ""} onFocus={() => past.current.push(sk)} onChange={(e) => setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? { ...f, [k]: +e.target.value || undefined } : f)) }, false)} /></div>
                 ))}
               </div>
-              <button className="btn btn-sm btn-ghost text-red" onClick={deleteSel}>Delete</button>
+              <div className="flex gap-2">
+                <button className="btn btn-sm" onClick={() => turn(true)} title="Q, Shift+Q the other way">Turn 90°</button>
+                <button className="btn btn-sm btn-ghost text-red" onClick={deleteSel}>Delete</button>
+              </div>
             </div>
           )}
 
@@ -810,6 +1005,23 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
                 <input type="number" className="input !h-9 !w-20" value={floor.level} onChange={(e) => setFloor({ ...floor, level: Math.round(+e.target.value) })} aria-label="Level (0 is the ground floor)" />
                 {sk.floors.length > 1 && <button className="btn btn-sm btn-ghost text-red ml-auto" onClick={() => { commit({ ...sk, floors: sk.floors.filter((_, i) => i !== fi) }); setFi(0); }}>Delete floor</button>}
               </div>
+              {(() => {
+                const h = floor.height_mm ?? std("house.ceiling");
+                return (
+                  <div className="flex items-center gap-2">
+                    <label className="text-muted" htmlFor="ceiling">Ceiling height</label>
+                    <input id="ceiling" key={`ceiling-${fi}-${h}`} className={`input !h-9 !w-24 font-mono ${floor.height_mm ? "!border-accent" : ""}`} defaultValue={fmtLen(h, lu)}
+                      onBlur={(e) => { const v = parseLength(e.target.value, lu); if (v && v >= 1800 && v <= 6000) setFloor({ ...floor, height_mm: roundLen(v, lu) }); else e.target.value = fmtLen(h, lu); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+                    {floor.height_mm != null && <button className="text-[12px] text-muted underline" onClick={() => setFloor({ ...floor, height_mm: undefined })}>Use my standard</button>}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+          {!sel && (
+            <div className="pt-3 border-t border-line">
+              <RoofPanel sketch={sk} units={lu} onChange={(s, h) => (h === false ? setSk(s) : commit(s))} />
             </div>
           )}
           {bg && !sel && (
