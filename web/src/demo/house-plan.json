@@ -55111,7 +55111,7 @@
   },
   {
    "code": "room_no_label",
-   "message": "G-R08 (0.85 m²) has no label in the drawing.",
+   "message": "G-R08 (9 ft²) has no label in the drawing.",
    "element_ids": [
     "G-R08"
    ],
@@ -55119,7 +55119,7 @@
   },
   {
    "code": "room_split",
-   "message": "The drawing gives lobby G-R09 an area of 3.3 m², which matches G-R09 and G-R10 together (2.9 m²). The walls show two rooms.",
+   "message": "The drawing gives lobby G-R09 an area of 36 ft², which matches G-R09 and G-R10 together (31 ft²). The walls show two rooms.",
    "element_ids": [
     "G-R09",
     "G-R10"
@@ -55128,7 +55128,7 @@
   },
   {
    "code": "room_no_label",
-   "message": "1-R02 (13.19 m²) has no label in the drawing.",
+   "message": "1-R02 (142 ft²) has no label in the drawing.",
    "element_ids": [
     "1-R02"
    ],
@@ -55136,7 +55136,7 @@
   },
   {
    "code": "room_no_label",
-   "message": "1-R05 (2.44 m²) has no label in the drawing.",
+   "message": "1-R05 (26 ft²) has no label in the drawing.",
    "element_ids": [
     "1-R05"
    ],
@@ -55144,7 +55144,7 @@
   },
   {
    "code": "room_no_label",
-   "message": "1-R08 (1.7 m²) has no label in the drawing.",
+   "message": "1-R08 (18 ft²) has no label in the drawing.",
    "element_ids": [
     "1-R08"
    ],
@@ -55160,7 +55160,7 @@
   },
   {
    "code": "room_split",
-   "message": "The drawing gives room 1-R02 an area of 27 m², which matches 1-R02 and 1-R03 together (26.1 m²). The walls show two rooms.",
+   "message": "The drawing gives room 1-R02 an area of 291 ft², which matches 1-R02 and 1-R03 together (281 ft²). The walls show two rooms.",
    "element_ids": [
     "1-R02",
     "1-R03"
@@ -55185,7 +55185,7 @@
   },
   {
    "code": "no_exterior",
-   "message": "The drawing has floor plans only. The outside view is estimated from the footprint and window positions with 3 m storeys.",
+   "message": "The drawing has floor plans only. The outside view is estimated from the footprint and window positions with 10 ft storeys.",
    "element_ids": [],
    "severity": "info"
   }

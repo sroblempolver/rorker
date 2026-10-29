@@ -13,7 +13,7 @@ from __future__ import annotations
 import io
 import math
 
-from .rules import RULES, opening_span
+from .rules import RULES, ftin, opening_span
 from .schema import Flag, Floor, Plan, Question, QuestionPoint
 
 MAX_QUESTIONS = 5
@@ -64,7 +64,8 @@ def align_floors(plan: Plan) -> list[str]:
             shift.append(-round((d0 + d1) / 2) if ok else 0)
         if any(shift):
             translate_floor(up, *shift)
-            done.append(f"Moved {up.name} by {shift[0]} mm, {shift[1]} mm to line up with {lo.name}")
+            done.append(f"Moved {up.name} by {ftin(abs(shift[0]))} {'left' if shift[0] < 0 else 'right'}, "
+                        f"{ftin(abs(shift[1]))} {'up' if shift[1] < 0 else 'down'} to line up with {lo.name}")
     return done
 
 
@@ -196,9 +197,9 @@ def describe_outside(plan: Plan) -> str:
     floors = sorted(plan.floors, key=lambda f: f.level)
     lines = [f"Floors: {', '.join(f'{f.name} ({f.id}) at {f.elevation_mm:.0f} mm, {f.height_mm:.0f} mm high' for f in floors)}.",
              f"Roof: {ex.roof if ex.roof != 'unknown' else 'not shown, so a hip roof by the rules'}, pitch "
-             f"{ex.roof_pitch_deg or RULES['pitch']} degrees, eaves {ex.eave_mm or RULES['eave']} mm out; lower parts of the "
+             f"{ex.roof_pitch_deg or RULES['pitch']} degrees, eaves {ex.eave_mm or RULES['eave']:.0f} mm out; lower parts of the "
              "house not covered by a floor above get a lean-to roof against the taller wall.",
-             f"Ground floor stands {ex.plinth_mm or RULES['plinth']} mm above the grade; walls with no room on either side are "
+             f"Ground floor stands {ex.plinth_mm or RULES['plinth']:.0f} mm above the grade; walls with no room on either side are "
              "drawn as porch posts (columns if 200-600 mm, railing posts if thinner) and the porch gets a canopy on its posts, "
              "or the balcony of the floor above when there is one."]
     for f in floors:

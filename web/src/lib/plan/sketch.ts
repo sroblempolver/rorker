@@ -4,6 +4,7 @@
 // inside wall, an edge only one room has is an outside wall.
 import type { BBox, Fixture, Floor, Opening, OpeningKind, Plan, Pt, Question, Room, RoomType, Wall } from "./types";
 import { bboxOf, polyArea } from "./geometry";
+import { RULES } from "./rules";
 
 export type Side = "north" | "south" | "east" | "west";
 export interface SketchRoom { name: string; type?: string; polygon: Pt[]; unit?: string }
@@ -30,7 +31,8 @@ const ANGLE: Record<Side, number> = { east: 0, south: 90, west: 180, north: -90 
 const SNAP = 150;  // edges this close are the same line (a read drawing is never exact)
 const EXT_T = 250, INT_T = 120, PARTY_T = 250;
 
-const r10 = (v: number) => Math.round(v / 10) * 10;
+// whole millimetres: half-inch sizes typed in the drawing tool come through within ½ mm
+const rmm = (v: number) => Math.round(v);
 const key = (p: Pt) => `${p[0]},${p[1]}`;
 const len = (a: Pt, b: Pt) => Math.hypot(b[0] - a[0], b[1] - a[1]);
 
@@ -39,7 +41,7 @@ function snapAxis(values: number[]): Map<number, number> {
   const sorted = [...new Set(values)].sort((a, b) => a - b);
   const out = new Map<number, number>();
   let group: number[] = [];
-  const flush = () => { if (!group.length) return; const m = r10(group.reduce((a, b) => a + b, 0) / group.length); for (const g of group) out.set(g, m); group = []; };
+  const flush = () => { if (!group.length) return; const m = rmm(group.reduce((a, b) => a + b, 0) / group.length); for (const g of group) out.set(g, m); group = []; };
   for (const v of sorted) { if (group.length && v - group[0] > SNAP) flush(); group.push(v); }
   flush();
   return out;
@@ -64,7 +66,7 @@ function floorCode(level: number, used: Set<string>) {
 function band(a: Pt, b: Pt, t: number, ext = 0): Pt[] {
   const L = len(a, b) || 1, ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L, nx = -uy * t / 2, ny = ux * t / 2;
   const A: Pt = [a[0] - ux * ext, a[1] - uy * ext], B: Pt = [b[0] + ux * ext, b[1] + uy * ext];
-  return [[A[0] + nx, A[1] + ny], [B[0] + nx, B[1] + ny], [B[0] - nx, B[1] - ny], [A[0] - nx, A[1] - ny]].map(([x, y]) => [r10(x), r10(y)] as Pt);
+  return [[A[0] + nx, A[1] + ny], [B[0] + nx, B[1] + ny], [B[0] - nx, B[1] - ny], [A[0] - nx, A[1] - ny]].map(([x, y]) => [rmm(x), rmm(y)] as Pt);
 }
 
 function onSegment(p: Pt, a: Pt, b: Pt) {
@@ -83,7 +85,7 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
   const xs = snapAxis(raw.flatMap((r) => r.polygon.map((p) => p[0])));
   const ys = snapAxis(raw.flatMap((r) => r.polygon.map((p) => p[1])));
   const rooms: Room[] = raw.map((r, i) => {
-    const poly = r.polygon.map((p) => [xs.get(p[0]) ?? r10(p[0]), ys.get(p[1]) ?? r10(p[1])] as Pt).filter((p, j, a) => j === 0 || key(p) !== key(a[j - 1]));
+    const poly = r.polygon.map((p) => [xs.get(p[0]) ?? rmm(p[0]), ys.get(p[1]) ?? rmm(p[1])] as Pt).filter((p, j, a) => j === 0 || key(p) !== key(a[j - 1]));
     if (poly.length > 1 && key(poly[0]) === key(poly[poly.length - 1])) poly.pop();
     const type = roomType(r.type, r.name);
     return {
@@ -175,7 +177,7 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
     taken.push(c);
     used.set(w.id, taken);
     const ux = (s.b[0] - s.a[0]) / L, uy = (s.b[1] - s.a[1]) / L;
-    const a: Pt = [r10(s.a[0] + ux * (c - wd / 2)), r10(s.a[1] + uy * (c - wd / 2))], b: Pt = [r10(s.a[0] + ux * (c + wd / 2)), r10(s.a[1] + uy * (c + wd / 2))];
+    const a: Pt = [rmm(s.a[0] + ux * (c - wd / 2)), rmm(s.a[1] + uy * (c - wd / 2))], b: Pt = [rmm(s.a[0] + ux * (c + wd / 2)), rmm(s.a[1] + uy * (c + wd / 2))];
     const n = openings.filter((o) => o.id.startsWith(`${code}-${prefix}`)).length + 1;
     const ang = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
     const o: Opening = {
@@ -198,7 +200,9 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
     const w = cands.sort((x, y) => y.length_mm - x.length_mm)[0];
     if (!w) { if (!out) notes.push(`${r1.name} and ${r2!.name} don't share a wall, so the door between them was left out.`); continue; }
     const kind = d.kind && d.kind !== "window" ? d.kind : "door";
-    place(w, d.width_mm ?? (kind === "garage_door" ? 2400 : kind === "double_door" || kind === "sliding_door" ? 1500 : kind === "opening" ? 1200 : 820), d.at ?? 0.5, kind, kind === "opening" ? "Opening" : kind === "sliding_door" ? (r2?.outdoor ? "Balcony door" : "Patio door") : out ? "Front door" : "Door", kind === "opening" ? "OP" : "D", { height_mm: d.height_mm });
+    // US stock widths: 9' single garage door, 6' patio and double doors, 4' cased opening, 36" entry, 32" inside
+    const usual = kind === "garage_door" ? 108 : kind === "double_door" || kind === "sliding_door" ? 72 : kind === "opening" ? 48 : out ? 36 : 32;
+    place(w, d.width_mm ?? usual * 25.4, d.at ?? 0.5, kind, kind === "opening" ? "Opening" : kind === "sliding_door" ? (r2?.outdoor ? "Balcony door" : "Patio door") : out ? "Front door" : "Door", kind === "opening" ? "OP" : "D", { height_mm: d.height_mm });
   }
   for (const wn of sf.windows ?? []) {
     const r = byName(wn.room);
@@ -208,7 +212,7 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
     const w = cands[0];
     if (!w) continue;
     const count = Math.max(1, Math.min(4, wn.count ?? 1));
-    for (let k = 0; k < count; k++) place(w, wn.width_mm ?? 1200, wn.at?.[k] ?? (k + 1) / (count + 1), "window", "Window", "WN", { sill_mm: wn.sill_mm, height_mm: wn.height_mm });
+    for (let k = 0; k < count; k++) place(w, wn.width_mm ?? 36 * 25.4, wn.at?.[k] ?? (k + 1) / (count + 1), "window", "Window", "WN", { sill_mm: wn.sill_mm, height_mm: wn.height_mm });
   }
 
   // objects at their real size, facing into the room
@@ -217,7 +221,7 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
     const facing = f.facing && f.facing in ANGLE ? ANGLE[f.facing] : null;
     const across = facing === 0 || facing === 180;
     const [hx, hy] = across ? [d / 2, w / 2] : [w / 2, d / 2];
-    const c: Pt = [r10(f.center[0]), r10(f.center[1])];
+    const c: Pt = [rmm(f.center[0]), rmm(f.center[1])];
     const room = (f.room ? byName(f.room) : null) ?? rooms.find((r) => { const b = bboxOf(r.polygon); return c[0] >= b[0] && c[0] <= b[2] && c[1] >= b[1] && c[1] <= b[3]; }) ?? null;
     // keep a piece inside its room (clear of the wall faces) when it fits, so added furniture never pokes through a wall
     if (room) {
@@ -317,7 +321,7 @@ export function expandUnits(sk: Sketch, notes: string[] = []): SketchFloor[] {
 }
 
 export function planFromSketch(sk: Sketch, src: SketchSource): { plan: Plan; notes: string[] } {
-  const storey = Math.max(2400, Math.min(4500, sk.storey_height_mm ?? 3000));
+  const storey = Math.max(2400, Math.min(4500, sk.storey_height_mm ?? RULES.storey));
   const notes: string[] = [];
   const used = new Set<string>();
   const floorsIn = expandUnits(sk, notes).filter((f) => f.rooms?.length).sort((a, b) => a.level - b.level);

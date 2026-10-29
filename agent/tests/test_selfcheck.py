@@ -59,9 +59,16 @@ def test_garage_without_a_door_is_asked_about(plan):
 
 
 def test_rule_heights():
-    assert opening_span("window", ["bathroom"]) == (1200, 2100)
-    assert opening_span("window", ["bedroom"]) == (900, 2100)
-    assert opening_span("garage_door", ["garage"]) == (0, 2300)
+    inch = lambda mm: round(mm / 25.4, 3)
+    assert tuple(map(inch, opening_span("window", ["bathroom"]))) == (48, 80)
+    assert tuple(map(inch, opening_span("window", ["bedroom"]))) == (36, 80)
+    assert tuple(map(inch, opening_span("garage_door", ["garage"]))) == (0, 84)
+
+
+def test_feet_and_inches():
+    from rorker_agent.rules import ft2, ftin
+    assert ftin(4191) == "13' 9\"" and ftin(2032) == "6' 8\"" and ftin(4203.7) == "13' 9½\""
+    assert ft2(12.5) == "135 ft²"
 
 
 def test_elevations_render(plan):

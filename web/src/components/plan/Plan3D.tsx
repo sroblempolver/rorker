@@ -20,7 +20,7 @@ import { ITEM_SIZE } from "./items";
 import { fixtureObject, Materials, SHARED_GEOMETRY } from "./models3d";
 import { buildRoofs, buildSite, buildZone, garagePanels, openingTrim, sidingMaterial, trimMaterial, type Fade } from "./exterior3d";
 import { planExterior } from "@/lib/plan/exterior";
-import { FINISH, FRAMING, openingSpan } from "@/lib/plan/rules";
+import { FINISH, FRAMING, openingSpan, RULES } from "@/lib/plan/rules";
 import { runOf, studsAlong, type BuildLook } from "@/lib/plan/build";
 import { getMarks, markFade, useMarks } from "@/lib/plan/marks";
 import { CHALK, CHALK_LINE, DRYWALL, GLASS, MATERIAL_BASE, PIN_COLOR, SUBFLOOR, ROOM_MATERIAL, STATUS_COLOR, type Material } from "./style";
@@ -235,8 +235,8 @@ function buildScene(p: Props, mt: Materials): Built {
   shown.forEach((fl) => {
     const fi = floorsAll.indexOf(fl);
     // a floor sits at its real height in both views, so an upper floor never looks like the ground floor
-    const base = fl.elevation_mm || fi * (p.plan.building.exterior.storey_height_mm || 3000);
-    const H = fl.height_mm || 2700;
+    const base = fl.elevation_mm || fi * (p.plan.building.exterior.storey_height_mm || RULES.storey);
+    const H = fl.height_mm || RULES.ceiling;
     const wallH = p.wallMode === "low" ? 1100 : H;
     const walls = p.wallMode !== "none" && look !== "slab";
     // framing: every stud, plate and header on this floor in one instanced mesh
@@ -255,7 +255,7 @@ function buildScene(p: Props, mt: Materials): Built {
     if (p.mode === "floor") {
       const below = floorsAll.slice(0, fi);
       below.forEach((lf, li) => {
-        const lb = lf.elevation_mm || li * (p.plan.building.exterior.storey_height_mm || 3000);
+        const lb = lf.elevation_mm || li * (p.plan.building.exterior.storey_height_mm || RULES.storey);
         const lh = Math.max(200, base - lb);
         const rings = lf.footprint.length ? lf.footprint : [[[lf.bounds[0], lf.bounds[1]], [lf.bounds[2], lf.bounds[1]], [lf.bounds[2], lf.bounds[3]], [lf.bounds[0], lf.bounds[3]]] as Pt[]];
         for (const ring of skin ? ex.rings[li] ?? rings : rings) {

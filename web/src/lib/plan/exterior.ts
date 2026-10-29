@@ -100,7 +100,7 @@ export function planExterior(plan: Plan): Exterior {
   const rules = buildingRules(plan);
   const floors = [...plan.floors].sort((a, b) => a.level - b.level);
   const base = (fi: number) => floors[fi]?.elevation_mm || fi * rules.storey;
-  const height = (fi: number) => floors[fi]?.height_mm || 2700;
+  const height = (fi: number) => floors[fi]?.height_mm || RULES.ceiling;
   const rings = floors.map(indoorRings);
 
   // ---- roofs: each floor's rooms that nothing above covers, top floor first

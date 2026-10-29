@@ -15,6 +15,7 @@ import { HIDDEN_KINDS, TOP_FILL, fixtureBottom, fixtureTop, isWallMounted } from
 import { ITEM_ICON } from "./items";
 import type { Controls, PinTarget, ScreenPoint } from "./target";
 import { usePanZoom } from "./usePanZoom";
+import { area, inches, len } from "@/lib/measure";
 
 export type ColorMode = "type" | "progress";
 
@@ -235,17 +236,17 @@ export function FloorCanvas(props: Props) {
     >
       <PlanDefs />
       <defs>
-        <pattern id="survey" width={1000} height={1000} patternUnits="userSpaceOnUse">
-          <path d="M1000 0H0V1000" fill="none" stroke="#262923" strokeWidth={10} />
+        <pattern id="survey" width={1219.2} height={1219.2} patternUnits="userSpaceOnUse">
+          <path d="M1219.2 0H0V1219.2" fill="none" stroke="#262923" strokeWidth={10} />
           <path d="M0 -40V40M-40 0H40" stroke="#33372f" strokeWidth={14} />
         </pattern>
         <filter id="soft" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation={240} /></filter>
       </defs>
-      {/* the lot: ground with a 1 m survey grid */}
+      {/* the lot: ground with a 4 ft survey grid */}
       <rect x={fb[0] - 80000} y={fb[1] - 80000} width={W + 160000} height={Hh + 160000} fill={GROUND} />
       <rect x={fb[0] - 80000} y={fb[1] - 80000} width={W + 160000} height={Hh + 160000} fill="url(#survey)" />
       <g pointerEvents="none" fontFamily="var(--font-mono)" fontSize={fs * 0.75} fill="#5d6157">
-        <text x={fb[0]} y={fb[1] - 900}>{floor.name.toUpperCase()} · {(W / 1000).toFixed(1)} × {(Hh / 1000).toFixed(1)} m</text>
+        <text x={fb[0]} y={fb[1] - 900}>{floor.name.toUpperCase()} · {len(W)} × {len(Hh)}</text>
       </g>
 
       {/* soft ground shadow under the building */}
@@ -316,7 +317,7 @@ export function FloorCanvas(props: Props) {
                 </>
               )}
               {f.facing != null && <FrontEdge b={b} facing={f.facing} lw={lw} strong={sel || hot} />}
-              {live && <text x={f.center[0]} y={b[1] - 10 * lw} textAnchor="middle" fontSize={11 * lw} fontFamily="var(--font-mono)" fill="#55b2ff" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>moved {Math.round(Math.hypot(live.dx, live.dy))} mm</text>}
+              {live && <text x={f.center[0]} y={b[1] - 10 * lw} textAnchor="middle" fontSize={11 * lw} fontFamily="var(--font-mono)" fill="#55b2ff" style={{ paintOrder: "stroke" }} stroke="#141513" strokeWidth={3 * lw}>moved {inches(Math.hypot(live.dx, live.dy))}</text>}
             </g>
           );
         })}
@@ -406,7 +407,7 @@ export function FloorCanvas(props: Props) {
           const tw = name.length * fs * 0.52;
           if (tw > (b[2] - b[0]) * 0.95 && !room) return null;
           const n = openByRoom.get(r.id) ?? 0;
-          const sub = `${r.area_m2.toFixed(1)} m²`;
+          const sub = area(r.area_m2);
           const showSub = sub.length * fs * 0.5 + 5 * fs < (b[2] - b[0]) * 0.95;
           return (
             <g key={r.id}>

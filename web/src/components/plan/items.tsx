@@ -13,9 +13,11 @@ export const ITEM_ICON: Record<ItemKind, string> = {
   outlet: "⏻", switch: "⎍", light: "✶", data: "⌁", plumbing: "⌇", vent: "≡", thermostat: "◔", mount: "▭", other: "•",
 };
 
-/** Usual centre height above the floor, mm (US practice: outlets 16", switches 48"). */
+/** Usual centre height above the floor, mm, at US heights in whole inches: outlets 16", switches 48",
+ *  wall lights 66", sink supply 22", high vents 84", thermostats 60". */
+const inch = (n: number) => n * 25.4;
 export const ITEM_HEIGHT: Record<ItemKind, number> = {
-  outlet: 400, switch: 1200, light: 1750, data: 400, plumbing: 550, vent: 2200, thermostat: 1500, mount: 1500, other: 1200,
+  outlet: inch(16), switch: inch(48), light: inch(66), data: inch(16), plumbing: inch(22), vent: inch(84), thermostat: inch(60), mount: inch(60), other: inch(48),
 };
 
 /** Real face size, mm: width x height. */
@@ -28,7 +30,7 @@ const INK = "#1b1a17";
 const PLATE = "#fbf8f1";
 
 /** The item drawn face-on in the wall view, centred on 0,0 (y down). `min` is the smallest size on
- *  screen in world units, so a 70 mm faceplate stays visible on a 5 m wall. */
+ *  screen in world units, so a 2¾" faceplate stays visible on a 16' wall. */
 export function ItemGlyph({ kind, min, selected, hot }: { kind: ItemKind; min: number; selected?: boolean; hot?: boolean }) {
   const [rw, rh] = ITEM_SIZE[kind];
   const k = Math.max(1, min / rh);
@@ -123,5 +125,3 @@ export function ItemGlyph({ kind, min, selected, hot }: { kind: ItemKind; min: n
   );
 }
 
-/** "1100 mm · 43 in" */
-export const mmIn = (mm: number) => `${Math.round(mm)} mm · ${(mm / 25.4).toFixed(mm < 254 ? 1 : 0)} in`;
