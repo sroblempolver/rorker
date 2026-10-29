@@ -6,7 +6,8 @@ import type { ElementEdit, ItemInput, ItemKind, JobItem } from "@/lib/data/types
 import { fixtureSize, turnedFacing } from "@/lib/plan/edits";
 import type { Fixture, Room, RoomType } from "@/lib/plan/types";
 import { fixtureBottom, fixtureHeight } from "@/components/plan/fixtures";
-import { ITEM_KINDS, ITEM_LABEL, mmIn } from "@/components/plan/items";
+import { ITEM_KINDS, ITEM_LABEL } from "@/components/plan/items";
+import { inches, parseInches } from "@/lib/measure";
 
 const FIXTURE_KINDS = [
   "base_cabinet", "wall_cabinet", "tall_cabinet", "filler", "kitchen_sink", "dishwasher", "range", "cooktop", "oven", "range_hood", "fridge", "island",
@@ -44,7 +45,8 @@ function EditBar({ editing, busy, onEdit, onCancel, onSave, onReset, changed }: 
   );
 }
 
-const num = (s: string) => (s.trim() === "" ? undefined : Math.round(Number(s)));
+/** A typed size in mm, from inches or feet and inches; NaN when it can't be read. */
+const num = (s: string) => (s.trim() === "" ? undefined : Math.round(parseInches(s) ?? NaN));
 const url = (s: string) => { const t = s.trim(); return !t ? undefined : /^https?:\/\//i.test(t) ? t : `https://${t}`; };
 
 /** What an object is and how big, with Edit → ✓. `focus` opens it straight on the product fields. */
@@ -58,16 +60,18 @@ export function FixtureCard({ f, edit, room, onSave, focus }: { f: Fixture; edit
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const init = () => ({
-    name: f.name, kind: f.kind, width: String(Math.round(size.width)), depth: String(Math.round(size.depth)), height: String(Math.round(h)),
-    bottom: String(Math.round(bottom)), spec: f.spec ?? "", product_name: f.product_name ?? "", product_url: f.product_url ?? "", notes: f.notes ?? "",
+    name: f.name, kind: f.kind, width: inches(size.width), depth: inches(size.depth), height: inches(h),
+    bottom: inches(bottom), spec: f.spec ?? "", product_name: f.product_name ?? "", product_url: f.product_url ?? "", notes: f.notes ?? "",
   });
   const [v, setV] = useState(init);
   const set = (k: keyof ReturnType<typeof init>) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setV({ ...v, [k]: e.target.value });
 
   const save = async () => {
-    const w = num(v.width), d = num(v.depth), hh = num(v.height), b = num(v.bottom);
+    // sizes show to the nearest ½", so only a field that was typed in counts as a change
+    const was = init(), typed = (k: "width" | "depth" | "height" | "bottom") => (v[k] !== was[k] ? num(v[k]) : undefined);
+    const w = typed("width"), d = typed("depth"), hh = typed("height"), b = typed("bottom");
     for (const [label, x] of [["Width", w], ["Depth", d], ["Height", hh]] as const) if (x != null && (!(x > 0) || x > 20000)) return setErr(`${label} looks wrong.`);
-    if (b != null && (b < 0 || b > 4000)) return setErr("Mount height looks wrong.");
+    if (b != null && !(b >= 0 && b <= 4000)) return setErr("Mount height looks wrong.");
     const patch: ElementEdit = {
       // unchanged fields keep whatever was edited before (f already shows those edits)
       name: v.name.trim() && v.name.trim() !== f.name ? v.name.trim() : edit?.name,
@@ -90,8 +94,8 @@ export function FixtureCard({ f, edit, room, onSave, focus }: { f: Fixture; edit
     <div>
       <Row k="Kind" v={f.kind === "other" ? "Not identified yet" : nice(f.kind)} />
       <Row k="Room" v={room} />
-      <Row k="Size" v={`${Math.round(size.width)} wide × ${Math.round(size.depth)} deep × ${Math.round(h)} high mm`} />
-      {bottom > 0 && <Row k="Mounted at" v={mmIn(bottom)} />}
+      <Row k="Size" v={`${inches(size.width)} wide × ${inches(size.depth)} deep × ${inches(h)} high`} />
+      {bottom > 0 && <Row k="Mounted at" v={inches(bottom)} />}
       <Row k="Front faces" v={
         <span className="inline-flex items-center gap-1.5 flex-wrap">
           <span className="mr-1">{f.facing == null ? "Any way" : FACES[turnedFacing(f, 0)]}</span>
@@ -120,12 +124,12 @@ export function FixtureCard({ f, edit, room, onSave, focus }: { f: Fixture; edit
             <Field label="Kind"><select className="input" value={v.kind} onChange={set("kind")}>{[...new Set([f.kind, ...FIXTURE_KINDS])].map((k) => <option key={k} value={k}>{nice(k)}</option>)}</select></Field>
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <Field label="Width mm"><input className="input" inputMode="numeric" value={v.width} onChange={set("width")} /></Field>
-            <Field label="Depth mm"><input className="input" inputMode="numeric" value={v.depth} onChange={set("depth")} /></Field>
-            <Field label="Height mm"><input className="input" inputMode="numeric" value={v.height} onChange={set("height")} /></Field>
+            <Field label="Width, in"><input className="input" value={v.width} onChange={set("width")} /></Field>
+            <Field label="Depth, in"><input className="input" value={v.depth} onChange={set("depth")} /></Field>
+            <Field label="Height, in"><input className="input" value={v.height} onChange={set("height")} /></Field>
           </div>
-          <Field label="Bottom above floor, mm (0 stands on the floor)"><input className="input" inputMode="numeric" value={v.bottom} onChange={set("bottom")} /></Field>
-          <Field label="Spec / size code"><input className="input" value={v.spec} onChange={set("spec")} placeholder="e.g. SB36, Base 600" /></Field>
+          <Field label="Bottom above floor, in (0 stands on the floor)"><input className="input" value={v.bottom} onChange={set("bottom")} /></Field>
+          <Field label="Spec / size code"><input className="input" value={v.spec} onChange={set("spec")} placeholder="e.g. SB36, Base 24" /></Field>
         </>
       )}
       <div className="grid grid-cols-1 gap-2">
@@ -166,7 +170,7 @@ export function ItemPanel({ item, wallLabel, wallLength, onUpdate, onDelete, onP
   onUpdate: (input: Partial<ItemInput>) => Promise<void>; onDelete: () => Promise<void>; onPin: () => void; onShow: () => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [v, setV] = useState({ kind: item.kind, label: item.label ?? "", x: String(item.x), y: String(item.y), note: item.note ?? "" });
+  const [v, setV] = useState({ kind: item.kind, label: item.label ?? "", x: inches(item.x), y: inches(item.y), note: item.note ?? "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const title = item.label || ITEM_LABEL[item.kind];
@@ -179,13 +183,13 @@ export function ItemPanel({ item, wallLabel, wallLength, onUpdate, onDelete, onP
       </div>
       {!editing ? (
         <div>
-          <Row k="Height" v={`${mmIn(item.y)} to the centre, from the floor`} />
-          <Row k="From the left" v={`${mmIn(item.x)}${wallLength ? `, ${mmIn(Math.max(0, wallLength - item.x))} from the right` : ""}`} />
+          <Row k="Height" v={`${inches(item.y)} to the centre, from the floor`} />
+          <Row k="From the left" v={`${inches(item.x)}${wallLength ? `, ${inches(Math.max(0, wallLength - item.x))} from the right` : ""}`} />
           {item.note && <Row k="Note" v={item.note} />}
           <p className="text-[12px] text-muted mt-2">Drag it on the wall to move it. Measurements update as you go.</p>
           <div className="flex gap-2 mt-3">
             <button className="btn btn-sm" onClick={onPin}>Pin a task here</button>
-            <button className="btn btn-sm ml-auto" onClick={() => { setV({ kind: item.kind, label: item.label ?? "", x: String(item.x), y: String(item.y), note: item.note ?? "" }); setEditing(true); }} aria-label="Edit">✎ Edit</button>
+            <button className="btn btn-sm ml-auto" onClick={() => { setV({ kind: item.kind, label: item.label ?? "", x: inches(item.x), y: inches(item.y), note: item.note ?? "" }); setEditing(true); }} aria-label="Edit">✎ Edit</button>
           </div>
         </div>
       ) : (
@@ -195,14 +199,15 @@ export function ItemPanel({ item, wallLabel, wallLength, onUpdate, onDelete, onP
             <Field label="Label"><input className="input" value={v.label} onChange={(e) => setV({ ...v, label: e.target.value })} placeholder="e.g. GFCI 20A" /></Field>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <Field label="Height mm"><input className="input" inputMode="numeric" value={v.y} onChange={(e) => setV({ ...v, y: e.target.value })} /></Field>
-            <Field label="From the left mm"><input className="input" inputMode="numeric" value={v.x} onChange={(e) => setV({ ...v, x: e.target.value })} /></Field>
+            <Field label="Height, in"><input className="input" value={v.y} onChange={(e) => setV({ ...v, y: e.target.value })} /></Field>
+            <Field label="From the left, in"><input className="input" value={v.x} onChange={(e) => setV({ ...v, x: e.target.value })} /></Field>
           </div>
           <Field label="Note"><textarea className="input !h-16 py-2" value={v.note} onChange={(e) => setV({ ...v, note: e.target.value })} /></Field>
           {err && <p className="text-red text-[13px]">{err}</p>}
           <EditBar editing busy={busy} onEdit={() => {}} onCancel={() => setEditing(false)} onSave={async () => {
-            const x = num(v.x), y = num(v.y);
-            if (x == null || y == null || x < 0 || y < 0 || y > 6000 || (wallLength && x > wallLength)) return setErr("Check the measurements.");
+            // unchanged fields keep their exact spot (they show rounded to the nearest ½")
+            const x = v.x === inches(item.x) ? item.x : num(v.x), y = v.y === inches(item.y) ? item.y : num(v.y);
+            if (x == null || y == null || !(x >= 0 && y >= 0 && y <= 6000) || (wallLength && x > wallLength)) return setErr("Check the measurements.");
             setBusy(true);
             try { await onUpdate({ kind: v.kind, label: v.label, x, y, note: v.note }); setEditing(false); } finally { setBusy(false); }
           }} />

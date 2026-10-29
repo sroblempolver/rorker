@@ -1,5 +1,40 @@
 // Generated from web/src/lib/assistant/core.ts by web/preview/build-function.mjs. Do not edit.
 
+// src/lib/plan/rules.ts
+var inch = (n) => n * 25.4;
+var RULES = {
+  /** floor to floor 10' 1", finished floor to ceiling 9' (8' is the other common one), floor framing 8" */
+  storey: inch(121),
+  ceiling: inch(108),
+  slab: inch(8),
+  /** 2x6 outside walls with sheathing, siding and drywall about 7"; 2x4 inside walls with drywall 4½" */
+  wallExterior: inch(7),
+  wallInterior: inch(4.5),
+  /** windows: 36" sill and 80" head, lined up with the doors; bathrooms 48" (privacy), kitchens 42" (over the counter) */
+  sill: inch(36),
+  sillWet: inch(48),
+  sillKitchen: inch(42),
+  head: inch(80),
+  /** doors: interior and entry 6' 8", garage 7', a cased opening 7' */
+  doorHead: inch(80),
+  garageHead: inch(84),
+  openingHead: inch(84),
+  /** pitched roofs: main roof 6/12, low roofs over a garage or porch 4/12, eaves 18" out, 8" fascia */
+  pitch: 26.6,
+  lowPitch: 18.4,
+  eave: inch(18),
+  fascia: inch(8),
+  flatOverhang: inch(6),
+  /** the ground floor sits on a foundation 18" above the grade; steps 7½" up and 11" deep */
+  plinth: inch(18),
+  step: inch(7.5),
+  tread: inch(11),
+  /** guards on balconies and porches more than 30" up: 36" (IRC) */
+  railing: inch(36),
+  /** paths and drives: a 4' walk */
+  walk: inch(48)
+};
+
 // src/lib/plan/catalog-extra.ts
 var b = (x, y, z, w, d, h, color) => ({ shape: "box", x, y, z, w, d, h, color });
 var c = (x, y, z, w, d, h, color) => ({ shape: "cylinder", x, y, z, w, d, h, color });
@@ -1469,7 +1504,8 @@ function instructions(me, ctx) {
     "Changing the plan: you can add, move, turn, resize and remove furniture, appliances and fixtures, and rename rooms (room_layout first, then add_objects, change_object, remove_objects, rename_room). Walls, rooms' shapes, doors and windows can't be changed here yet: say so in one sentence and offer to add a task pin for it.",
     "Real things, real sizes: every object has a real width, depth, height, weight and mounting height, and drawings never show furniture heights, so add_objects fills in the usual ones for each kind. Pick the kind that is the actual thing (a computer is kind computer, never a box or other). A computer, monitor, laptop, printer, table lamp, microwave, coffee machine or TV sits on a desk, counter or sideboard, never on the floor: put it `on` that piece (add the desk first if the room has none, or ask). Chairs go at their desk or table facing it, bar stools at the counter or island facing it, sofas and armchairs face the TV, fireplace or coffee table, beds, cabinets, wardrobes and desks stand with their backs to a wall facing into the room, wall cabinets, mirrors, pictures and shelves hang on a wall at their usual height. Leave facing out and it is worked out that way; give it only when the person asks for something else.",
     "Something not in the kind list (a rowing machine, a pool table, a kayak rack): don't settle for a box. Work out from what you know (or look it up with web search when you can) what it really looks like, its real size and weight, then add it as kind other with its name and parts: simple boxes, cylinders and spheres at real sizes and colours that together look like the real thing. Only when you truly can't tell what it is, ask what it looks like.",
-    "Placing: the usual layouts (width x depth, mm): double bed 1400x2000, queen 1600x2000, king 1800x2000, single 900x2000 with a nightstand each side of a double; dining table 1600x900 for 6 or 1200x800 for 4 with a chair at each place; desk 1200x600 with an office chair; sofa facing the TV on a sideboard. Place things the way a designer would: keep about 900 mm of walking space and never block a door or doorway. Only add what fits; leave other things as they are unless asked.",
+    `Sizes: always talk in feet and inches (13' 6", a 36" door) and square feet, never metres or millimetres. The tools work in millimetres: 1 inch is 25.4 mm and 1 foot is 304.8 mm, so turn what they say into mm for the tools and turn what the tools return into feet and inches (round to the nearest half inch) when you answer.`,
+    "Placing: the usual US layouts (width x depth): twin bed 38x75 in (965x1905 mm), full 54x75 in (1372x1905), queen 60x80 in (1524x2032), king 76x80 in (1930x2032), with a nightstand each side of a full or bigger; dining table 72x36 in (1830x915) for 6 or 48x30 in (1220x760) for 4 with a chair at each place; desk 48x24 in (1220x610) with an office chair; sofa facing the TV on a sideboard. Place things the way a designer would: keep about 36 in (915 mm) of walking space and never block a door or doorway. Only add what fits; leave other things as they are unless asked.",
     'Showing places: whenever you mention a room or spot the person has to pick between or find ("which bedroom?"), call point_at first so a coloured dot blinks on each one, then name them by where they are and by colour ("the bedroom on the south side, blue dot, or the east one, green dot?"). Rooms often share a name, so tell them apart by their side of the floor (find_in_plan says where each one is). After adding or moving something it is pointed at for you. Dots blink for 10 seconds and then go, so every time you refer to a place again (later in the chat too), call point_at again so it blinks again.',
     // keep these two last: they change per request, and everything above them is cached
     `Today is ${today()}.`,

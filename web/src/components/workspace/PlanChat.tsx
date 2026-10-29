@@ -9,7 +9,7 @@ import type { AssistantContext } from "@/lib/assistant/core";
 import { FURNISH } from "@/lib/plan/furnish";
 import { speak, stopSpeaking, useDictation, VoiceNote } from "@/components/voice/speech";
 
-const HINT = "Say what to change: \"put a sofa facing the TV in the living room\", \"move the bed 30 cm north\", \"turn the desk to face the window\", \"rename the study to Office\".";
+const HINT = "Say what to change: \"put a sofa facing the TV in the living room\", \"move the bed a foot north\", \"turn the desk to face the window\", \"rename the study to Office\".";
 
 export function PlanChat({ send, context, rooms, onChanged, onFurnish }: { send: AssistantSend; context: AssistantContext; rooms: string[]; onChanged?: () => void; onFurnish?: (room: string | null) => void }) {
   const [turns, setTurns] = useState<Turn[]>([]);

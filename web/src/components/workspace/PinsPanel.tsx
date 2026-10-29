@@ -140,7 +140,7 @@ export function PinForm({ plan, draft, preset, stages, onCancel, onCreate }: {
       </div>
       <div>
         <label className="label" htmlFor="pin-title">Title</label>
-        <input id="pin-title" ref={titleRef} className="input" value={title} onChange={(x) => setTitle(x.target.value)} placeholder={kind === "issue" ? "Crack above the window" : kind === "material" ? "Tile: 60×60 matte grey" : "Install outlet, 450 mm up"} />
+        <input id="pin-title" ref={titleRef} className="input" value={title} onChange={(x) => setTitle(x.target.value)} placeholder={kind === "issue" ? "Crack above the window" : kind === "material" ? "Tile: 24×24 matte grey" : "Install outlet, 18\" up"} />
       </div>
       <div>
         <label className="label" htmlFor="pin-body">Details</label>

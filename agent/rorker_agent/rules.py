@@ -1,16 +1,32 @@
 """House rules: the code-normal sizes a house is built to, used wherever the drawing doesn't say.
-Mirror of web/src/lib/plan/rules.ts (the 3D builds from the same numbers). Millimetres."""
+Mirror of web/src/lib/plan/rules.ts (the 3D builds from the same numbers). US residential sizes in
+whole inches, stored as millimetres."""
 from __future__ import annotations
 
+IN = 25.4
+
 RULES = dict(
-    storey=3000, ceiling=2700, slab=200, wall_exterior=300, wall_interior=120,
-    sill=900, sill_wet=1200, sill_kitchen=1050, head=2100,
-    door_head=2100, garage_head=2300, opening_head=2400,
-    pitch=26.6, low_pitch=18.4, eave=450, fascia=200,
-    plinth=450, step=225, tread=300, railing=1000, walk=1200,
+    storey=121 * IN, ceiling=108 * IN, slab=8 * IN, wall_exterior=7 * IN, wall_interior=4.5 * IN,
+    sill=36 * IN, sill_wet=48 * IN, sill_kitchen=42 * IN, head=80 * IN,
+    door_head=80 * IN, garage_head=84 * IN, opening_head=84 * IN,
+    pitch=26.6, low_pitch=18.4, eave=18 * IN, fascia=8 * IN,
+    plinth=18 * IN, step=7.5 * IN, tread=11 * IN, railing=36 * IN, walk=48 * IN,
 )
 
 WET = {"bathroom", "wc", "laundry"}
+
+
+def ftin(mm: float) -> str:
+    """A length the way the contractor reads it: 13' 9½" (nearest half inch)."""
+    halves = round(mm / IN * 2)
+    ft, inch = divmod(halves, 24)
+    whole, half = divmod(inch, 2)
+    return f"{ft}' {whole}{'½' if half else ''}\""
+
+
+def ft2(m2: float) -> str:
+    """An area in square feet: 120 ft²."""
+    return f"{round(m2 * 10.7639)} ft²"
 
 
 def opening_span(kind: str, room_types: list[str]) -> tuple[float, float]:

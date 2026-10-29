@@ -36,11 +36,12 @@ Rules:
   gap measured along the wall centre line.
 - Items: kitchen and bathroom fixtures and main furniture, each with its centre and size in pixels.
 - Scale: work out millimetres per pixel from dimension strings or grid spacing (for example a 3600 bay), and say
-  what you used. If nothing is written, estimate from typical sizes (doors about 800-900 mm, beds about 2000 mm).
+  what you used. If nothing is written, estimate from typical sizes (US doors 30-36 in, about 760-915 mm; beds about 80 in, 2030 mm).
 - Reference point per floor: the pixel position of the top-left outside corner of that floor's main outer wall,
   so floors can be stacked.
 - Ask at most 5 short questions, only about things that change the plan and that you cannot settle from the image,
-  each with 2-4 options, your best guess first."""
+  each with 2-4 options, your best guess first. Write sizes in them in feet and inches (a 36" door, a 12' wall);
+  the numbers you return stay in millimetres and pixels."""
 
 
 def load_image(path: str) -> Image.Image:
@@ -260,7 +261,7 @@ def plan_from_vision(result: dict, filename: str, kind: str) -> Plan:
     plan.flags.append(Flag(code="vision_source", severity="info",
                            message=f"Read from an image. Scale {k:.2f} mm per pixel: {result.get('scale_evidence', '')}"))
     plan.flags.append(Flag(code="no_exterior", severity="info",
-                           message="The outside view is estimated from the footprint with 3 m storeys."))
+                           message="The outside view is estimated from the footprint with 10 ft storeys."))
     from .build import _stats
     plan.stats = _stats(plan)
     return plan
