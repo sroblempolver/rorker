@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildSteps, dayOf, planAtStep, stepAt, type BuildStep, type StageId } from "@/lib/plan/buildPlay";
 import type { Plan } from "@/lib/plan/types";
+import type { BuildSpec } from "@/lib/plan/buildSpec";
 
 /** End to end, ms */
 const LENGTH = 10000;
@@ -13,10 +14,10 @@ const LENGTH = 10000;
 export interface Playing { plan: Plan; step: BuildStep }
 
 /** Playing the build: where it is (0 to 1), the steps, and the plan as built at the step on show. */
-export function useBuildPlay(plan: Plan | null, days?: Partial<Record<StageId, number>>) {
+export function useBuildPlay(plan: Plan | null, days?: Partial<Record<StageId, number>>, spec?: BuildSpec) {
   const [t, setT] = useState<number | null>(null);
   const [run, setRun] = useState(false);
-  const steps = useMemo(() => (plan ? buildSteps(plan, days) : []), [plan, days]);
+  const steps = useMemo(() => (plan ? buildSteps(plan, days, spec) : []), [plan, days, spec]);
   const i = t == null ? -1 : stepAt(steps, t);
   const shown = useMemo<Playing | null>(() => (plan && i >= 0 && steps[i] ? { plan: planAtStep(plan, steps[i]), step: steps[i] } : null), [plan, steps, i]);
   const now = useRef(0);

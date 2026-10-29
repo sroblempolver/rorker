@@ -373,8 +373,9 @@ function fromAssistant(r: NewProjectResult, team: Member[]): WorkspaceData {
   const planRow: PlanRow | null = r.plan ? { id: uid(), job_id: jobId, version: 1, data: r.plan, created_at: now() } : null;
   return {
     job: { id: jobId, company_id: "demo", ...r.job, status: "active", current_plan_id: planRow?.id ?? null, created_at: now() },
-    plan: planRow, stages: tpl.stages.map((s, i) => ({ id: uid(), job_id: jobId, position: i + 1, name: s.name, description: null, status: "not_started", started_at: null, completed_at: null })),
-    pins: [], states: [], edits: r.furnish !== undefined ? { [JOB_KEY]: { furnish: r.furnish } } : {}, can3d: true, items: [],
+    // the stages from how it's built (the build questions), or else the company template's
+    plan: planRow, stages: (r.stages ?? tpl.stages.map((s) => ({ name: s.name, description: "" }))).map((s, i) => ({ id: uid(), job_id: jobId, position: i + 1, name: s.name, description: s.description || null, status: "not_started", started_at: null, completed_at: null })),
+    pins: [], states: [], edits: r.furnish !== undefined || r.build ? { [JOB_KEY]: { ...(r.furnish !== undefined ? { furnish: r.furnish } : {}), ...(r.build ? { build: r.build } : {}) } } : {}, can3d: true, items: [],
     runs: planRow ? [{ id: uid(), job_id: jobId, kind: "read", file_name: r.plan!.source.filename || "Your files", status: r.plan!.questions.length ? "needs_answers" : "done", error: null, plan_id: planRow.id, created_at: now(), finished_at: now(), metrics: {} }] : [],
     members: team, me: "m0", aiAvailable: false, canShare: true,
     billing: { quotes: [], invoices: [], payments: [] }, brand: BRAND, payoutsConnected: false,
