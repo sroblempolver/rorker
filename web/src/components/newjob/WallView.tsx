@@ -1,11 +1,12 @@
 "use client";
 // One wall of a room seen from the side, standing in the room and facing it: its doors and windows at
-// their real size and height, dragged along the wall to where they really are. Doors and windows can be
-// added and resized here. Everything is written back to the sketch, so the plan above moves with it.
+// their real size and height, and the furniture standing against it, dragged along the wall to where they
+// really are. Doors and windows can be added and resized here. Everything is written back to the sketch, so the plan above moves with it.
 import { useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import type { Pt } from "@/lib/plan/types";
-import type { SketchDoor, SketchFloor, SketchWindow } from "@/lib/plan/sketch";
-import { fmtLen, parseLength, type Units } from "@/lib/plan/units";
+import type { SketchDoor, SketchFixture, SketchFloor, SketchWindow } from "@/lib/plan/sketch";
+import { CATALOG, bottomOf, topOf } from "@/lib/plan/catalog";
+import { fmtLen, parseLength, roundLen, type Units } from "@/lib/plan/units";
 import { doorSpot, doorWall, doorWidth, edgesOf, outsidePieces, param, pointInPoly, sameLine, segLen, sideOf, wallAt, windowSpots, windowWall, type Seg } from "@/lib/plan/sketchEdit";
 
 // standard sizes: what a new door or window starts as, and what one without its own numbers is drawn at
@@ -15,7 +16,9 @@ const DOOR_H: Record<string, number> = { opening: 2400, garage_door: 2300 };
 const doorH = (d: SketchDoor) => d.height_mm ?? DOOR_H[d.kind ?? "door"] ?? 2100;
 const BALCONY_DEPTH = 1500;
 const DOOR_KINDS = [["door", "Door"], ["double_door", "Double door"], ["sliding_door", "Patio door"], ["opening", "Opening"], ["garage_door", "Garage door"]] as const;
-type Item = { t: "door"; i: number; x0: number; x1: number } | { t: "window"; i: number; k: number; x0: number; x1: number };
+type Item = { t: "door" | "thing"; i: number; x0: number; x1: number } | { t: "window"; i: number; k: number; x0: number; x1: number };
+const same = (a: Item, b: Item) => a.t === b.t && a.i === b.i && (a.t !== "window" || (b.t === "window" && a.k === b.k));
+const OPP: Record<string, string> = { north: "south", south: "north", east: "west", west: "east" };
 
 /** The wall's two ends as seen from inside the room: left end first. */
 export function wallFromInside(poly: Pt[], e: number): Seg {
@@ -30,7 +33,7 @@ export function wallFromInside(poly: Pt[], e: number): Seg {
   return ux * rx + uy * ry >= 0 ? [a, b] : [b, a];
 }
 
-export function WallView({ floor, room, edge, height = 2700, units = "m", onChange, onClose, onEdge }: {
+export function WallView({ floor, room, edge, height = 2700, units = "ft", onChange, onClose, onEdge }: {
   floor: SketchFloor; room: number; edge: number; height?: number; units?: Units;
   /** `history`: false while dragging (the change before the drag was already kept for undo) */
   onChange: (f: SketchFloor, history?: boolean) => void; onClose: () => void; onEdge: (e: number) => void;
@@ -56,6 +59,16 @@ export function WallView({ floor, room, edge, height = 2700, units = "m", onChan
     (floor.windows ?? []).forEach((w, i) => windowSpots(floor, w).forEach((s, k) => { if (on(s)) { const [p, q] = [xOf(s[0]), xOf(s[1])].sort((a, b) => a - b); out.push({ t: "window", i, k, x0: p, x1: q }); } }));
     return out;
   }, [floor, wall]); // eslint-disable-line react-hooks/exhaustive-deps
+  // furniture standing against this wall (its back within a hand's width of it)
+  const inward: Pt = [-outward[0], -outward[1]];
+  const along = (f: SketchFixture) => { const back = !f.facing || f.facing === OPP[side] || f.facing === side; return back ? [f.width_mm ?? 600, f.depth_mm ?? 600] : [f.depth_mm ?? 600, f.width_mm ?? 600]; };
+  const offOf = (c: Pt) => (c[0] - wall[0][0]) * inward[0] + (c[1] - wall[0][1]) * inward[1];
+  const things = useMemo(() => (floor.fixtures ?? []).flatMap((f, i): Item[] => {
+    const [w, d] = along(f), x = xOf(f.center), off = offOf(f.center);
+    if (off < 0 || off > d / 2 + 150 || x < 0 || x > L || CATALOG[f.kind]?.mount === "ceiling") return [];
+    if (f.room && f.room.toLowerCase() !== r.name.toLowerCase()) return [];
+    return [{ t: "thing", i, x0: x - w / 2, x1: x + w / 2 }];
+  }), [floor.fixtures, wall, outward]); // eslint-disable-line react-hooks/exhaustive-deps
   // who is on the other side, along the wall
   const outside = useMemo(() => outsidePieces(floor, room).filter((s) => sameLine(s, wall)).map((s) => [xOf(s[0]), xOf(s[1])].sort((a, b) => a - b) as [number, number]), [floor, room, wall]); // eslint-disable-line react-hooks/exhaustive-deps
   const beyond = useMemo(() => {
@@ -75,12 +88,16 @@ export function WallView({ floor, room, edge, height = 2700, units = "m", onChan
   // move an item so its centre sits `c` mm from the left end
   const moveTo = (it: Item, c: number, history: boolean) => {
     const P = at(Math.max(0, Math.min(L, c)));
-    if (it.t === "door") {
+    if (it.t === "thing") {
+      const f = floor.fixtures![it.i], off = offOf(f.center);
+      const q: Pt = [Math.round(P[0] + inward[0] * off), Math.round(P[1] + inward[1] * off)];
+      onChange({ ...floor, fixtures: floor.fixtures!.map((x, i) => (i === it.i ? { ...x, center: q } : x)) }, history);
+    } else if (it.t === "door") {
       const d = floor.doors![it.i], ref = doorWall(floor, d);
       if (!ref) return;
       const t = Math.round(Math.max(0, Math.min(1, param(P, ref))) * 1000) / 1000;
       onChange({ ...floor, doors: floor.doors!.map((x, i) => (i === it.i ? { ...x, at: t } : x)) }, history);
-    } else {
+    } else if (it.t === "window") {
       const w = floor.windows![it.i], ref = windowWall(floor, w);
       if (!ref) return;
       const n = Math.max(1, Math.min(4, w.count ?? 1));
@@ -101,7 +118,7 @@ export function WallView({ floor, room, edge, height = 2700, units = "m", onChan
     const dx = toX(e) - d.from;
     if (!d.moved && Math.abs(dx) < 30) return;
     if (!d.moved) { d.moved = true; moveTo(d.item, d.c0, true); } // keep the start for undo
-    moveTo(d.item, Math.round((d.c0 + dx) / 10) * 10, false);
+    moveTo(d.item, roundLen(d.c0 + dx, units), false);
   };
   const up = () => { drag.current = null; };
 
@@ -168,8 +185,9 @@ export function WallView({ floor, room, edge, height = 2700, units = "m", onChan
   };
   const remove = () => {
     if (!sel) return;
+    if (sel.t === "thing") { onChange({ ...floor, fixtures: floor.fixtures!.filter((_, i) => i !== sel.i) }); setSel(null); return; }
     if (sel.t === "door") onChange({ ...floor, doors: floor.doors!.filter((_, i) => i !== sel.i) });
-    else {
+    else if (sel.t === "window") {
       const w = floor.windows![sel.i], n = Math.max(1, Math.min(4, w.count ?? 1));
       if (n <= 1) onChange({ ...floor, windows: floor.windows!.filter((_, i) => i !== sel.i) });
       else {
@@ -186,7 +204,9 @@ export function WallView({ floor, room, edge, height = 2700, units = "m", onChan
   const setWin = (ch: Partial<SketchWindow>) => sel && onChange({ ...floor, windows: floor.windows!.map((x, i) => (i === sel.i ? { ...x, ...ch } : x)) }, false);
   const setWidth = (v: number) => { if (v > 200) (selDoor ? setDoor : setWin)({ width_mm: v }); };
   const setTall = (v: number) => { if (v > 200 && v <= height) (selDoor ? setDoor : setWin)({ height_mm: v }); };
-  const cur = sel && items.find((x) => x.t === sel.t && x.i === sel.i && (x.t === "door" || (sel.t === "window" && x.k === sel.k)));
+  const selThing = sel?.t === "thing" ? floor.fixtures![sel.i] : null;
+  const setThing = (ch: Partial<SketchFixture>) => sel && onChange({ ...floor, fixtures: floor.fixtures!.map((x, i) => (i === sel.i ? { ...x, ...ch } : x)) }, false);
+  const cur = sel && [...items, ...things].find((x) => same(x, sel));
   const n = edgesOf(r.polygon).length;
   const fs = Math.max(110, Math.max(L + 800, (height + 700) * 4) / 40);
 
@@ -208,8 +228,17 @@ export function WallView({ floor, room, edge, height = 2700, units = "m", onChan
         <rect x={0} y={-height} width={L} height={height} fill="#e3d9c6" stroke="#0a0a0b" strokeWidth={20} />
         {outside.map(([a, b], k) => <rect key={k} x={a} y={-height} width={b - a} height={height} fill="#d6c9b0" />)}
         <line x1={-pad} y1={0} x2={L + pad} y2={0} stroke="#9c978d" strokeWidth={20} />
+        {things.map((it) => {
+          const f = floor.fixtures![it.i], b = bottomOf(f), t = topOf(f), on = !!sel && same(it, sel), label = f.name || CATALOG[f.kind]?.label || f.kind;
+          return (
+            <g key={`f${it.i}`} onPointerDown={(e) => down(e, it)} style={{ cursor: "ew-resize" }}>
+              <rect x={it.x0} y={-t} width={it.x1 - it.x0} height={t - b} fill={CATALOG[f.kind]?.fill ?? "#b9a27e"} fillOpacity={0.9} stroke={on ? "#ff6a1f" : "#0a0a0b"} strokeWidth={on ? 40 : 14} />
+              <text x={(it.x0 + it.x1) / 2} y={-(b + t) / 2} fontSize={Math.min(fs * 0.7, (it.x1 - it.x0) / (label.length * 0.62))} textAnchor="middle" dominantBaseline="middle" fill="#0a0a0b" style={{ pointerEvents: "none" }}>{label}</text>
+            </g>
+          );
+        })}
         {items.map((it, k) => {
-          const on = sel && sel.t === it.t && sel.i === it.i && (it.t === "door" || (sel.t === "window" && it.k === sel.k));
+          const on = !!sel && same(it, sel);
           const w = it.x1 - it.x0;
           return it.t === "door" ? (
             <g key={k} onPointerDown={(e) => down(e, it)} style={{ cursor: "ew-resize" }}>
@@ -249,12 +278,22 @@ export function WallView({ floor, room, edge, height = 2700, units = "m", onChan
             {L - cur.x1 > fs * 3.5 && <text x={(cur.x1 + L) / 2} y={-height - 80} textAnchor="middle">{m(L - cur.x1)}</text>}
           </g>
         )}
-        {!items.length && <text x={L / 2} y={-height / 2} fontSize={fs} textAnchor="middle" fill="#6e6a62">No doors or windows on this wall</text>}
+        {!items.length && !things.length && <text x={L / 2} y={-height / 2} fontSize={fs} textAnchor="middle" fill="#6e6a62">Nothing on this wall yet</text>}
       </svg>
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px] min-h-[44px]">
         {note && <span className="text-amber">{note}</span>}
-        {!sel && !note && <span className="text-muted">Drag a door or window along the wall. Pick one to change its width or remove it.</span>}
-        {sel && (
+        {!sel && !note && <span className="text-muted">Drag a door, window or piece of furniture along the wall. Pick one to change its size or remove it.</span>}
+        {selThing && (
+          <>
+            <span className="font-medium">{selThing.name || CATALOG[selThing.kind]?.label || selThing.kind}</span>
+            <Len label="Width" mm={selThing.width_mm ?? 600} units={units} onStart={() => onChange(floor)} onSet={(v) => v >= 100 && setThing({ width_mm: v })} />
+            <Len label="Height" mm={topOf(selThing) - bottomOf(selThing)} units={units} onStart={() => onChange(floor)} onSet={(v) => v >= 50 && bottomOf(selThing) + v <= height && setThing({ height_mm: v })} />
+            <Len label="Off the floor" mm={bottomOf(selThing)} units={units} onStart={() => onChange(floor)} onSet={(v) => topOf(selThing) - bottomOf(selThing) + v <= height && setThing({ elevation_mm: v || undefined })} />
+            {cur && <Len label="From the left" mm={cur.x0} units={units} onStart={() => onChange(floor)} onSet={(v) => moveTo(cur, v + (cur.x1 - cur.x0) / 2, false)} />}
+            <button className="btn btn-sm btn-ghost text-red ml-auto" onClick={remove}>Remove</button>
+          </>
+        )}
+        {sel && !selThing && (
           <>
             {selDoor ? (
               <select className="input !h-8 !w-auto" value={selDoor.kind ?? "door"} aria-label="Kind of door" onFocus={() => onChange(floor)}
@@ -276,13 +315,13 @@ export function WallView({ floor, room, edge, height = 2700, units = "m", onChan
   );
 }
 
-/** A length typed in metres or feet and inches; set on Enter or when you leave the box, to the nearest cm. */
+/** A length typed in feet and inches (or metres); set on Enter or when you leave the box, to the nearest ½ inch (or cm). */
 function Len({ label, mm, units, onStart, onSet }: { label: string; mm: number; units: Units; onStart: () => void; onSet: (mm: number) => void }) {
   return (
     <label className="flex items-center gap-1.5">
       <span className="text-muted">{label}</span>
       <input key={`${Math.round(mm)}${units}`} className="input !h-8 !w-[88px]" defaultValue={fmtLen(mm, units, true)} onFocus={onStart} aria-label={label}
-        onBlur={(e) => { const v = parseLength(e.target.value, units); if (v != null) onSet(Math.round(v / 10) * 10); }} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
+        onBlur={(e) => { const v = parseLength(e.target.value, units); if (v != null) onSet(roundLen(v, units)); }} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
     </label>
   );
 }

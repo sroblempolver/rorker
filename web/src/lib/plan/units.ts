@@ -9,6 +9,9 @@ export function fmtLen(mm: number, u: Units, bare = false): string {
   const i = Number.isInteger(inch) ? `${inch}` : `${Math.floor(inch)}½`;
   return `${ft}' ${i}"`;
 }
+/** A length rounded to what can be typed: the nearest ½ inch, or the nearest cm in metres. */
+export const roundLen = (mm: number, u: Units = "ft") => (u === "ft" ? Math.round(mm / 12.7) * 12.7 : Math.round(mm / 10) * 10);
+export const INCH = 25.4;
 export const fmtArea = (m2: number, u: Units) => (u === "m" ? `${m2.toFixed(1)} m²` : `${Math.round(m2 * 10.7639)} ft²`);
 
 /**

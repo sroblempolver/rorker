@@ -7,14 +7,14 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import type { Pt } from "@/lib/plan/types";
 import type { Side, Sketch, SketchFloor, SketchRoom } from "@/lib/plan/sketch";
-import { OUTSIDE, doorSpot, outsidePieces, edgesOf, flatten, moveCorner, moveWall, nearSeg, pointInPoly, roomArea, sideOf, snapTo, splitPoly, wallAt, windowSpots, type Seg } from "@/lib/plan/sketchEdit";
+import { OUTSIDE, doorSpot, hugWall, outsidePieces, edgesOf, flatten, moveCorner, moveWall, nearSeg, pointInPoly, roomArea, sideOf, snapTo, splitPoly, wallAt, windowSpots, type Seg } from "@/lib/plan/sketchEdit";
 import { bboxOf, centroid } from "@/lib/plan/geometry";
 import { CATALOG } from "@/lib/plan/catalog";
 import { MATERIAL_BASE, ROOM_MATERIAL } from "@/components/plan/style";
 import { useEscape, editable } from "@/components/ui/hotkeys";
 import { WallView } from "./WallView";
 import { tidyStroke } from "@/lib/plan/pen";
-import { fmtArea, fmtLen, parseLength, type Units } from "@/lib/plan/units";
+import { INCH, fmtArea, fmtLen, parseLength, roundLen, type Units } from "@/lib/plan/units";
 import type { IntakePart } from "@/lib/intake/files";
 
 /** A picture of the drawing to trace over. `mmPerPx` when its scale is known (an AutoCAD drawing). */
@@ -95,8 +95,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   // the wall seen from the side (a room and which of its edges), and the "+ Floor" choice
   const [wall, setWall] = useState<{ room: number; edge: number } | null>(null);
   const [addingFloor, setAddingFloor] = useState(false);
-  const [lu, setLuState] = useState<Units>(() => { try { return localStorage.getItem("rorker-units") === "ft" ? "ft" : "m"; } catch { return "m"; } });
-  const setLu = (u: Units) => { setLuState(u); try { localStorage.setItem("rorker-units", u); } catch { /* private window */ } };
+  // lengths are shown and typed in feet and inches
+  const lu: Units = "ft";
   const svg = useRef<SVGSVGElement>(null);
   const [box, setBox] = useState({ w: 800, h: 560 });
   const floor = sk.floors[Math.min(fi, sk.floors.length - 1)];
@@ -223,7 +223,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     for (const r of below?.rooms ?? []) for (const p of r.polygon) { xs.push(p[0]); ys.push(p[1]); }
     return { xs, ys };
   };
-  const snapPt = (p: Pt, skip?: number): Pt => { const { xs, ys } = snapLines(skip); const g = px > 40 ? 100 : px < 8 ? 10 : 50; return [snapTo(p[0], xs, 12 * px, g), snapTo(p[1], ys, 12 * px, g)]; };
+  const snapPt = (p: Pt, skip?: number): Pt => { const { xs, ys } = snapLines(skip); const g = px > 40 ? 12 * INCH : px < 8 ? INCH : 6 * INCH; return [snapTo(p[0], xs, 12 * px, g), snapTo(p[1], ys, 12 * px, g)]; };
   const snapCorner = (p: Pt): Pt => {
     let best = p, d = 14 * px;
     for (const r of [...floor.rooms, ...(below?.rooms ?? [])]) for (const q of r.polygon) if (dist(p, q) < d) { d = dist(p, q); best = q; }
@@ -285,7 +285,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       const dir: Record<string, Pt> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
       if (dir[e.key] && (sel?.t === "room" || sel?.t === "thing")) {
         e.preventDefault();
-        const st = e.shiftKey ? 10 : 100, [dx, dy] = [dir[e.key][0] * st, dir[e.key][1] * st];
+        const st = e.shiftKey ? INCH / 2 : 6 * INCH, [dx, dy] = [dir[e.key][0] * st, dir[e.key][1] * st];
         if (sel.t === "room") setFloor({ ...floor, rooms: floor.rooms.map((r, i) => (i === sel.i ? { ...r, polygon: r.polygon.map(([x, y]) => [x + dx, y + dy] as Pt) } : r)) });
         else setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? { ...f, center: [f.center[0] + dx, f.center[1] + dy] as Pt } : f)) });
         return;
@@ -369,7 +369,10 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       setFloor({ ...floor, rooms: moveWall(drag.orig, drag.s, by) }, false);
     } else if (drag.k === "thing") {
       const c: Pt = [r10(drag.orig[0] + p[0] - drag.from[0]), r10(drag.orig[1] + p[1] - drag.from[1])];
-      setFloor({ ...floor, fixtures: (floor.fixtures ?? []).map((f, i) => (i === drag.i ? { ...f, center: c } : f)) }, false);
+      const f0 = (floor.fixtures ?? [])[drag.i], ri = roomAt(c);
+      // slides along a wall it's dragged near, back to the wall
+      const hug = f0 && ri >= 0 && CATALOG[f0.kind]?.mount !== "ceiling" ? hugWall(floor.rooms[ri].polygon, c, f0.width_mm ?? 600, f0.depth_mm ?? 600, 250) : null;
+      setFloor({ ...floor, fixtures: (floor.fixtures ?? []).map((f, i) => (i === drag.i ? { ...f, center: hug?.center ?? c, ...(hug ? { facing: hug.facing } : {}), room: ri >= 0 ? floor.rooms[ri].name : f.room } : f)) }, false);
     } else if (drag.k === "picture" && bg) {
       setBgs({ ...bgs, [fi]: { ...bg, at: [drag.orig[0] + p[0] - drag.from[0], drag.orig[1] + p[1] - drag.from[1]] } });
     }
@@ -388,7 +391,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       return;
     }
     if (d?.k === "pen") {
-      const poly = tidyStroke(d.pts, px < 8 ? 10 : 50);
+      const poly = tidyStroke(d.pts, px < 8 ? INCH : 6 * INCH);
       if (!poly) { setNote("Draw the room's outline all the way round, like drawing a box on paper."); return; }
       const name = uniqueName(`Room ${floor.rooms.length + 1}`);
       setFloor({ ...floor, rooms: [...floor.rooms, { name, type: "other", polygon: poly.map((q) => snapCorner(snapPt(q))) }] });
@@ -441,7 +444,10 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       const spec = CATALOG[thing];
       const ri = roomAt(p);
       const c: Pt = [r10(p[0]), r10(p[1])];
-      const fx = { kind: thing, name: spec?.label, room: ri >= 0 ? floor.rooms[ri].name : undefined, center: c, width_mm: spec?.w ?? 600, depth_mm: spec?.d ?? 600, facing: facingFor(c, ri) };
+      const w = spec?.w ?? 600, dp = spec?.d ?? 600;
+      // against a wall when it's put near one: back flat to the wall, facing the room
+      const hug = ri >= 0 && spec?.mount !== "ceiling" ? hugWall(floor.rooms[ri].polygon, c, w, dp, 600) : null;
+      const fx = { kind: thing, name: spec?.label, room: ri >= 0 ? floor.rooms[ri].name : undefined, center: hug?.center ?? c, width_mm: w, depth_mm: dp, facing: hug?.facing ?? facingFor(c, ri) };
       setFloor({ ...floor, fixtures: [...(floor.fixtures ?? []), fx] });
       setSel({ t: "thing", i: (floor.fixtures ?? []).length });
     } else if (tool === "scale") {
@@ -501,7 +507,6 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             className={`btn btn-sm ${tool === t.id ? "btn-primary" : "btn-ghost"}`}>{t.label}</button>
         ))}
         <span className="mx-1 h-5 w-px bg-line" />
-        <button className="chip !h-7" onClick={() => setLu(lu === "m" ? "ft" : "m")} title="Switch metres / feet and inches">{lu === "m" ? "m" : "ft·in"}</button>
         <button className="btn btn-sm btn-ghost" onClick={undo} disabled={!past.current.length} title="Undo (Ctrl+Z)">Undo</button>
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(0.75)} aria-label="Zoom in">+</button>
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(1.33)} aria-label="Zoom out">−</button>
@@ -639,7 +644,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
                     {([0, 1] as const).map((ax) => (
                       <div key={ax}><label className="label !mb-1" htmlFor={`size${ax}`}>{ax === 0 ? "Width (east–west)" : "Depth (north–south)"}</label>
                         <input id={`size${ax}`} key={`${sel.i}-${ax}-${b[ax + 2] - b[ax]}-${lu}`} className="input !h-9" defaultValue={fmtLen(b[ax + 2] - b[ax], lu, true)}
-                          onFocus={() => past.current.push(sk)} onBlur={(e) => { const v = parseLength(e.target.value, lu); if (v) resize(sel.i, ax, Math.round(v / 10) * 10); }}
+                          onFocus={() => past.current.push(sk)} onBlur={(e) => { const v = parseLength(e.target.value, lu); if (v) resize(sel.i, ax, roundLen(v, lu)); }}
                           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></div>
                     ))}
                   </div>
