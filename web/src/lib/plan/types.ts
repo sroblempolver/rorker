@@ -21,6 +21,9 @@ export interface Room {
 }
 export interface Wall {
   id: string; polygon: Pt[]; length_mm: number; thickness_mm: number; exterior: boolean; room_ids: string[];
+  /** a wall lower than the ceiling (a half wall), mm; `free` when it was drawn as a piece of its own
+   *  (it stands as drawn, never read as a porch edge) */
+  height_mm?: number; free?: boolean;
 }
 export interface Opening {
   id: string; kind: OpeningKind; name: string; a: Pt; b: Pt; width_mm: number; thickness_mm: number;

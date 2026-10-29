@@ -151,7 +151,7 @@ export function planExterior(plan: Plan): Exterior {
     if (!rings[fi].length) return;
     const items: { ids: string[]; box: BBox }[] = [];
     for (const ring of ringOf(f)) if (!rings[fi].includes(ring)) items.push({ ids: [], box: bboxOf(ring) });
-    for (const w of f.walls) if (!w.room_ids.length) items.push({ ids: [w.id], box: bboxOf(w.polygon) });
+    for (const w of f.walls) if (!w.room_ids.length && !w.free) items.push({ ids: [w.id], box: bboxOf(w.polygon) });
     // pieces close together are one porch
     const groups: { ids: string[]; box: BBox }[] = [];
     for (const it of items) {
@@ -180,7 +180,7 @@ export function planExterior(plan: Plan): Exterior {
   const overlap = (a: BBox, b: BBox) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
   for (const z of zones) {
     const f = floors[z.floorIndex];
-    const own = f.walls.filter((w) => !w.room_ids.length && overlap(bboxOf(w.polygon), z.rect) > 0);
+    const own = f.walls.filter((w) => !w.room_ids.length && !w.free && overlap(bboxOf(w.polygon), z.rect) > 0);
     const columns = own.filter((w) => { const b = bboxOf(w.polygon); return Math.max(b[2] - b[0], b[3] - b[1]) <= 600 && Math.min(b[2] - b[0], b[3] - b[1]) > 200; });
     const upper = zones.find((u) => u.floorIndex === z.floorIndex + 1 && overlap(u.rect, z.rect) > 0.3 * Math.min((z.rect[2] - z.rect[0]) * (z.rect[3] - z.rect[1]), (u.rect[2] - u.rect[0]) * (u.rect[3] - u.rect[1])));
     z.cover = upper ? "balcony" : columns.length ? "canopy" : null;

@@ -23,7 +23,7 @@ const NO_PINS: never[] = [];
 const noop = () => {};
 
 /** Which sketch floor each plan floor came from (planFromSketch leaves out empty floors, lowest first). */
-const floorOrder = (sk: Sketch) => sk.floors.map((f, i) => ({ f, i })).filter(({ f }) => f.rooms?.length).sort((a, b) => a.f.level - b.f.level).map(({ i }) => i);
+const floorOrder = (sk: Sketch) => sk.floors.map((f, i) => ({ f, i })).filter(({ f }) => f.rooms?.length || f.walls?.length).sort((a, b) => a.f.level - b.f.level).map(({ i }) => i);
 // the rooms and furniture planFromSketch numbers (it skips broken outlines and unplaced objects)
 const roomsOf = (sk: Sketch, i: number) => sk.floors[i].rooms.map((r, k) => (Array.isArray(r.polygon) && r.polygon.length >= 3 ? k : -1)).filter((k) => k >= 0);
 const thingsOf = (sk: Sketch, i: number) => (sk.floors[i].fixtures ?? []).map((f, k) => (Array.isArray(f.center) && f.kind ? k : -1)).filter((k) => k >= 0);

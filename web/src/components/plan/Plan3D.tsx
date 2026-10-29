@@ -319,7 +319,7 @@ function buildScene(p: Props, mt: Materials): Built {
       // a wall with no room on either side is a porch post, a balcony baluster or the porch's edge
       const role = ex.walls.get(w.id);
       if (role && role.height <= 0) continue;
-      const wh = role ? Math.min(role.height, wallH) : wallH;
+      const wh = role ? Math.min(role.height, wallH) : Math.min(wallH, w.height_mm ?? wallH);
       const run = look === "framing" && !role ? runOf(w.polygon) : null;
       if (run) {
         // studs, a bottom plate and a double top plate; an invisible wall keeps it clickable
