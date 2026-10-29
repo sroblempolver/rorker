@@ -30,7 +30,7 @@ export function Problem({ title, body }: { title: string; body: string }) {
 }
 
 /** Sign in, make an account, or look around on sample data. */
-export function AuthScreen({ error, onSession, onDemo }: { error?: string; onSession(s: Session | null): void; onDemo(): void }) {
+export function AuthScreen({ error, onSession, onDemo, saving }: { error?: string; onSession(s: Session | null): void; onDemo(): void; saving?: boolean }) {
   const [mode, setMode] = useState<"in" | "up">("in");
   const [f, setF] = useState({ email: "", password: "", name: "", company: "" });
   const [busy, setBusy] = useState(false);
@@ -50,7 +50,7 @@ export function AuthScreen({ error, onSession, onDemo }: { error?: string; onSes
       <div className="w-full max-w-[420px]">
         <div className="mb-8"><Logo /></div>
         <h1 className="font-display text-[34px] font-extrabold uppercase leading-none tracking-[0.01em] mb-1">{mode === "in" ? "Sign in" : "New account"}</h1>
-        <p className="text-muted mb-6">{mode === "in" ? "Your jobs, plans and tasks, saved and on every device." : "For the contractor. Your crew and clients don't need an account: you send them a link."}</p>
+        <p className="text-muted mb-6">{saving ? "Sign in or make a free account, and the job you were sent goes into it, with every other job shared with you." : mode === "in" ? "Your jobs, plans and tasks, saved and on every device." : "For contractors, subs, employees and clients. Jobs people share with you show up in it. Anyone without an account can still open a link you send."}</p>
         <form onSubmit={submit} className="card p-6 border-t-[3px] !border-t-accent space-y-4">
           {mode === "up" && (
             <>
@@ -70,9 +70,43 @@ export function AuthScreen({ error, onSession, onDemo }: { error?: string; onSes
             {mode === "in" ? <>New here? <button type="button" className="text-accent underline" onClick={() => { setMode("up"); setErr(null); }}>Make an account</button></> : <>Have an account? <button type="button" className="text-accent underline" onClick={() => { setMode("in"); setErr(null); }}>Sign in</button></>}
           </p>
         </form>
-        <button onClick={onDemo} className="mt-4 w-full text-[13px] text-muted hover:text-text">Or look around on sample data first (nothing is saved)</button>
+        {!saving && <button onClick={onDemo} className="mt-4 w-full text-[13px] text-muted hover:text-text">Or look around on sample data first (nothing is saved)</button>}
       </div>
     </main>
+  );
+}
+
+/** Where a signed-in person's own account is: the accounts page on build.rorker.com, else this page. */
+export const accountsHref = (hash = "#/jobs") => (location.hostname === "build.rorker.com" ? `/accounts/${hash}` : `${location.pathname.replace(/link\/(index\.html)?$/, "")}${hash}`);
+interface Mine { signedIn?: boolean; saved?: boolean }
+
+/** On a link: keep it in your own Rorker account, so it's with every other job shared with you. */
+function SaveBar({ token, kind, mine }: { token: string; kind: "s" | "c"; mine: Mine }) {
+  const [saved, setSaved] = useState(!!mine.saved);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const save = async () => {
+    setBusy(true); setErr(null);
+    try { await cloud.saveLink(token); setSaved(true); } catch (e) { setErr(e instanceof Error ? e.message : "That didn't save. Try again."); }
+    setBusy(false);
+  };
+  return (
+    <div className="shrink-0 px-4 py-1.5 text-[12.5px] bg-panel-2 border-b border-line text-muted flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center" role="region" aria-label="Your account">
+      {saved ? (
+        <span>In your Rorker account. <a className="underline text-text" href={accountsHref()}>See everything shared with you</a></span>
+      ) : mine.signedIn ? (
+        <>
+          <span>Keep this with your other jobs.</span>
+          <button className="underline text-accent font-semibold" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save to my account"}</button>
+        </>
+      ) : (
+        <>
+          <span>Have a Rorker account? Keep this with your other jobs.</span>
+          <a className="underline text-accent font-semibold" href={accountsHref(`#/save/${kind}/${token}`)}>Save to my account</a>
+        </>
+      )}
+      {err && <span className="text-red">{err}</span>}
+    </div>
   );
 }
 
@@ -86,7 +120,7 @@ function useLink<T>(token: string) {
 
 /** What a crew member (employee or sub) opens from their link. No sign-in. */
 export function CrewLinkPage({ token, pin }: { token: string; pin: string | null }) {
-  const { data, error } = useLink<{ kind: "crew"; work: SharedWork; person?: boolean } | { kind: "client" }>(token);
+  const { data, error } = useLink<({ kind: "crew"; work: SharedWork; person?: boolean } | { kind: "client" }) & Mine>(token);
   useEffect(() => { document.title = data?.kind === "crew" ? `${data.work.label} · ${data.work.company.name}` : "Rorker"; }, [data]);
   // the team board, on a person's own link
   const inbox = useMemo<TeamInboxApi>(() => ({
@@ -98,6 +132,7 @@ export function CrewLinkPage({ token, pin }: { token: string; pin: string | null
   if (data.kind === "client") { location.hash = `#/c/${token}`; return null; }
   return (
     <div className="h-full flex flex-col lg:overflow-hidden overflow-y-auto">
+      <SaveBar token={token} kind="s" mine={data} />
       <SharedWorkView work={data.work} pin={pin}
         send={async (pinId, file) => (await cloud.call<{ photos: string[] }>("photo", { token, pin: pinId, ...(await cloud.photoData(file)) })).photos}
         done={async (pinId) => { await cloud.call("done", { token, pin: pinId }); }} inbox={data.person ? inbox : undefined} />
@@ -107,7 +142,7 @@ export function CrewLinkPage({ token, pin }: { token: string; pin: string | null
 
 /** What the contractor's client opens: their project, their thread with the contractor, their money. */
 export function ClientLinkPage({ token, open, pin }: { token: string; open: string | null; pin: string | null }) {
-  const { data, error } = useLink<{ kind: "client"; view: ClientView } | { kind: "crew" }>(token);
+  const { data, error } = useLink<({ kind: "client"; view: ClientView } | { kind: "crew" }) & Mine>(token);
   const [err, setErr] = useState<string | null>(null);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => { if (data?.kind === "client") document.title = `${data.view.job.name} · ${data.view.company.name}`; }, [data]);
@@ -130,5 +165,42 @@ export function ClientLinkPage({ token, open, pin }: { token: string; open: stri
   if (data.kind === "crew") { location.hash = `#/s/${token}`; return null; }
   const [kind, id] = (open ?? "").split(":");
   const start: ClientStart = id && (kind === "quote" || kind === "invoice" || kind === "change") ? { kind, id } : null;
-  return <ClientPage view={data.view} api={api} start={start} pin={pin} error={err} seenKey={`client:${token}`} />;
+  return (
+    <div className="h-full flex flex-col">
+      <SaveBar token={token} kind="c" mine={data} />
+      <div className="flex-1 min-h-0"><ClientPage view={data.view} api={api} start={start} pin={pin} error={err} seenKey={`client:${token}`} /></div>
+    </div>
+  );
+}
+
+/** The jobs other people shared with you and you saved to your account: a sub's jobs from every
+ *  contractor they work for, a client's own project. Each opens the same page its link does. */
+export function SharedWithYou({ note }: { note?: string | null }) {
+  const [list, setList] = useState<cloud.SharedItem[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { cloud.sharedWithMe().then(setList, (e) => setErr(e instanceof Error ? e.message : "Couldn't load what's shared with you.")); }, []);
+  const remove = async (id: string) => {
+    setList((l) => (l ?? []).filter((x) => x.id !== id));
+    try { await cloud.unsaveLink(id); } catch { /* it's back on the next load */ }
+  };
+  if (!list?.length && !note && !err) return null;
+  return (
+    <section className="px-4 sm:px-6 pb-4" aria-label="Shared with you">
+      <p className="eyebrow mb-2">Shared with you</p>
+      {note && <p className="text-[13px] mb-2">{note}</p>}
+      {err && <p className="text-red text-[13px] mb-2">{err}</p>}
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {(list ?? []).map((x) => (
+          <div key={x.id} className={`card p-3 flex items-start gap-3 ${x.live ? "" : "opacity-60"}`}>
+            <a href={x.live ? `#/${x.kind}/${x.token}` : undefined} className="flex-1 min-w-0" aria-disabled={!x.live}>
+              <span className="block text-[11.5px] text-muted truncate">{x.company} · {x.kind === "c" ? "your project" : x.job ? "your tasks" : "your tasks on every job"}</span>
+              <span className="block font-semibold truncate">{x.job?.name ?? x.label}</span>
+              <span className="block text-[12px] text-muted truncate">{x.live ? x.job?.address ?? x.label : "Turned off by the contractor"}</span>
+            </a>
+            <button className="text-muted hover:text-text text-[12px] shrink-0" onClick={() => void remove(x.id)} aria-label={`Take ${x.job?.name ?? x.label} off your list`}>Remove</button>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }

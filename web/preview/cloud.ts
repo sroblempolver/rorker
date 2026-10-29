@@ -17,12 +17,24 @@ export const sb = createClient(URL_, KEY, { auth: { persistSession: true, storag
 export async function call<T>(action: string, body: Record<string, unknown> = {}): Promise<T> {
   let r: Response;
   try {
-    r = await fetch(`${URL_}/functions/v1/build`, { method: "POST", headers: { "content-type": "application/json", apikey: KEY }, body: JSON.stringify({ action, ...body }) });
+    // signed in (on this site's accounts page): the function knows who, to keep links in their account
+    const { data } = await sb.auth.getSession();
+    const auth: Record<string, string> = data.session ? { authorization: `Bearer ${data.session.access_token}` } : {};
+    r = await fetch(`${URL_}/functions/v1/build`, { method: "POST", headers: { "content-type": "application/json", apikey: KEY, ...auth }, body: JSON.stringify({ action, ...body }) });
   } catch { throw new Error("Can't reach Rorker. Check your connection and try again."); }
   const j = await r.json().catch(() => null);
   if (!r.ok) throw new Error(j?.error ?? "Something went wrong. Try again.");
   return j as T;
 }
+
+/** A link someone saved to their account, as their "Shared with you" list shows it. */
+export interface SharedItem {
+  id: string; token: string; kind: "s" | "c"; label: string; company: string;
+  job: { name: string; address: string | null } | null; live: boolean; saved_at: string;
+}
+export const sharedWithMe = async () => (await call<{ shared: SharedItem[] }>("shared")).shared;
+export const saveLink = (token: string) => call<{ id: string }>("save", { token });
+export const unsaveLink = (id: string) => call("unsave", { id });
 
 export async function signUp(input: { email: string; password: string; name: string; company: string }) {
   await call("signup", input);

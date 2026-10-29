@@ -169,7 +169,11 @@ export interface ShareLink {
   expires_at: string | null; revoked_at: string | null; created_at: string;
   /** who it's for: crew (the default) or the job's client (their progress and money page) */
   audience?: "crew" | "client";
+  /** shown only: the people who saved this link to their own account (never saved with the link) */
+  saved_by?: string[];
 }
+/** Someone who saved a link to their own Rorker account, so it's in their "Shared with you". */
+export interface ShareAccess { id: string; share_id: string; user_id: string; email: string | null; name: string | null; saved_at: string }
 export interface ShareLinkInput { label: string; member_id?: string | null; pin_ids?: string[]; expires_at?: string | null }
 /** What a shared link shows. Built by shareView(), never straight from the database. */
 export interface SharedView {
