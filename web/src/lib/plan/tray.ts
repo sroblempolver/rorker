@@ -3,9 +3,10 @@
 // A section is just a group of items, so another part of the app adds its own with addTrayGroup (for
 // example cabinets in their stock widths). Anything in the catalogue no group names lands in Other.
 import { CATALOG } from "./catalog";
+import type { CabSpec } from "./cabinets";
 
 /** One thing in the tray: a catalogue kind, optionally at its own size and with its own name. */
-export interface TrayItem { kind: string; label?: string; w?: number; d?: number; h?: number }
+export interface TrayItem { kind: string; label?: string; w?: number; d?: number; h?: number; /** a stock cabinet (B18, W3030): placed as one, see lib/plan/cabinets.ts */ cab?: CabSpec }
 /** A tab of the tray. `by` says which row of tabs it sits in. */
 export interface TrayGroup { id: string; label: string; by: "room" | "kind"; items: TrayItem[] }
 
@@ -13,7 +14,7 @@ const its = (s: string): TrayItem[] => s.split(/\s+/).filter(Boolean).map((kind)
 
 const ROOMS: TrayGroup[] = [
   { id: "kitchen", label: "Kitchen", by: "room", items: its("base_cabinet wall_cabinet tall_cabinet island kitchen_sink dishwasher range cooktop oven wall_oven range_hood fridge wine_cooler chest_freezer microwave coffee_machine kettle toaster blender stand_mixer air_fryer bar_stool trash_can recycling_bin kitchen_cart water_dispenser dish_rack") },
-  { id: "bath", label: "Bath", by: "room", items: its("toilet washbasin vanity bathtub shower bidet urinal mirror medicine_cabinet towel_radiator towel_bar toilet_roll_holder laundry_hamper") },
+  { id: "bath", label: "Bath", by: "room", items: its("toilet washbasin vanity tall_cabinet bathtub shower bidet urinal mirror medicine_cabinet towel_radiator towel_bar toilet_roll_holder laundry_hamper") },
   { id: "bedroom", label: "Bedroom", by: "room", items: its("bed bunk_bed sofa_bed crib nightstand wardrobe dresser dressing_table blanket_chest floor_mirror clothes_rack bench changing_table table_lamp") },
   { id: "living", label: "Living", by: "room", items: its("sofa sectional_sofa loveseat armchair recliner chaise_longue ottoman bean_bag coffee_table side_table console_table sideboard tv soundbar floor_speaker game_console bookshelf wall_shelf picture rug fireplace piano lamp table_lamp plant ceiling_fan pendant_light aquarium grandfather_clock wall_clock coat_rack umbrella_stand bar_cart room_divider") },
   { id: "dining", label: "Dining", by: "room", items: its("dining_table round_dining_table table chair high_chair china_cabinet sideboard pendant_light") },
@@ -59,7 +60,7 @@ export const tabForRoom = (type?: string): string | null =>
   ({ kitchen: "kitchen", bathroom: "bath", wc: "bath", bedroom: "bedroom", living: "living", family: "living", dining: "dining", study: "office", office: "office", laundry: "laundry", utility: "laundry", garage: "garage", balcony: "outside", porch: "outside", terrace: "outside" } as Record<string, string>)[type ?? ""] ?? null;
 
 export const itemLabel = (it: TrayItem) => it.label ?? CATALOG[it.kind]?.label ?? it.kind.replace(/_/g, " ");
-const itemKey = (it: TrayItem) => `${it.kind}|${it.label ?? ""}|${it.w ?? ""}|${it.d ?? ""}`;
+const itemKey = (it: TrayItem) => `${it.kind}|${it.label ?? ""}|${it.w ?? ""}|${it.d ?? ""}|${it.h ?? ""}`;
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 /**

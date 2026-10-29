@@ -158,6 +158,8 @@ export function refit(f: SketchFloor, name: () => string): { floor: SketchFloor;
   const rooms: SketchRoom[] = [];
   for (const r of f.rooms) {
     if (!r.loose) { rooms.push(r); continue; }
+    // a room with none of its walls on the floor (pasted from a library, say) traces its own again
+    if (!walls.some((w) => onOutline(w, r.polygon))) { rooms.push({ ...r, loose: undefined }); continue; }
     const seed = insidePoint(r.polygon);
     let k = loops.findIndex((l, i) => !taken.has(i) && pointInPoly(seed, l.poly));
     // the wall was dragged across the old middle: the loop that shares the most corners

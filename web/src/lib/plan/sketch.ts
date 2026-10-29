@@ -5,6 +5,7 @@
 // lib/plan/walls.ts) are added on top: one lying on a room's wall gives that wall its thickness and height.
 import type { BBox, Fixture, Floor, Opening, OpeningKind, Plan, Pt, Question, Room, RoomType, Stair, Wall } from "./types";
 import { bboxOf, polyArea } from "./geometry";
+import { cabinetFixture, type CabSpec } from "./cabinets";
 import { std } from "./standards";
 import "./rules"; // registers the house standards read below
 import { floorRise, stairGeom } from "./stairs";
@@ -22,7 +23,7 @@ export interface SketchRoom {
 export interface SketchWall { a: Pt; b: Pt; thickness_mm?: number; height_mm?: number; half?: boolean; room?: { name: string; type?: string; unit?: string } }
 export interface SketchDoor { rooms: [string, string]; kind?: OpeningKind; width_mm?: number; height_mm?: number; at?: number; /** an outside door: which side of the house */ side?: Side }
 export interface SketchWindow { room: string; side: Side; width_mm?: number; height_mm?: number; /** bottom of the window above the floor */ sill_mm?: number; count?: number; /** where each one sits along the wall, 0 to 1 (spread evenly when left out) */ at?: number[] }
-export interface SketchFixture { kind: string; name?: string; room?: string; center: Pt; width_mm?: number; depth_mm?: number; facing?: Side | null; /** its own height, and its bottom above the floor (the catalogue's when missing) */ height_mm?: number; elevation_mm?: number }
+export interface SketchFixture { kind: string; name?: string; room?: string; center: Pt; width_mm?: number; depth_mm?: number; facing?: Side | null; /** its own height, and its bottom above the floor (the catalogue's when missing) */ height_mm?: number; elevation_mm?: number; /** a kitchen or bath cabinet: its family, fronts and trim (lib/plan/cabinets.ts) */ cab?: CabSpec }
 /**
  * Stairs going up from this floor to the one above (see lib/plan/stairs.ts). `at` is the middle of the
  * bottom step's front edge and `rotation` the way they go up, in degrees (0 east, 90 south). The steps,
@@ -247,11 +248,12 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
 
   // objects at their real size, facing into the room
   const fixtures: Fixture[] = (sf.fixtures ?? []).filter((f) => Array.isArray(f.center) && f.kind).map((f, i) => {
-    const w = Math.max(200, f.width_mm ?? 600), d = Math.max(200, f.depth_mm ?? 600);
+    // fillers and end panels are only an inch or two wide
+    const w = Math.max(f.cab ? 10 : 200, f.width_mm ?? 600), d = Math.max(f.cab ? 10 : 200, f.depth_mm ?? 600);
     const facing = f.facing && f.facing in ANGLE ? ANGLE[f.facing] : null;
     const across = facing === 0 || facing === 180;
     const [hx, hy] = across ? [d / 2, w / 2] : [w / 2, d / 2];
-    const c: Pt = [r10(f.center[0]), r10(f.center[1])];
+    const c: Pt = f.cab ? [Math.round(f.center[0]), Math.round(f.center[1])] : [r10(f.center[0]), r10(f.center[1])];
     const room = (f.room ? byName(f.room) : null) ?? rooms.find((r) => { const b = bboxOf(r.polygon); return c[0] >= b[0] && c[0] <= b[2] && c[1] >= b[1] && c[1] <= b[3]; }) ?? null;
     // keep a piece inside its room (clear of the wall faces) when it fits, so added furniture never pokes through a wall
     if (room) {
@@ -266,6 +268,7 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
       id: `${code}-F${String(i + 1).padStart(2, "0")}`, kind: f.kind, name: f.name || f.kind.replace(/_/g, " "), room_id: room?.id ?? null, center: c, bbox, rotation: 0,
       outline: [[[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]], [bbox[0], bbox[1]]]], source: "ai", source_ref: null, confidence: 0.6, facing,
       ...(f.height_mm ? { height_mm: f.height_mm } : {}), ...(f.elevation_mm ? { elevation_mm: f.elevation_mm } : {}),
+      ...(f.cab ? cabinetFixture(f.cab, w, d, f.height_mm ?? 900) : {}),
     } as Fixture;
   });
 
