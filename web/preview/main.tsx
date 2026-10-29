@@ -411,7 +411,9 @@ const TITLES: Partial<Record<Page, string>> = { jobs: "Jobs", team: "Team", new:
 interface CloudBoot { account: cloud.Account; saver: cloud.Saver; email: string | null; name: string }
 
 /** Where a link opens: this same page, on the link's own address. */
-const linkBase = () => `${location.origin}${location.pathname.replace(/app\.html$/, "")}`;
+// share links open on their own page, build.rorker.com/link/, which is outside the site's sign-in
+declare const __LINK_ONLY__: boolean;
+const linkBase = () => (location.hostname === "build.rorker.com" ? `${location.origin}/link/` : `${location.origin}${location.pathname.replace(/app\.html$/, "")}`);
 /** api methods that only read, so they don't need a save after */
 const READS = new Set(["listComments", "listShareLinks", "refreshPlan", "shareUrl", "openShare", "ask", "afterAssistant", "openShopping", "list", "openClient", "open"]);
 /** Every change through the api is followed by a save. */
@@ -776,7 +778,7 @@ async function openAccount(s: Session): Promise<Boot> {
 function Root() {
   const [link, setLink] = useState(linkRoute);
   const [demo, setDemo] = useState(demoRoute);
-  const [boot, setBoot] = useState<Boot>(() => (OPEN_DEMO ? { kind: "app", jobs: sampleJobs() } : { kind: "loading" }));
+  const [boot, setBoot] = useState<Boot>(() => (OPEN_DEMO && !__LINK_ONLY__ ? { kind: "app", jobs: sampleJobs() } : { kind: "loading" }));
   useEffect(() => {
     const on = () => { setLink(linkRoute()); setDemo(demoRoute()); };
     window.addEventListener("hashchange", on);
@@ -787,8 +789,9 @@ function Root() {
     setBoot({ kind: "loading" });
     try { setBoot(await openAccount(s)); } catch (e) { setBoot({ kind: "auth", error: e instanceof Error ? e.message : "Couldn't open your account." }); }
   };
-  useEffect(() => { if (!link && !demo && !OPEN_DEMO) void cloud.currentSession().then(start); }, [!link, !demo]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!link && !demo && !OPEN_DEMO && !__LINK_ONLY__) void cloud.currentSession().then(start); }, [!link, !demo]); // eslint-disable-line react-hooks/exhaustive-deps
   if (demo) return <DemoLinkPage route={demo} />;
+  if (__LINK_ONLY__ && !link) return <Problem title="Open the link you were sent" body="This page only shows the tasks or project someone shared with you. Use the full link from your text or email." />;
   if (link) return link.kind === "c"
     ? <ClientLinkPage token={link.token} open={link.params.get("open")} pin={link.params.get("pin")} />
     : <CrewLinkPage token={link.token} pin={link.params.get("pin")} />;
