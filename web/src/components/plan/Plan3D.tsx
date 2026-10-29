@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { JobItem, Pin, PinInput } from "@/lib/data/types";
-import { floorBBox, frontView, labelPoint, pointInPoly, roomSides, sidePoint, unionBBox, type WallSide } from "@/lib/plan/geometry";
+import { edgeDistance, floorBBox, frontView, labelPoint, pointInPoly, roomSides, sidePoint, unionBBox, type WallSide } from "@/lib/plan/geometry";
 import type { ElementStatus, Floor, Plan, Pt, Room } from "@/lib/plan/types";
 import type { ColorMode } from "./FloorCanvas";
 import { hitTest } from "./FloorCanvas";
@@ -54,6 +54,10 @@ interface Props {
   look?: BuildLook;
   /** look but don't move anything (shared links, the new-project review) */
   locked?: boolean;
+  /** the drawing tool's live view of the building: a click picks a room instead of opening its floor,
+   *  zoom goes right in, `open` sets the cutaway (0 walls up, 1 the walls facing you down) instead of
+   *  the zoom, and the roof shows only when `roof` */
+  live?: { open: number; roof: boolean };
   controls: Controls;
   onSelect: (id: string | null) => void;
   onSelectPin: (id: string) => void;
@@ -70,16 +74,23 @@ type Pick = { type: "fixture" | "wall" | "opening" | "room" | "stair" | "item" |
 
 // --------------------------------------------------------------------------- geometry helpers
 
-function extrude(poly: Pt[], y0: number, y1: number): THREE.BufferGeometry {
+function extrude(poly: Pt[], y0: number, y1: number, holes: Pt[][] = []): THREE.BufferGeometry {
   const shape = new THREE.Shape(poly.map(([x, y]) => new THREE.Vector2(x * S, -y * S)));
+  cutHoles(shape, poly, holes);
   const geo = new THREE.ExtrudeGeometry(shape, { depth: Math.max(0.001, (y1 - y0) * S), bevelEnabled: false });
   geo.rotateX(-Math.PI / 2);
   geo.translate(0, y0 * S, 0);
   return geo;
 }
 
-function flat(poly: Pt[], y: number): THREE.BufferGeometry {
+// stair openings: a hole goes in a floor shape only when it sits wholly inside it
+function cutHoles(shape: THREE.Shape, poly: Pt[], holes: Pt[][]) {
+  for (const h of holes) if (h.length >= 3 && h.every((q) => pointInPoly(q, poly) || edgeDistance(q, poly) < 2)) shape.holes.push(new THREE.Path(h.map(([x, y]) => new THREE.Vector2(x * S, -y * S))));
+}
+
+function flat(poly: Pt[], y: number, holes: Pt[][] = []): THREE.BufferGeometry {
   const shape = new THREE.Shape(poly.map(([x, py]) => new THREE.Vector2(x * S, -py * S)));
+  cutHoles(shape, poly, holes);
   const geo = new THREE.ShapeGeometry(shape);
   geo.rotateX(-Math.PI / 2);
   geo.translate(0, y * S, 0);
@@ -239,7 +250,7 @@ function buildScene(p: Props, mt: Materials): Built {
   const finish = outside || skin;
   // trim, porches and the dressed outside once it's finished; the roof is on from sheetrock
   const dressed = skin && p.wallMode === "full";
-  const roofed = outside && p.wallMode === "full" && (dressed || look === "drywall");
+  const roofed = outside && p.wallMode === "full" && (dressed || look === "drywall") && (p.live?.roof ?? true);
   const pickAny = (o: THREE.Object3D, data: Pick) => { o.userData.pick = data; picks.push(o); byId.set(data.id, o); };
   const pick = pickAny;
 
@@ -290,7 +301,7 @@ function buildScene(p: Props, mt: Materials): Built {
       const rings = finish ? ex.rings[fi] ?? [] : fl.footprint.length ? fl.footprint : [[[fl.bounds[0], fl.bounds[1]], [fl.bounds[2], fl.bounds[1]], [fl.bounds[2], fl.bounds[3]], [fl.bounds[0], fl.bounds[3]]] as Pt[]];
       for (const ring of rings) {
         const m = wallMaterial(finish ? (fi === 0 ? FINISH.foundation : FINISH.trim) : "#8e877a");
-        const slab = new THREE.Mesh(extrude(ring, finish && fi === 0 ? -ex.rules.plinth : -200, 0), m);
+        const slab = new THREE.Mesh(extrude(ring, finish && fi === 0 ? -ex.rules.plinth : -200, 0, fl.holes), m);
         slab.receiveShadow = true;
         g.add(slab);
         const b = floorBBox(fl);
@@ -306,7 +317,7 @@ function buildScene(p: Props, mt: Materials): Built {
       const bare = fi === 0 ? MATERIAL_BASE.concrete : SUBFLOOR;
       const m = new THREE.MeshStandardMaterial({ color: patterned ? "#ffffff" : statusTint(r.id, finished ? MATERIAL_BASE[mat] : bare), map: patterned ? floorTexture(mat) : null, roughness: 0.85, transparent: true });
       if (p.room && r.id !== p.room.id) { m.opacity = 0.35; }
-      const mesh = new THREE.Mesh(flat(r.polygon, 2), m);
+      const mesh = new THREE.Mesh(flat(r.polygon, 2, fl.holes), m);
       mesh.receiveShadow = true;
       g.add(mesh);
       pick(mesh, { type: "room", id: r.id, floorId: fl.id });
@@ -326,7 +337,7 @@ function buildScene(p: Props, mt: Materials): Built {
       // a wall with no room on either side is a porch post, a balcony baluster or the porch's edge
       const role = ex.walls.get(w.id);
       if (role && role.height <= 0) continue;
-      const wh = role ? Math.min(role.height, wallH) : wallH;
+      const wh = role ? Math.min(role.height, wallH) : Math.min(wallH, w.height_mm ?? wallH);
       const run = look === "framing" && !role ? runOf(w.polygon) : null;
       if (run) {
         // studs, a bottom plate and a double top plate; an invisible wall keeps it clickable
@@ -429,7 +440,13 @@ function buildScene(p: Props, mt: Materials): Built {
     for (const st of look === "slab" ? [] : fl.stairs) {
       const b = st.polygon.reduce((a, q) => [Math.min(a[0], q[0]), Math.min(a[1], q[1]), Math.max(a[2], q[0]), Math.max(a[3], q[1])], [Infinity, Infinity, -Infinity, -Infinity]);
       const sg = new THREE.Group();
-      const n = Math.max(6, Math.round(H / 185));
+      // a drawn stair knows each step: a block up to each tread's (or the landing's) top
+      for (const s of st.steps ?? []) {
+        const step = new THREE.Mesh(extrude(s.polygon, 0, s.top_mm), mt.get("#8a6a48"));
+        step.castShadow = step.receiveShadow = true;
+        sg.add(step);
+      }
+      const n = st.steps?.length ? 0 : Math.max(6, Math.round(H / 185));
       const alongX = b[2] - b[0] > b[3] - b[1];
       const L = alongX ? b[2] - b[0] : b[3] - b[1];
       const m = whole ? new THREE.MeshStandardMaterial({ color: "#8a6a48", roughness: 0.8, transparent: true }) : mt.get("#8a6a48");
@@ -772,7 +789,7 @@ export function Plan3D(p: Props) {
     dir.normalize();
     const building = cb.current.mode === "building";
     // 0 = closed up, 1 = fully open
-    const open = building ? THREE.MathUtils.clamp((R * 2.7 - dist) / (R * 1.1), 0, 1) : polar < 0.3 ? 0 : THREE.MathUtils.clamp((polar - 0.3) / 0.4, 0, 1);
+    const open = building && cb.current.live ? cb.current.live.open : building ? THREE.MathUtils.clamp((R * 2.7 - dist) / (R * 1.1), 0, 1) : polar < 0.3 ? 0 : THREE.MathUtils.clamp((polar - 0.3) / 0.4, 0, 1);
     const focus = t.focus;
     // the storeys above the floor you're in lift off, and come back as you zoom out, over half a second
     const k = THREE.MathUtils.clamp((performance.now() - t.vis.t0) / 450, 0, 1);
@@ -803,7 +820,7 @@ export function Plan3D(p: Props) {
   }
 
   // (re)build the model when the job changes
-  const key = useMemo(() => ({}), [p.plan, p.mode, p.floor, p.room, p.items, p.pins, p.states, p.colorMode, p.wallMode, p.empty, p.look, p.only, p.draft, p.selectedPin, p.selectedItem]); // eslint-disable-line react-hooks/exhaustive-deps
+  const key = useMemo(() => ({}), [p.plan, p.mode, p.floor, p.room, p.items, p.pins, p.states, p.colorMode, p.wallMode, p.empty, p.look, p.only, p.draft, p.selectedPin, p.selectedItem, p.live?.roof]); // eslint-disable-line react-hooks/exhaustive-deps
   const framed = useRef<string>("");
   useEffect(() => {
     const t = three.current;
@@ -889,7 +906,7 @@ export function Plan3D(p: Props) {
     // one zoom runs through the outside and the floors: the floor starts where the outside's zoom ends,
     // and you're back outside a little further out than that, so it never flickers between the two
     controls.zoomToCursor = true;
-    const min = building ? O * 1.45 : cb.current.room ? 0.6 : 1.2;
+    const min = building ? (cb.current.live ? 1.5 : O * 1.45) : cb.current.room ? 0.6 : 1.2;
     const max = building ? O * 6 : cb.current.room ? Math.max(R, 2.6) * 5 : O * 1.7;
     t.want = { min, max };
     if (!reset) {
@@ -964,7 +981,7 @@ export function Plan3D(p: Props) {
     const t = three.current;
     if (dir === "out" && cb.current.mode === "floor") cb.current.onLimitOut();
     else if (dir === "out") cb.current.onLimitOut();
-    else if (dir === "in" && cb.current.mode === "building" && t?.built) {
+    else if (dir === "in" && cb.current.mode === "building" && !cb.current.live && t?.built) {
       const f = t.built.floors[t.focus] ?? t.built.floors[0];
       if (f) cb.current.onOpenFloor(f.id);
     }
@@ -1129,6 +1146,7 @@ export function Plan3D(p: Props) {
         return;
       }
       const h = cast(e);
+      if (P.mode === "building" && P.live) return P.onSelect(h ? h.pick.id : null);
       if (P.mode === "building") {
         if (h?.pick.type === "pin") return P.onSelectPin(h.pick.id);
         if (h) P.onOpenFloor(floorAtY(h.point.y, h.pick.floorId));

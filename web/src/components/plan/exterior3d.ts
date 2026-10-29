@@ -161,7 +161,7 @@ function roofPart(r: RoofPart, ex: Exterior, below: Pt[][]): RoofOut {
 
   if (r.kind === "flat") {
     // a membrane roof: no shingles, a fascia all round
-    const o = RULES.flatOverhang;
+    const o = ex.rules.flatOverhang;
     roofM.map = null;
     const slab = block([x0 - o, y0 - o, x1 + o, y1 + o], r.eaveY, r.eaveY + 250, [trimM, trimM, roofM, soffitM, trimM, trimM]);
     g.add(slab);

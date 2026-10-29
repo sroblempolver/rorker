@@ -21,6 +21,9 @@ export interface Room {
 }
 export interface Wall {
   id: string; polygon: Pt[]; length_mm: number; thickness_mm: number; exterior: boolean; room_ids: string[];
+  /** a wall lower than the ceiling (a half wall), mm; `free` when it was drawn as a piece of its own
+   *  (it stands as drawn, never read as a porch edge) */
+  height_mm?: number; free?: boolean;
 }
 export interface Opening {
   id: string; kind: OpeningKind; name: string; a: Pt; b: Pt; width_mm: number; thickness_mm: number;
@@ -41,10 +44,16 @@ export interface Fixture {
   /** the object it sits on (a computer on its desk), and where that one stood when this was put on it */
   on?: string | null; on_at?: Pt | null;
 }
-export interface Stair { id: string; polygon: Pt[]; room_id: string | null; outline: Pt[][] }
+export interface Stair {
+  id: string; polygon: Pt[]; room_id: string | null; outline: Pt[][];
+  /** each tread and landing with the height of its top above the floor, when the stair's shape is known */
+  steps?: { polygon: Pt[]; top_mm: number }[];
+}
 export interface Floor {
   id: string; name: string; level: number; elevation_mm: number; height_mm: number; footprint: Pt[][];
   bounds: BBox; rooms: Room[]; walls: Wall[]; openings: Opening[]; fixtures: Fixture[]; stairs: Stair[];
+  /** openings cut in this floor for stairs coming up from the floor below */
+  holes?: Pt[][];
   /** Build mode: points where a straight wall was cut into pieces that move on their own */
   joints?: Pt[];
 }
