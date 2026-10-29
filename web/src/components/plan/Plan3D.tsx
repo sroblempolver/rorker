@@ -18,6 +18,7 @@ import { hitTest } from "./FloorCanvas";
 import { HIDDEN_KINDS, TOP_FILL, isWallMounted } from "./fixtures";
 import { ITEM_SIZE } from "./items";
 import { fixtureObject, Materials, SHARED_GEOMETRY } from "./models3d";
+import { openingFill } from "./openings3d";
 import { buildRoofs, buildSite, buildZone, garagePanels, openingTrim, sidingMaterial, surfaceMaterial, trimMaterial, type Fade } from "./exterior3d";
 import type { Surface } from "@/lib/plan/buildSpec";
 import { outward, planExterior } from "@/lib/plan/exterior";
@@ -431,25 +432,34 @@ function buildScene(p: Plan3DProps, mt: Materials): Built {
       const sm = face && !layered ? sidingOf(0) : m;
       if (bot > 0 && !run) og.add(new THREE.Mesh(extrude(o.polygon, 0, Math.min(bot, wallH)), sm));
       const gm = new THREE.MeshStandardMaterial({ color: face ? FINISH.glass : GLASS, transparent: true, opacity: face ? 0.55 : 0.32, roughness: 0.05, metalness: face ? 0.4 : 0.1, depthWrite: false });
-      // outside: casing, sill and sash frame on every door and window
       const extra: THREE.Material[] = [];
-      if (face && dressed) {
-        const tm = trimMaterial(), fm2 = wallMaterial(FINISH.frame);
-        extra.push(tm, fm2, sm);
-        for (const t of openingTrim(o, fl, [bot, top], wallH, o === ex.entry, tm, fm2)) { t.castShadow = true; og.add(t); }
-      }
-      if (o.kind === "window" || o.kind === "sliding_door") {
-        if (Math.min(top, wallH) > bot) og.add(new THREE.Mesh(extrude(o.polygon, bot, Math.min(top, wallH)), gm));
-      } else if (finished && (o.kind === "door" || o.kind === "double_door" || o.kind === "garage_door")) {
-        // a thin closed door in the frame, so doors read as doors; the way in gets its own colour
-        const dm = new THREE.MeshStandardMaterial({ color: o.kind === "garage_door" ? (face ? FINISH.garageDoor : "#c9c2b4") : face && o === ex.entry ? FINISH.frontDoor : FINISH.door, roughness: 0.7, transparent: true });
-        if (face && o.kind === "garage_door") { dm.map = garagePanels(); }
-        const dx = o.b[0] - o.a[0], dy = o.b[1] - o.a[1], L = Math.hypot(dx, dy) || 1;
-        const nx = -dy / L, ny = dx / L, t = 20;
-        const leaf: Pt[] = [[o.a[0] + nx * t, o.a[1] + ny * t], [o.b[0] + nx * t, o.b[1] + ny * t], [o.b[0] - nx * t, o.b[1] - ny * t], [o.a[0] - nx * t, o.a[1] - ny * t]];
+      // the finished house: doors and windows as they're built (frames, sashes, panels, hardware, trim)
+      const isDoor = o.kind === "door" || o.kind === "double_door" || o.kind === "garage_door";
+      if (!prog && finished && !run && !layered && (isDoor || ((o.kind === "window" || o.kind === "sliding_door") && face))) {
         // inside a floor the doors between rooms stay open; the outside doors are drawn shut
-        if (!inside || o.kind === "garage_door" || face) og.add(new THREE.Mesh(extrude(leaf, 0, Math.min(top, wallH)), dm));
-        fades.push({ mats: [dm], centre: new THREE.Vector3(((o.a[0] + o.b[0]) / 2) * S, (base + 1000) * S, ((o.a[1] + o.b[1]) / 2) * S), floorIndex: fi, role: "wall" });
+        const built = openingFill(o, fl, [bot, top], wallH, { front: o === ex.entry, trim: face && dressed, leaf: !inside || o.kind === "garage_door" || face });
+        og.add(built.obj);
+        extra.push(...built.mats, sm);
+      } else {
+        // outside: casing, sill and sash frame on every door and window
+        if (face && dressed) {
+          const tm = trimMaterial(), fm2 = wallMaterial(FINISH.frame);
+          extra.push(tm, fm2, sm);
+          for (const t of openingTrim(o, fl, [bot, top], wallH, o === ex.entry, tm, fm2)) { t.castShadow = true; og.add(t); }
+        }
+        if (o.kind === "window" || o.kind === "sliding_door") {
+          if (Math.min(top, wallH) > bot) og.add(new THREE.Mesh(extrude(o.polygon, bot, Math.min(top, wallH)), gm));
+        } else if (finished && (o.kind === "door" || o.kind === "double_door" || o.kind === "garage_door")) {
+          // a thin closed door in the frame, so doors read as doors; the way in gets its own colour
+          const dm = new THREE.MeshStandardMaterial({ color: o.kind === "garage_door" ? (face ? FINISH.garageDoor : "#c9c2b4") : face && o === ex.entry ? FINISH.frontDoor : FINISH.door, roughness: 0.7, transparent: true });
+          if (face && o.kind === "garage_door") { dm.map = garagePanels(); }
+          const dx = o.b[0] - o.a[0], dy = o.b[1] - o.a[1], L = Math.hypot(dx, dy) || 1;
+          const nx = -dy / L, ny = dx / L, t = 20;
+          const leaf: Pt[] = [[o.a[0] + nx * t, o.a[1] + ny * t], [o.b[0] + nx * t, o.b[1] + ny * t], [o.b[0] - nx * t, o.b[1] - ny * t], [o.a[0] - nx * t, o.a[1] - ny * t]];
+          // inside a floor the doors between rooms stay open; the outside doors are drawn shut
+          if (!inside || o.kind === "garage_door" || face) og.add(new THREE.Mesh(extrude(leaf, 0, Math.min(top, wallH)), dm));
+          fades.push({ mats: [dm], centre: new THREE.Vector3(((o.a[0] + o.b[0]) / 2) * S, (base + 1000) * S, ((o.a[1] + o.b[1]) / 2) * S), floorIndex: fi, role: "wall" });
+        }
       }
       g.add(og);
       pick(og, { type: "opening", id: o.id, floorId: fl.id });
