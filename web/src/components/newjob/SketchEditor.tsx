@@ -17,6 +17,7 @@ import { DOOR_W, WallView } from "./WallView";
 import { tidyStroke } from "@/lib/plan/pen";
 import { INCH, fmtArea, fmtLen, parseLength, roundLen, type Units } from "@/lib/plan/units";
 import type { IntakePart } from "@/lib/intake/files";
+import { StandardsPanel } from "./StandardsPanel";
 
 /** A picture of the drawing to trace over. `mmPerPx` when its scale is known (an AutoCAD drawing). */
 export interface Picture { name: string; url: string; mmPerPx?: number }
@@ -104,6 +105,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   // the wall seen from the side (a room and which of its edges), and the "+ Floor" choice
   const [wall, setWall] = useState<{ room: number; edge: number } | null>(null);
   const [addingFloor, setAddingFloor] = useState(false);
+  // the company's standards, open in the side panel
+  const [showStd, setShowStd] = useState(false);
   // lengths are shown and typed in feet and inches
   const lu: Units = "ft";
   const svg = useRef<SVGSVGElement>(null);
@@ -543,6 +546,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(0.75)} aria-label="Zoom in">+</button>
         <button className="btn btn-sm btn-ghost" onClick={() => zoom(1.33)} aria-label="Zoom out">−</button>
         <button className="btn btn-sm btn-ghost" onClick={() => setView(fitView())}>Fit</button>
+        <button className={`btn btn-sm ml-auto ${showStd ? "btn-primary" : "btn-ghost"}`} onClick={() => setShowStd((x) => !x)} title="Your default sizes and the limits the checks use">Standards</button>
       </div>
       <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 border-b border-line text-[13px]">
         {sk.floors.map((f, i) => (
@@ -629,6 +633,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         </div>
 
         <aside className="border-t lg:border-t-0 lg:border-l border-line p-3 space-y-3 text-[13.5px] max-h-[62vh] overflow-y-auto scroll-thin">
+          {showStd ? <StandardsPanel units={lu} onClose={() => setShowStd(false)} /> : <>
           <p className="text-muted leading-snug">{TOOLS.find((t) => t.id === tool)?.help}</p>
           {note && <p className="text-amber">{note}</p>}
 
@@ -763,6 +768,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
               <input type="range" min={0} max={1} step={0.05} className="w-full" value={bg.opacity} onChange={(e) => setBgs({ ...bgs, [fi]: { ...bg, opacity: +e.target.value } })} aria-label="Picture opacity" />
             </div>
           )}
+          </>}
         </aside>
       </div>
       <div className="flex gap-2 px-3 py-2 border-t border-line bg-panel">
