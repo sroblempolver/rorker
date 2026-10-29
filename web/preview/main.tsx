@@ -17,7 +17,7 @@ import { PhotosPage, type PhotoJob } from "@/components/workspace/PhotosPage";
 import type { PhotoItem } from "@/lib/photos";
 import { useFeedback } from "@/components/ui/feedback";
 import { DEFAULT_TEMPLATES } from "@/lib/data/templates";
-import { clientMemberId, type Company, type JobItem, type JobMessage, type JobPhoto, type JobPhotoInput, type JobStage, type JobSummary, type Member, type MemberInput, type Pin, type PinComment, type PlanRow, type ShareAccess, type ShareLink, type TeamMessage } from "@/lib/data/types";
+import { clientMemberId, type Company, type JobItem, type JobMessage, type JobPhoto, type JobPhotoInput, type JobStage, type JobSummary, type Member, type MemberInput, type Pin, type PinComment, type PlanRow, type ShareAccess, type ShareHandoff, type ShareLink, type TeamMessage } from "@/lib/data/types";
 import { JOB_KEY } from "@/lib/plan/build";
 import type { Plan } from "@/lib/plan/types";
 import { previewAsk } from "./assistant";
@@ -49,7 +49,7 @@ import type { JobLive, MapEvent } from "@/components/AllJobsMap";
 import { today } from "@/lib/dates";
 import type { Session } from "@supabase/supabase-js";
 import * as cloud from "./cloud";
-import { AuthScreen, ClientLinkPage, CrewLinkPage, Loading, Problem, SharedWithYou } from "./pages";
+import { AuthScreen, ClientLinkPage, CrewLinkPage, HandoffPage, Loading, Problem, SharedWithYou } from "./pages";
 
 /** when this preview was built, so an out-of-date copy in the browser cache is easy to spot */
 declare const __BUILD__: string;
@@ -154,6 +154,8 @@ let COMPANY: Company = { id: "demo", name: "Demo Builders", logo_url: null, bran
 const shares: ShareLink[] = [];
 /** who saved which of this account's links to their own account (signed in only) */
 let access: ShareAccess[] = [];
+/** which of this account's projects a contractor took on (a homeowner's account) */
+let handoffs: ShareHandoff[] = [];
 /** money on the other jobs in the overview (they have no plan in the preview) */
 const otherJobs = sampleOtherJobs();
 /** What a link opens, across every job in the preview (a person's own link covers them all). */
@@ -240,7 +242,7 @@ function clientLink(d: WorkspaceData): ShareLink {
 function savedAccount(jobs: WorkspaceData[]): SavedAccount {
   return {
     jobs: jobs.map((d) => ({ job: d.job, plan: d.plan, stages: d.stages, pins: d.pins, items: d.items, edits: d.edits, states: d.states, runs: d.runs, billing: d.billing })),
-    members: team.members, materials: materials.lines, shares, settings: { brand: BRAND, phone: COMPANY.phone }, comments: [...comments.values()].flat(), messages: [...messages.values()].flat(), notes: clientNotes, team: teamBoard, access: [], photos: jobPhotos,
+    members: team.members, materials: materials.lines, shares, settings: { brand: BRAND, phone: COMPANY.phone }, comments: [...comments.values()].flat(), messages: [...messages.values()].flat(), notes: clientNotes, photos: jobPhotos, team: teamBoard, access: [], handoffs: [],
   };
 }
 /** what the client's link shows and does, on the preview's own data */
@@ -335,7 +337,13 @@ function memoryApi(d: WorkspaceData): WorkspaceApi {
       d.plan = { ...p, data };
     },
     async refreshPlan() { return { runs: d.runs, plan: d.plan }; },
-    async listShareLinks() { return shares.map((l) => { const by = access.filter((a) => a.share_id === l.id).map((a) => a.name || a.email || "someone"); return by.length ? { ...l, saved_by: by } : l; }); },
+    async listShareLinks() {
+      return shares.map((l) => {
+        const by = access.filter((a) => a.share_id === l.id).map((a) => a.name || a.email || "someone");
+        const took = handoffs.find((h) => h.share_id === l.id)?.company;
+        return { ...l, ...(by.length ? { saved_by: by } : {}), ...(took ? { taken_by: took } : {}) };
+      });
+    },
     async createShareLink(input) {
       const l: ShareLink = { id: uid(), job_id: d.job.id, token: newToken(), label: input.label, member_id: input.member_id ?? null, pin_ids: input.pin_ids ?? [], expires_at: input.expires_at ?? null, revoked_at: null, created_at: now() };
       if (!l.member_id && !l.pin_ids.length) throw new Error("Pick the tasks they should see.");
@@ -603,7 +611,8 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
     const a = memoryApi(active);
     if (signedIn) {
       const acct = signedIn.account.id;
-      const url = (token: string) => `${linkBase()}#/${shares.find((l) => l.token === token)?.audience === "client" ? "c" : "s"}/${token}`;
+      const kindOf = (token: string) => { const a = shares.find((l) => l.token === token)?.audience; return a === "client" ? "c" : a === "contractor" ? "h" : "s"; };
+      const url = (token: string) => `${linkBase()}#/${kindOf(token)}/${token}`;
       Object.assign(a, {
         async listComments(id: string) { return cloud.listComments(acct, id); },
         async addComment(id: string, body: string, files: File[]) {
@@ -618,6 +627,16 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
       const made = { create: a.createShareLink!, person: a.personLink! };
       a.createShareLink = async (input) => { const l = await made.create(input); await signedIn.saver.flush(); return l; };
       a.personLink = async (m) => { const l = await made.person(m); await signedIn.saver.flush(); return l; };
+      // a homeowner's own project, for their contractor to take on: the same link every time
+      a.contractorLink = async () => {
+        let l = shares.find((x) => x.audience === "contractor" && x.job_id === active.job.id && !x.revoked_at);
+        if (!l) {
+          l = { id: uid(), job_id: active.job.id, token: newToken(), label: signedIn.name, member_id: null, pin_ids: [], expires_at: null, revoked_at: null, created_at: now(), audience: "contractor" };
+          shares.unshift(l);
+          await signedIn.saver.flush();
+        }
+        return l;
+      };
       const base = a.updatePin;
       // a photo sent from a crew link is in the database, not in this page: look before closing
       a.updatePin = async (id, input) => { if (input.status === "done") comments.set(id, await cloud.listComments(acct, id)); return base(id, input); };
@@ -902,9 +921,9 @@ function DemoLinkPage({ route }: { route: NonNullable<ReturnType<typeof demoRout
 }
 
 /** A link's own address: #/s/<token> for crew, #/c/<token> for a client, with ?pin= or ?open= after. */
-function linkRoute(): { kind: "s" | "c"; token: string; params: URLSearchParams } | null {
-  const m = location.hash.match(/^#\/(s|c)\/([A-Za-z0-9_-]{16,64})(?:\?(.*))?$/);
-  return m ? { kind: m[1] as "s" | "c", token: m[2], params: new URLSearchParams(m[3] ?? "") } : null;
+function linkRoute(): { kind: "s" | "c" | "h"; token: string; params: URLSearchParams } | null {
+  const m = location.hash.match(/^#\/(s|c|h)\/([A-Za-z0-9_-]{16,64})(?:\?(.*))?$/);
+  return m ? { kind: m[1] as "s" | "c" | "h", token: m[2], params: new URLSearchParams(m[3] ?? "") } : null;
 }
 
 // build.rorker.com itself stays the open demo (no sign-in); accounts live at build.rorker.com/accounts/
@@ -923,12 +942,14 @@ async function openAccount(s: Session, empty = false): Promise<Boot> {
   const fresh = !rows.some((r) => r.kind === "member");
   let jobs: WorkspaceData[];
   if (fresh && empty) {
-    // made to keep a job they were sent: their own space starts empty, with what's shared with them on top
+    // made to keep a job they were sent or take one on: no sample house, just what they came for
     team.members = [toMember({ full_name: name, title: null, email: s.user.email ?? null, role: "admin" }, account.memberId, s.user.id)];
-    materials.lines = [];
+    materials.lines = saved.materials;
     messages.clear();
-    shares.splice(0, shares.length);
-    jobs = [];
+    for (const m of saved.messages) messages.set(m.job_id, [...(messages.get(m.job_id) ?? []), m]);
+    shares.splice(0, shares.length, ...saved.shares);
+    access = saved.access;
+    jobs = saved.jobs.map((d) => ({ ...d, members: team.members, me: account.memberId, aiAvailable: false, canShare: true, brand: BRAND }));
   } else if (fresh) {
     // the house, its tasks, money and materials, and the crew, to start from (and delete when done)
     jobs = sampleJobs({ name, email: s.user.email ?? null, userId: s.user.id });
@@ -941,21 +962,25 @@ async function openAccount(s: Session, empty = false): Promise<Boot> {
     access = saved.access;
     jobs = saved.jobs.map((d) => ({ ...d, members: team.members, me: account.memberId, aiAvailable: false, canShare: true, brand: BRAND }));
   }
+  handoffs = saved.handoffs;
   const saver = new cloud.Saver(account.id, snapshot, (st) => window.dispatchEvent(new CustomEvent("rorker-save", { detail: st })), rows);
   const signedIn: CloudBoot = { account, saver, email: s.user.email ?? null, name };
   if (fresh) { liveJobs = () => jobs; await saver.flush(); await cloud.putMessages(account.id, [...messages.values()].flat()); }
   return { kind: "app", jobs, signedIn };
 }
 
-/** "Save to my account" on a link sends the person here (#/save/s/<token>) to sign in first. */
+/** "Save to my account" on a link sends the person here (#/save/s/<token>) to sign in first, and a
+ *  contractor taking on a homeowner's project comes here the same way (#/adopt/<token>). */
 const SAVE_KEY = "rorker-save-link";
 function takeSaveRoute() {
-  const m = location.hash.match(/^#\/save\/(s|c)\/([A-Za-z0-9_-]{16,64})$/);
+  const m = location.hash.match(/^#\/(save\/[sc]|adopt)\/([A-Za-z0-9_-]{16,64})$/);
   if (!m) return;
-  try { sessionStorage.setItem(SAVE_KEY, m[2]); } catch { /* private mode: they can press Save on the link again */ }
+  try { sessionStorage.setItem(SAVE_KEY, `${m[1] === "adopt" ? "adopt" : "save"}:${m[2]}`); } catch { /* private mode: they can press the button on the link again */ }
   history.replaceState(null, "", "#/jobs");
 }
-const pendingSave = () => { try { return sessionStorage.getItem(SAVE_KEY); } catch { return null; } };
+const pendingSave = (): { kind: "save" | "adopt"; token: string } | null => {
+  try { const v = sessionStorage.getItem(SAVE_KEY); const [kind, token] = (v ?? "").split(":"); return token ? { kind: kind as "save" | "adopt", token } : null; } catch { return null; }
+};
 /** what happened to the link they asked to keep, for the Shared with you list */
 let saveNote: string | null = null;
 
@@ -975,8 +1000,13 @@ function Root() {
     const keep = pendingSave();
     if (keep) {
       try { sessionStorage.removeItem(SAVE_KEY); } catch { /* fine */ }
-      saveNote = await cloud.saveLink(keep).then(() => "Saved. The job you were sent is below, with everything else shared with you.", (e) => (e instanceof Error ? e.message : "That link didn't save."));
       history.replaceState(null, "", "#/jobs");
+      if (keep.kind === "save") saveNote = await cloud.saveLink(keep.token).then(() => "Saved. The job you were sent is below, with everything else shared with you.", (e) => (e instanceof Error ? e.message : "That link didn't save."));
+      else {
+        // their account first (a new one is made here), then the project goes into it
+        try { await cloud.myAccount(s); const r = await cloud.adoptLink(keep.token); history.replaceState(null, "", `#/job/${r.job}`); }
+        catch (e) { saveNote = e instanceof Error ? e.message : "That project didn't come over. Open the link again."; }
+      }
     }
     try { setBoot(await openAccount(s, !!keep)); } catch (e) { setBoot({ kind: "auth", error: e instanceof Error ? e.message : "Couldn't open your account." }); }
   };
@@ -985,9 +1015,10 @@ function Root() {
   if (__LINK_ONLY__ && !link) return <Problem title="Open the link you were sent" body="This page only shows the tasks or project someone shared with you. Use the full link from your text or email." />;
   if (link) return link.kind === "c"
     ? <ClientLinkPage token={link.token} open={link.params.get("open")} pin={link.params.get("pin")} />
+    : link.kind === "h" ? <HandoffPage token={link.token} />
     : <CrewLinkPage token={link.token} pin={link.params.get("pin")} />;
   if (boot.kind === "loading") return <Loading />;
-  if (boot.kind === "auth") return <AuthScreen error={boot.error} saving={!!pendingSave()} onSession={start} onDemo={() => setBoot({ kind: "app", jobs: sampleJobs() })} />;
+  if (boot.kind === "auth") return <AuthScreen error={boot.error} saving={pendingSave()?.kind} onSession={start} onDemo={() => setBoot({ kind: "app", jobs: sampleJobs() })} />;
   return <App initial={boot.jobs} signedIn={boot.signedIn} />;
 }
 

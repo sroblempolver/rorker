@@ -35,6 +35,8 @@ export interface SharedItem {
 export const sharedWithMe = async () => (await call<{ shared: SharedItem[] }>("shared")).shared;
 export const saveLink = (token: string) => call<{ id: string }>("save", { token });
 export const unsaveLink = (id: string) => call("unsave", { id });
+/** A contractor takes on a homeowner's project from the homeowner's link: it lands in their account. */
+export const adoptLink = (token: string) => call<{ job: string }>("adopt", { token });
 
 export async function signUp(input: { email: string; password: string; name: string; company: string }) {
   await call("signup", input);
@@ -63,7 +65,7 @@ export async function myAccount(s: Session): Promise<{ account: Account; isNew: 
   let row = await find();
   let isNew = false;
   if (!row) {
-    const company = (s.user.user_metadata?.company as string | undefined) || "My company";
+    const company = (s.user.user_metadata?.company as string | undefined) || (s.user.user_metadata?.full_name as string | undefined) || "My company";
     const { error } = await sb.rpc("create_account", { account_name: company, owner_member: "m0" });
     if (error) throw new Error("Couldn't set up your company. Try again.");
     row = await find();

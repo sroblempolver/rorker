@@ -39,6 +39,7 @@ function fromRecords(rows) {
     messages: of("message").map((r) => r.data).sort((a, b) => a.created_at.localeCompare(b.created_at)),
     team: of("team").map((r) => r.data).sort((a, b) => a.created_at.localeCompare(b.created_at)),
     access: of("access").map((r) => r.data),
+    handoffs: of("handoff").map((r) => r.data),
     materials: of("material").map((r) => r.data),
     shares: of("share").map((r) => r.data).sort((a, b) => b.created_at.localeCompare(a.created_at)),
     settings: of("settings")[0]?.data ?? null

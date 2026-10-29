@@ -15,6 +15,9 @@
 //   save    a signed-in person keeps a link they were sent in their own account ("Shared with you")
 //   shared  a signed-in person's saved links: whose they are and what's on them
 //   unsave  a signed-in person takes one off their list (the link itself still works)
+//   adopt   a contractor, signed in, takes on a homeowner's project from the homeowner's link: the job is
+//           copied into the contractor's account, the homeowner gets its client page in "Shared with
+//           you", and the contractor's account records who referred them
 //   upload  crew or a client adds a photo to a job's Photos, tagged with a room (clients get back the
 //           job's photos they see)
 // The rules for what a link shows and what a client may change are in core.js, built from the page's own
@@ -95,6 +98,72 @@ async function savedBy(userId: string) {
     });
   }
   return out.sort((x, y) => Number(y.live) - Number(x.live) || y.saved_at.localeCompare(x.saved_at));
+}
+
+/** Every string in a saved thing, rewritten (ids, file paths), keys kept. */
+function mapStrings(v: unknown, f: (s: string, key: string) => string, key = ""): unknown {
+  if (typeof v === "string") return f(v, key);
+  if (Array.isArray(v)) return v.map((x) => mapStrings(x, f, key));
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, mapStrings(x, f, k)]));
+  return v;
+}
+// the kinds that make up one job, and the fields in them that point at another of the job's things
+const JOB_KINDS = ["job", "plan", "stage", "pin", "item", "run", "edits", "states", "billing", "material", "comment", "message", "photo"];
+const REF_KEYS = new Set(["job_id", "pin_id", "stage_id", "task_id", "current_plan_id", "plan_id", "run_id"]);
+// the people on the homeowner's side mean nothing in the contractor's team (the client stays the client)
+const PEOPLE_KEYS = new Set(["buyer", "installer", "author_id", "assignee", "member_id"]);
+
+/** A homeowner's job, copied into a contractor's account: new ids, its files copied over, the
+ *  homeowner set as the client, and a client link the homeowner already has in their account. */
+async function adoptJob(from: string, jobId: string, to: string, homeowner: { id: string; email: string | null; name: string | null }) {
+  const { data: rows, error } = await db.from("records").select("kind, id, job_id, data").eq("account_id", from).eq("job_id", jobId).in("kind", JOB_KINDS).limit(20000);
+  if (error) throw error;
+  if (!rows?.some((r) => r.kind === "job")) return null;
+  const pre = `h${uid().slice(0, 6)}_`;
+  const newJob = pre + jobId;
+  const ids = new Set(rows.map((r) => r.id as string));
+  const files = new Map<string, string>();
+  const one = (s: string, key: string) => {
+    if (s.startsWith(`${from}/`)) { const n = `${to}/${s.slice(from.length + 1)}`; files.set(s, n); return n; }
+    if (s === jobId && REF_KEYS.has(key)) return newJob;
+    if (s === `client:${jobId}`) return `client:${newJob}`;
+    if (REF_KEYS.has(key) && ids.has(s)) return pre + s;
+    if (PEOPLE_KEYS.has(key)) return "";
+    return s;
+  };
+  const out = rows.map((r) => {
+    // a plan's drawing, the job's edits, items and money keep the ids inside them (walls, rooms,
+    // quotes); only their files and their job move
+    const deep = ["plan", "edits", "states", "item", "billing"].includes(r.kind);
+    const data = (deep ? mapStrings(r.data, (s, k) => (s.startsWith(`${from}/`) || (k === "job_id" && s === jobId) ? one(s, k) : s)) : mapStrings(r.data, one)) as Record<string, unknown>;
+    const own = ["job", "edits", "states", "billing"].includes(r.kind);
+    if (!own && data && data.id === r.id) data.id = pre + r.id;
+    if (r.kind === "pin") { const p = data as { tagged?: string[] }; p.tagged = (p.tagged ?? []).filter((t) => t.startsWith("client:")); }
+    if (r.kind === "job") {
+      const j = (data as { job: Record<string, unknown> }).job;
+      j.id = newJob;
+      j.client_name = j.client_name || homeowner.name || "Homeowner";
+      j.client_email = j.client_email || homeowner.email;
+    }
+    for (const k of PEOPLE_KEYS) if (data && data[k] === "") data[k] = null;
+    const id = own ? newJob : pre + r.id;
+    return { account_id: to, kind: r.kind, id, job_id: newJob, data };
+  });
+  for (const [a, b] of files) { const c = await db.storage.from(BUCKET).copy(a, b); if (c.error && !/exist/i.test(c.error.message)) console.error("copy", a, c.error.message); }
+  for (let i = 0; i < out.length; i += 100) {
+    const { error: e } = await db.from("records").insert(out.slice(i, i + 100));
+    if (e) throw e;
+  }
+  // the homeowner keeps the project as its client: a client link, already in their account
+  const at = new Date().toISOString();
+  const share = { id: uid(), job_id: newJob, token: `${uid()}${uid()}`, label: homeowner.name || "Client", member_id: null, pin_ids: [], expires_at: null, revoked_at: null, created_at: at, audience: "client" };
+  const access = { id: accessId(share.id, homeowner.id), share_id: share.id, user_id: homeowner.id, email: homeowner.email, name: homeowner.name, saved_at: at };
+  const { error: e2 } = await db.from("records").insert([
+    { account_id: to, kind: "share", id: share.id, job_id: newJob, data: share },
+    { account_id: to, kind: "access", id: access.id, job_id: newJob, data: access },
+  ]);
+  if (e2) throw e2;
+  return { job: newJob, token: share.token };
 }
 
 /** Signed addresses for stored photos (a comment holds file paths). */
@@ -183,6 +252,38 @@ Deno.serve(async (req) => {
     if (!o) return json({ error: "This link was turned off or has run out. Ask the contractor for a new one." }, 404);
     const { saved, link, company, accountId } = o;
 
+    // a homeowner's "send to my contractor" link: only to see what it is and to take it on
+    if (link.audience === "contractor" && action !== "link" && action !== "adopt") return json({ error: "Not on this link." }, 403);
+    if (action === "adopt") {
+      if (link.audience !== "contractor" || !link.job_id) return json({ error: "Not on this link." }, 403);
+      const user = await signedIn(req);
+      if (!user) return json({ error: "Sign in first." }, 401);
+      const { data: mine } = await db.from("account_users").select("account_id").eq("user_id", user.id).eq("role", "admin").order("created_at").limit(1).maybeSingle();
+      if (!mine) return json({ error: "Open your Rorker account first, then try the link again." }, 409);
+      const to = mine.account_id as string;
+      if (to === accountId) return json({ error: "That's your own project. Send the link to your contractor." }, 400);
+      const hid = `${link.id}:${to}`;
+      const { data: done } = await db.from("records").select("data").eq("account_id", accountId).eq("kind", "handoff").eq("id", hid).maybeSingle();
+      if (done) return json({ ok: true, job: (done.data as { job: string }).job, again: true });
+      if (limited(`adopt:${user.id}`, 20)) return json({ error: "That's a lot at once. Give it a minute." }, 429);
+      const { data: acct } = await db.from("accounts").select("created_by").eq("id", accountId).single();
+      const { data: owner } = await db.auth.admin.getUserById(acct!.created_by as string);
+      const ou = owner?.user;
+      const homeowner = { id: acct!.created_by as string, email: ou?.email ?? null, name: (ou?.user_metadata?.full_name as string | undefined) ?? null };
+      const r = await adoptJob(accountId, link.job_id, to, homeowner);
+      if (!r) return json({ error: "This project isn't there any more." }, 404);
+      const at = new Date().toISOString();
+      const { data: them } = await db.from("accounts").select("name").eq("id", to).single();
+      const { error } = await db.from("records").insert([
+        // who referred this contractor, for the credits
+        { account_id: to, kind: "referral", id: `${accountId}:${r.job}`, job_id: r.job, data: { by_account: accountId, by_user: homeowner.id, by_email: homeowner.email, by_name: homeowner.name, job_id: r.job, from_job: link.job_id, at } },
+        // and on the homeowner's side, who took it on
+        { account_id: accountId, kind: "handoff", id: hid, job_id: link.job_id, data: { id: hid, share_id: link.id, account: to, company: them?.name ?? "Your contractor", user_id: user.id, email: user.email ?? null, job: r.job, at } },
+      ]);
+      if (error) throw error;
+      return json({ ok: true, job: r.job });
+    }
+
     if (action === "save") {
       const user = await signedIn(req);
       if (!user) return json({ error: "Sign in first." }, 401);
@@ -192,6 +293,13 @@ Deno.serve(async (req) => {
       const { error } = await db.from("records").upsert({ account_id: accountId, kind: "access", id, job_id: link.job_id, data: access }, { onConflict: "account_id,kind,id", ignoreDuplicates: true });
       if (error) throw error;
       return json({ ok: true, id });
+    }
+
+    if (action === "link" && link.audience === "contractor") {
+      const d = saved.jobs.find((x: { job: { id: string } }) => x.job.id === link.job_id);
+      if (!d) return json({ error: "This project isn't there any more." }, 404);
+      const user = req.headers.get("authorization") ? await signedIn(req) : null;
+      return json({ kind: "handoff", from: link.label, job: { name: d.job.name, address: d.job.address }, rooms: (d.plan?.data?.floors ?? []).reduce((n: number, f: { rooms: unknown[] }) => n + f.rooms.length, 0), tasks: d.pins.length, signedIn: !!user });
     }
 
     if (action === "link") {

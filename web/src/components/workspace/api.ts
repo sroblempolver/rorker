@@ -65,6 +65,8 @@ export interface WorkspaceApi {
   revokeShareLink?(linkId: string): Promise<void>;
   /** a tagged person's own link: all their tasks for this company, on every job; the same link every time */
   personLink?(memberId: string): Promise<ShareLink>;
+  /** a homeowner's own project: the link a contractor opens to take it on (signed in only) */
+  contractorLink?(): Promise<ShareLink>;
   /** the full address of a link, to copy */
   shareUrl?(token: string): string;
   /** the preview has no second page: show what the link shows, right here */
