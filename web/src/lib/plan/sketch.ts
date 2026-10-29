@@ -22,7 +22,12 @@ export interface SketchRoom {
 /** A wall drawn as a piece of its own, centre line from a to b. Thickness and height are the standards'
  *  when left out; a half wall stands at the half wall height. `room` remembers the room these walls
  *  closed while its loop is open, so it comes back the same. */
-export interface SketchWall { a: Pt; b: Pt; thickness_mm?: number; height_mm?: number; half?: boolean; room?: { name: string; type?: string; unit?: string } }
+export interface SketchWall {
+  a: Pt; b: Pt; thickness_mm?: number; height_mm?: number; half?: boolean; room?: { name: string; type?: string; unit?: string };
+  /** doors and windows set in this piece, `at` 0 to 1 from a to b (for a wall standing on its own, with no room either side) */
+  doors?: { at: number; kind?: OpeningKind; width_mm?: number; height_mm?: number }[];
+  windows?: { at: number; width_mm?: number; height_mm?: number; sill_mm?: number }[];
+}
 export interface SketchDoor { rooms: [string, string]; kind?: OpeningKind; width_mm?: number; height_mm?: number; at?: number; /** an outside door: which side of the house */ side?: Side }
 export interface SketchWindow { room: string; side: Side; width_mm?: number; height_mm?: number; /** bottom of the window above the floor */ sill_mm?: number; count?: number; /** where each one sits along the wall, 0 to 1 (spread evenly when left out) */ at?: number[] }
 export interface SketchFixture { kind: string; name?: string; room?: string; center: Pt; width_mm?: number; depth_mm?: number; facing?: Side | null; /** its own height, and its bottom above the floor (the catalogue's when missing) */ height_mm?: number; elevation_mm?: number; /** a kitchen or bath cabinet: its family, fronts and trim (lib/plan/cabinets.ts) */ cab?: CabSpec }
@@ -251,6 +256,54 @@ function buildFloor(sf: SketchFloor, fi: number, code: string, storey: number, n
     if (!w) continue;
     const count = Math.max(1, Math.min(4, wn.count ?? 1));
     for (let k = 0; k < count; k++) place(w, wn.width_mm ?? 36 * 25.4, wn.at?.[k] ?? (k + 1) / (count + 1), "window", "Window", "WN", { sill_mm: wn.sill_mm, height_mm: wn.height_mm });
+  }
+
+  // doors and windows set in a wall piece: on the plan wall under that spot of the piece
+  for (const pw of sf.walls ?? []) {
+    const a = onLine(pw.a), b = onLine(pw.b), L = len(a, b);
+    if (L < 100) continue;
+    const put = (at: number) => {
+      const p: Pt = [a[0] + (b[0] - a[0]) * at, a[1] + (b[1] - a[1]) * at];
+      for (const w of walls) {
+        const s = wallLines.get(w.id);
+        if (!s) continue;
+        const sl = len(s.a, s.b), ux = (s.b[0] - s.a[0]) / (sl || 1), uy = (s.b[1] - s.a[1]) / (sl || 1);
+        const t = (p[0] - s.a[0]) * ux + (p[1] - s.a[1]) * uy, off = Math.abs((p[0] - s.a[0]) * uy - (p[1] - s.a[1]) * ux);
+        if (off < 15 && t >= 0 && t <= sl) return { w, t: t / sl };
+      }
+      return null;
+    };
+    for (const d of pw.doors ?? []) {
+      const hit = put(d.at);
+      if (!hit) continue;
+      const kind = d.kind && d.kind !== "window" ? d.kind : "door";
+      const usual = kind === "garage_door" ? 108 : kind === "double_door" || kind === "sliding_door" ? 72 : kind === "opening" ? 48 : 32;
+      place(hit.w, d.width_mm ?? usual * 25.4, hit.t, kind, kind === "opening" ? "Opening" : "Door", kind === "opening" ? "OP" : "D", { height_mm: d.height_mm });
+    }
+    for (const wn of pw.windows ?? []) {
+      const hit = put(wn.at);
+      if (hit) place(hit.w, wn.width_mm ?? 36 * 25.4, hit.t, "window", "Window", "WN", { sill_mm: wn.sill_mm, height_mm: wn.height_mm });
+    }
+  }
+  // a wall standing on its own is cut where its doors and windows are (the header and sill come with the opening)
+  for (const w of walls.filter((x) => x.free && used.has(x.id))) {
+    const s = wallLines.get(w.id)!, L = len(s.a, s.b), ux = (s.b[0] - s.a[0]) / L, uy = (s.b[1] - s.a[1]) / L;
+    const at = (t: number): Pt => [rmm(s.a[0] + ux * t), rmm(s.a[1] + uy * t)];
+    const along = (p: Pt) => (p[0] - s.a[0]) * ux + (p[1] - s.a[1]) * uy, off = (p: Pt) => Math.abs((p[0] - s.a[0]) * uy - (p[1] - s.a[1]) * ux);
+    const holes = openings.filter((o) => !o.room_ids.length && off(o.a) < 15 && off(o.b) < 15)
+      .map((o) => [along(o.a), along(o.b)].sort((x, y) => x - y))
+      .filter(([lo, hi]) => hi > 0 && lo < L).sort((x, y) => x[0] - y[0]);
+    const keep: [number, number][] = [];
+    let t0 = 0;
+    for (const [lo, hi] of holes) { if (lo - t0 > 20) keep.push([t0, lo]); t0 = Math.max(t0, hi); }
+    if (L - t0 > 20) keep.push([t0, L]);
+    const k = walls.indexOf(w);
+    const parts: Wall[] = keep.map(([lo, hi], j) => {
+      const id = j === 0 ? w.id : `${w.id}-${j + 1}`;
+      wallLines.set(id, { a: at(lo), b: at(hi), rooms: [] });
+      return { ...w, id, polygon: band(at(lo), at(hi), w.thickness_mm, w.thickness_mm / 2), length_mm: Math.round(hi - lo) };
+    });
+    walls.splice(k, 1, ...parts);
   }
 
   // objects at their real size, facing into the room
