@@ -36,8 +36,7 @@ import { Inspector, ProjectSummary, type AddPin } from "./Inspector";
 import { FeedPanel } from "./FeedPanel";
 import { PinDetail, PinForm, PinsList, QuickPin, where } from "./PinsPanel";
 import { PlanPanel, UploadBox } from "./PlanPanel";
-import { PhotosPanel, type PhotoHere } from "./PhotosPanel";
-import { placeOf, type PhotoItem } from "@/lib/photos";
+import type { PhotoItem } from "@/lib/photos";
 import { ShareDialog } from "./ShareDialog";
 import { useFollowMarks } from "./useFollowMarks";
 import { HOUSE_LAYER, StagesPanel, StageStrip } from "./StagesPanel";
@@ -46,7 +45,7 @@ import { parseQty, type Suggestion } from "@/lib/materials/suggest";
 import { NEXT_STATUS, pinSummary, qtyText, type MaterialInput, type MaterialLine } from "@/lib/materials/types";
 
 // (a job's money is on the Money page, beside every other job's)
-const TABS: Tab[] = ["feed", "details", "pins", "photos", "buy", "stages", "client"];
+const TABS: Tab[] = ["feed", "details", "pins", "buy", "stages", "client"];
 // Build mode clears the pins off the map, so a click lands on the wall under them
 const NO_PINS: Pin[] = [];
 const OUT: Record<string, Pt> = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] };
@@ -63,7 +62,7 @@ function levelFits(plan: PlanRow["data"], l: Level) {
 }
 const sameLevel = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-type Tab = "feed" | "details" | "pins" | "photos" | "buy" | "stages" | "client";
+type Tab = "feed" | "details" | "pins" | "buy" | "stages" | "client";
 /** the wall picked with Move wall: its saved move (key), the room side it is, where it was drawn and how far it moved */
 interface SideSel { key: string; roomId: string; heading: "north" | "east" | "south" | "west"; at: [number, number]; by: number; t: number }
 export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; api: WorkspaceApi; onAllJobs: () => void }) {
@@ -219,6 +218,9 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     const id = p.element_id ?? p.room_id;
     if (id) showPlace({ id, label: (view && findElement(view, id) && elementLabel(findElement(view, id)!)) || "Here" });
   }, [pins, view, showPlace]);
+  // opened from Photos: go to the photo's spot once the plan is up
+  const firstPhoto = useRef(data.startOnPhoto ?? null);
+  useEffect(() => { const p = firstPhoto.current; if (p && view) { firstPhoto.current = null; if (p.pin) setTab("pins"); setTimeout(() => showPhotoSpot(p), 300); } }, [view, showPhotoSpot]);
   const firstPlace = useRef(data.startOnClient?.place ?? null);
   useEffect(() => { const t = firstPlace.current; if (t && view) { firstPlace.current = null; setTimeout(() => showPlace(t), 300); } }, [view, showPlace]);
   // furnishing, and how built the house looks: finished, unless a stage is picked in Stages
@@ -707,7 +709,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   useEscape(back);
 
   // the tabs this job shows (Buy and Money only when they're wired up); 1, 2, 3... open them in order
-  const shownTabs = TABS.filter((t) => (t !== "buy" || !!api.materials) && (t !== "photos" || !!api.photos) && (t !== "client" || !!(api.client && job.client_name)));
+  const shownTabs = TABS.filter((t) => (t !== "buy" || !!api.materials) && (t !== "client" || !!(api.client && job.client_name)));
   const openTab = useCallback((t: Tab) => {
     // a tab takes you out of Build mode
     if (build) { setBuild(false); setPinMode(false); setSideSel(null); setToolRaw("pick"); }
@@ -725,7 +727,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
   });
 
   // this job's places and actions in the Go to box (Ctrl+K): floors, rooms, open pins, people, tabs
-  const tabName: Record<Tab, string> = { feed: "Feed", details: "Details", pins: "Pins", photos: "Photos", buy: "Buy list", stages: "Stages", client: "Client" };
+  const tabName: Record<Tab, string> = { feed: "Feed", details: "Details", pins: "Pins", buy: "Buy list", stages: "Stages", client: "Client" };
   const goItems = useMemo<GoItem[]>(() => {
     const out: GoItem[] = [];
     const k = job.id;
@@ -859,16 +861,6 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
     </div>
   ), [api, view, askContext, saveEdit, edits, plan, runs, data.aiAvailable, showElements, say]);
 
-  /** where you are on the map, to tag new photos with: the thing you picked, or the room you're in */
-  const photoHere = useMemo<PhotoHere | null>(() => {
-    if (!view) return null;
-    const id = selected ?? (level.kind === "room" || level.kind === "wall" ? level.roomId : null);
-    if (!id) return null;
-    const at = placeOf(view, { element_id: id });
-    const e = findElement(view, id);
-    return at.room_id ? { ...at, label: e ? elementLabel(e) : null } : null;
-  }, [view, selected, level]);
-
   const panel = useMemo(() => {
     if (build && view) return (
       <BuildPanel plan={view} floor={buildFloor} tool={tool} setTool={setTool} doorKind={doorKind} setDoorKind={setDoorKind} selected={selected} edits={edits} side={side}
@@ -922,10 +914,6 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
         onDelete={(id) => stageOp(() => api.deleteStage(id))}
         onMove={(id, d) => stageOp(() => api.moveStage(id, d))} />
     );
-    if (tab === "photos" && api.photos) return (
-      <PhotosPanel api={api.photos} job={job} plan={view} pins={pins} stages={stages} members={data.members} here={photoHere}
-        activeStage={stages.find((s) => s.status === "active")?.id ?? null} onShowSpot={showPhotoSpot} onShowPin={showPin} say={say} />
-    );
     if (tab === "client" && api.client && job.client_name) {
       const c = api.client;
       return (
@@ -950,8 +938,7 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
       onAddItem={addItem} onUpdateItem={updateItem} onDeleteItem={deleteItem} onPinKind={showPinKind}
       buy={api.materials ? { lines: mlines.filter((l) => l.job_id === job.id && l.status !== "returned"), onQuick: quickBuy, onAll: quickBuyAll, onMore: (t) => openBuy(t), onOpen: openLine, onTick: (id) => { const l = mlines.find((x) => x.id === id); if (l) void updateMaterial(id, { status: NEXT_STATUS[l.status] }); } } : undefined} />;
   }, [build, buildFloor, tool, setTool, doorKind, side, removeOpening, setSideBy, splitAt, joinBack, joinWall, toggleBuild, planSection, tab, feedPerson, buyDraft, buyFocus, mlines, mjobs, lastBuyer, addMaterials, updateMaterial, removeMaterial, quickBuy, quickBuyAll, openBuy, openLine, draft, pin, plan, view, stages, pins, level, selected, states, api, data.canShare, say, showPin, updatePin, deletePin, undoable, stageOp, setLevel, setStatus, select, addPin, createPin, showElements,
-    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, job, places, showPlace, seenKey, layer, layerPins, layerStage, inLayer, stageCounts, pickLayer, settings,
-    photoHere, showPhotoSpot, data.members]);
+    edits, saveEdit, items, selectedItem, selectItem, addItem, updateItem, deleteItem, showPinKind, pinFilter, job, places, showPlace, seenKey, layer, layerPins, layerStage, inLayer, stageCounts, pickLayer, settings]);
 
   // where the quick card sits inside the map, kept on screen
   const quick = (() => {
@@ -1064,7 +1051,6 @@ export function JobWorkspace({ data, api, onAllJobs }: { data: WorkspaceData; ap
             {tabBtn("feed", "Feed")}
             {tabBtn("details", "Details")}
             {tabBtn("pins", "Pins", openPins)}
-            {api.photos && tabBtn("photos", "Photos")}
             {api.materials && tabBtn("buy", "Buy", mlines.filter((l) => l.job_id === job.id && l.status === "to_buy").length)}
             {tabBtn("stages", "Stages")}
             {api.client && job.client_name && tabBtn("client", "Client", clientNew.length)}

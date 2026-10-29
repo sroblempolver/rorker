@@ -3,6 +3,7 @@
 import type { AssistantSend } from "@/components/assistant/Assistant";
 import type { ThreadApi } from "./ClientThread";
 import type { PlaceTag } from "@/lib/plan/places";
+import type { PhotoItem } from "@/lib/photos";
 import type { ClientStart } from "@/components/billing/MoneyPanel";
 import type { Billing, Brand } from "@/lib/billing/types";
 import type { MaterialLine, MaterialsApi, MaterialsJob } from "@/lib/materials/types";
@@ -33,6 +34,8 @@ export interface WorkspaceData {
   payoutsConnected?: boolean;
   /** open on the Client tab (from a "new from your client" notice), showing the place they tagged */
   startOnClient?: { place: PlaceTag | null };
+  /** open at a photo's spot (from Photos in the top bar): its pin, or its room or the thing in it */
+  startOnPhoto?: PhotoItem;
   /** the materials list: lines on every job this person can see, and those jobs (to split an add) */
   materials?: { lines: MaterialLine[]; jobs: MaterialsJob[] };
 }
@@ -81,9 +84,6 @@ export interface WorkspaceApi {
   materials?: MaterialsApi;
   /** open the shopping run across every job */
   openShopping?: () => void;
-  /** the job's Photos: everything added straight there, and the photos on its pins and in its client
-   *  thread (with addresses to show); left out, the Photos tab is hidden */
-  photos?: PhotosApi;
   /** the job's client: one thread with them, whether they may add notes you see, and their page; left
    *  out (or no client on the job), the Client tab is hidden */
   client?: {
@@ -94,6 +94,8 @@ export interface WorkspaceApi {
   };
 }
 
+/** one job's Photos: everything added straight there, and the photos on its pins and in its client
+ *  thread (with addresses to show) */
 export interface PhotosApi {
   /** everything Photos shows, fresh (crew and the client add photos from their links) */
   list(): Promise<{ uploads: JobPhoto[]; comments: PinComment[]; messages: JobMessage[] }>;
