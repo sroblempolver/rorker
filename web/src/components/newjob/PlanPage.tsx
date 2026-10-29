@@ -7,14 +7,17 @@ import { useMemo, useState } from "react";
 import type { Plan } from "@/lib/plan/types";
 import { planFromSketch, type Sketch } from "@/lib/plan/sketch";
 import { sketchFromPlan } from "@/lib/bench/score";
+import { stagesFromSpec, type BuildSpec, type SpecStage } from "@/lib/plan/buildSpec";
 import { SketchEditor } from "./SketchEditor";
 
-export interface PlanPageJob { id: string; name: string; address: string | null; plan: Plan | null }
+export interface PlanPageJob { id: string; name: string; address: string | null; plan: Plan | null; build?: BuildSpec }
 
-export function PlanPage({ jobs, jobId, onPick, onSave, onOpenJob, onNew }: {
+export function PlanPage({ jobs, jobId, onPick, onSave, onBuild, onOpenJob, onNew }: {
   jobs: PlanPageJob[]; jobId: string | null; onPick: (id: string) => void;
   /** the new plan for the job, built from the drawing */
   onSave: (id: string, plan: Plan) => void;
+  /** how it's built (the build questions), and the job's new stages when the contractor says to replace them */
+  onBuild?: (id: string, spec: BuildSpec, stages?: SpecStage[]) => void;
   onOpenJob: (id: string) => void; onNew: () => void;
 }) {
   const job = jobs.find((j) => j.id === jobId) ?? jobs.find((j) => j.plan) ?? jobs[0] ?? null;
@@ -22,6 +25,8 @@ export function PlanPage({ jobs, jobId, onPick, onSave, onOpenJob, onNew }: {
   const [round, setRound] = useState(0);
   const [saved, setSaved] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // the answers as they're given; the stages are only replaced on Save, after a confirm
+  const [spec, setSpec] = useState<{ id: string; s: BuildSpec; changed: boolean } | null>(null);
   const initial = useMemo<Sketch | null>(() => {
     const p = job?.plan;
     if (!p) return null;
@@ -38,7 +43,15 @@ export function PlanPage({ jobs, jobId, onPick, onSave, onOpenJob, onNew }: {
     </div>
   );
 
+  const build = spec?.id === job.id ? spec.s : job.build ?? {};
+  const answer = (s: BuildSpec) => { setSpec({ id: job.id, s, changed: true }); onBuild?.(job.id, s); };
+
   const save = (sk: Sketch) => {
+    if (spec?.id === job.id && spec.changed) {
+      const stages = stagesFromSpec(spec.s);
+      if (stages.length && confirm("Make this job's stages from how it's built? This replaces its current stages.")) onBuild?.(job.id, spec.s, stages);
+      setSpec({ ...spec, changed: false });
+    }
     try {
       const { plan } = planFromSketch(sk, job.plan?.source ?? { kind: "sketch", filename: "Drawn by hand" });
       onSave(job.id, plan);
@@ -72,6 +85,7 @@ export function PlanPage({ jobs, jobId, onPick, onSave, onOpenJob, onNew }: {
           <button className="btn btn-sm" onClick={() => onOpenJob(job.id)}>Open the job</button>
         </div>
         <SketchEditor key={`${job.id}-${round}`} initial={initial} pictures={[]} doneLabel="Save plan"
+          build={onBuild ? build : undefined} onBuild={onBuild ? answer : undefined}
           onDone={(sk) => save(sk)} onCancel={() => { setSaved(null); setRound((n) => n + 1); }} />
       </div>
     </div>

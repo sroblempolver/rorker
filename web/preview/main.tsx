@@ -719,13 +719,22 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
       {shown === "new" ? (
         <NewProject onCreate={created} onCancel={() => setPage("jobs")} />
       ) : shown === "plan" ? (
-        <PlanPage jobs={jobs.map((d) => ({ id: d.job.id, name: d.job.name, address: d.job.address, plan: d.plan?.data ?? null }))} jobId={activeId || null}
+        <PlanPage jobs={jobs.map((d) => ({ id: d.job.id, name: d.job.name, address: d.job.address, plan: d.plan?.data ?? null, build: d.edits[JOB_KEY]?.build }))} jobId={activeId || null}
           onPick={(id) => go("plan", id)} onOpenJob={(id) => { setVer((n) => n + 1); go("job", id); }} onNew={() => setPage("new")}
           onSave={(id, plan) => {
             const d = jobsRef.current.find((j) => j.job.id === id);
             if (!d) return;
             d.plan = d.plan ? { ...d.plan, version: d.plan.version + 1, data: plan } : { id: uid(), job_id: id, version: 1, data: plan, created_at: now() };
             d.job = { ...d.job, current_plan_id: d.plan.id };
+            setJobs((js) => [...js]);
+            setVer((n) => n + 1);
+            poke();
+          }}
+          onBuild={(id, spec, stages) => {
+            const d = jobsRef.current.find((j) => j.job.id === id);
+            if (!d) return;
+            d.edits = { ...d.edits, [JOB_KEY]: { ...d.edits[JOB_KEY], build: spec } };
+            if (stages) d.stages = stages.map((s, i) => ({ id: uid(), job_id: id, position: i + 1, name: s.name, description: s.description || null, status: "not_started", started_at: null, completed_at: null }));
             setJobs((js) => [...js]);
             setVer((n) => n + 1);
             poke();
