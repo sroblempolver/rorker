@@ -278,6 +278,11 @@ async function sendSharedPhoto(label: string, pinId: string, file: File) {
   return pinPhotos.get(pinId)!;
 }
 
+/** a crew member marks one of their tasks done from their link, as they can on a real link */
+function sharedDone(jobs: WorkspaceData[], pinId: string) {
+  for (const j of jobs) j.pins = j.pins.map((p) => (p.id === pinId ? { ...p, status: "done", closed_at: now() } : p));
+}
+
 /** a photo sent from a crew link into one of their jobs' Photos */
 function sendSharedJobPhoto(jobs: WorkspaceData[], token: string, jobId: string, f: File, input: Partial<JobPhotoInput>) {
   const l = shares.find((x) => x.token === token);
@@ -663,7 +668,8 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
       money: saved.money && { ...saved.money, openClient: signedIn ? a.money!.openClient : (start: ClientStart) => showClient(start) },
       materials: mapi, openShopping: () => goRef.current("shop") };
   }, [active, mapi, poke, signedIn]);
-  const teamA = useMemo(() => teamApi(() => jobsRef.current, poke), [poke]);
+  // a change to the team shows on the open job too, so someone just added can be tagged on its pins
+  const teamA = useMemo(() => teamApi(() => jobsRef.current, () => { poke(); setVer((n) => n + 1); }), [poke]);
   // the team board: in the database with an account, in memory on the sample data
   const boardApi = useMemo<TeamBoardApi>(() => {
     const owner = () => signedIn?.name ?? team.members.find((m) => m.is_owner)?.full_name ?? "You";
@@ -799,7 +805,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
         </div>
       ) : shown === "shared" && share ? (
         <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden overflow-y-auto">
-          {(() => { const v = sharedWork(jobs, share.token, pinPhotos); return v ? <SharedWorkView key={share.token + share.pin} work={v} pin={share.pin} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} inbox={(() => { const id = shares.find((l) => l.token === share.token)?.member_id; return id ? demoInbox(id) : undefined; })()} addPhoto={async (job, f, input) => sendSharedJobPhoto(jobs, share.token, job, f, input)} onBack={() => { setVer((n) => n + 1); setPage("job"); }} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
+          {(() => { const v = sharedWork(jobs, share.token, pinPhotos); return v ? <SharedWorkView key={share.token + share.pin} work={v} pin={share.pin} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} done={async (pin) => sharedDone(jobs, pin)} inbox={(() => { const id = shares.find((l) => l.token === share.token)?.member_id; return id ? demoInbox(id) : undefined; })()} addPhoto={async (job, f, input) => sendSharedJobPhoto(jobs, share.token, job, f, input)} onBack={() => { setVer((n) => n + 1); setPage("job"); }} /> : <p className="p-6 text-muted">This link was turned off. <button className="underline" onClick={() => setPage("job")}>Back</button></p>; })()}
         </div>
       ) : shown === "shop" ? (
         <div className="flex-1 overflow-y-auto">
@@ -915,7 +921,7 @@ function DemoLinkPage({ route }: { route: NonNullable<ReturnType<typeof demoRout
   return (
     <div className="h-full flex flex-col lg:overflow-hidden overflow-y-auto">
       {note}
-      <SharedWorkView work={v} pin={route.params.get("pin")} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} inbox={link.member_id ? demoInbox(link.member_id) : undefined} addPhoto={async (job, f, input) => sendSharedJobPhoto(jobs, link.token, job, f, input)} />
+      <SharedWorkView work={v} pin={route.params.get("pin")} send={(pin, f) => sendSharedPhoto(v.label, pin, f)} done={async (pin) => sharedDone(jobs, pin)} inbox={link.member_id ? demoInbox(link.member_id) : undefined} addPhoto={async (job, f, input) => sendSharedJobPhoto(jobs, link.token, job, f, input)} />
     </div>
   );
 }
