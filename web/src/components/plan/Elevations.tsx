@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { JobItem, Pin, PinInput } from "@/lib/data/types";
 import { attachedToSide, frontView, type WallSide } from "@/lib/plan/geometry";
 import type { ElementStatus, Floor, Opening, Plan, Room } from "@/lib/plan/types";
+import { openingSpan } from "@/lib/plan/rules";
 import { CHALK, ROOM_MATERIAL, STATUS_COLOR, WALL_TOP } from "./style";
 import { DraftFlag, PinFlag, PlanDefs, useHoldToPin, useWorldDrag } from "./svg";
 import { FixtureElevation, fixtureBottom, fixtureTop } from "./fixtures";
@@ -24,7 +25,7 @@ const DOOR = "#7b5638";
 function OpeningShape({ o, x0, x1, base, tint, lw, lit }: { o: Opening; x0: number; x1: number; base: number; tint: string | null; lw: number; lit?: boolean }) {
   const w = x1 - x0;
   if (o.kind === "window") {
-    const top = base - 2100, bot = base - 900;
+    const [b, t] = openingSpan(o, null), top = base - t, bot = base - b;
     return (
       <g>
         <rect x={x0 - 40} y={top - 40} width={w + 80} height={bot - top + 80} fill="#e9e1d1" />
@@ -35,10 +36,11 @@ function OpeningShape({ o, x0, x1, base, tint, lw, lit }: { o: Opening; x0: numb
     );
   }
   if (o.kind === "opening") {
-    return <rect x={x0} y={base - 2400} width={w} height={2400} fill="#121311" fillOpacity={0.85} stroke="#f0ece3" strokeOpacity={0.45} strokeDasharray={`${6 * lw} ${4 * lw}`} strokeWidth={lw} />;
+    const h = openingSpan(o, null)[1];
+    return <rect x={x0} y={base - h} width={w} height={h} fill="#121311" fillOpacity={0.85} stroke="#f0ece3" strokeOpacity={0.45} strokeDasharray={`${6 * lw} ${4 * lw}`} strokeWidth={lw} />;
   }
   if (o.kind === "garage_door") {
-    const h = 2300;
+    const h = openingSpan(o, null)[1];
     return (
       <g>
         <rect x={x0} y={base - h} width={w} height={h} fill={tint ?? "#9c978d"} stroke={FRAME} strokeWidth={2 * lw} />
@@ -46,7 +48,7 @@ function OpeningShape({ o, x0, x1, base, tint, lw, lit }: { o: Opening; x0: numb
       </g>
     );
   }
-  const h = 2100;
+  const h = openingSpan(o, null)[1];
   const leaves = o.kind === "double_door" ? 2 : 1;
   return (
     <g>
@@ -194,8 +196,8 @@ interface WallProps {
   locked?: boolean;
 }
 
-const openTop = (o: Opening) => (o.kind === "window" ? 2100 : o.kind === "garage_door" ? 2300 : o.kind === "opening" ? 2400 : 2100);
-const openBottom = (o: Opening) => (o.kind === "window" ? 900 : 0);
+const openTop = (o: Opening) => openingSpan(o, null)[1];
+const openBottom = (o: Opening) => openingSpan(o, null)[0];
 
 export function WallView(p: WallProps) {
   const { floor, side, selected, states, colorMode } = p;

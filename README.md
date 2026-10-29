@@ -75,6 +75,21 @@ python3 -m rorker_agent answer out/plan.json Q1="One room" Q3="Pantry"
 fixtures found, questions asked, unidentified items, cost and time. To add a case, drop the drawing and
 an `expected.json` in a new folder; `house/expected.json` shows the format.
 
+## Plan tests (the reader's scorecard) and drawing by hand
+
+The New project reader is measured on real plans in the preview's **Plan tests** page (`#/bench`).
+Each test plan is exactly what an upload sends the reader (`parts`, made by `lib/intake/files.ts`) plus
+the right answer, drawn with the same sketch editor contractors use (`components/newjob/SketchEditor.tsx`).
+**Run all** reads every plan with the live reader (questions skipped) and `lib/bench/score.ts` scores it
+out of 100: floors, homes, rooms found by overlap after lining the floors up, rooms named right, scale,
+doors, windows (room and side) and the main fixtures. Plans added in the page live in that browser
+(IndexedDB); "Save all to a file" exports them. Shared test plans are `web/bench/cases/<id>/case.json`,
+listed in `web/bench/cases/index.json`, and are copied beside the preview page by `preview/build.mjs`.
+
+When a read is wrong, New project's review has **Fix it by drawing** (and the start screen **Draw it
+myself**): rooms dragged out over the uploaded drawing, split, reshaped by corner or wall, doors, windows,
+things, scale from one known length, and "Line up" to sit the picture under the rooms.
+
 ## Deploy (Railway + Supabase)
 
 Everything is new for this project: a new GitHub repo, Supabase project, Railway project and API key.

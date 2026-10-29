@@ -15,6 +15,7 @@ import { furnishWhere, type Furnish } from "@/lib/plan/build";
 import { MicButton, speak, stopSpeaking, useDictation } from "@/components/voice/speech";
 import { useFeedback } from "@/components/ui/feedback";
 import { useEscape } from "@/components/ui/hotkeys";
+import { SketchEditor, picturesFrom, type Backdrop } from "./SketchEditor";
 
 export interface NewProjectResult {
   job: { name: string; address: string | null; job_type: string; start_date: string | null; client_name: string | null; client_email: string | null; client_phone: string | null };
@@ -33,7 +34,10 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
   const [files, setFiles] = useState<File[]>([]);
   const { confirm } = useFeedback();
   const [text, setText] = useState("");
-  const [stage, setStage] = useState<"start" | "working" | "questions" | "message" | "review">("start");
+  const [stage, setStage] = useState<"start" | "working" | "questions" | "message" | "review" | "draw">("start");
+  // drawing by hand: from scratch (no read, or instead of one) or to fix what was read
+  const [drawFrom, setDrawFrom] = useState<"start" | "review">("start");
+  const [backdrops, setBackdrops] = useState<Record<number, Backdrop>>({});
   const [err, setErr] = useState<string | null>(null);
   const [prep, setPrep] = useState<Prepared | null>(null);
   const [step, setStep] = useState<IntakeStep | null>(null);
@@ -107,6 +111,27 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
     await run((c, s) => c.next(undefined, s));
   };
 
+  const drawMyself = async () => {
+    setErr(null);
+    let p = prep;
+    if (files.length && !p) { setStage("working"); p = await prepareFiles(files); setPrep(p); }
+    setDrawFrom("start");
+    setStage("draw");
+  };
+  const drawn = (sketch: NonNullable<IntakeProject["sketch"]>, b: Record<number, Backdrop>) => {
+    setBackdrops(b);
+    if (drawFrom === "review" && project) {
+      setProject({ ...project, sketch });
+      chat.current?.handDrawn(sketch);
+      setTalk((t) => [...t, { who: "ai", text: "Got your drawing. Tell me anything else to change, or create the project." }]);
+    } else {
+      setProject({ summary: "You drew the plan by hand.", job: { name: text.trim().split(/[.\n]/)[0].slice(0, 60) || "New job", job_type: "renovation" }, sketch });
+      setTalk([]);
+    }
+    setStage("review");
+  };
+  const pictures = useMemo(() => picturesFrom(prep?.parts ?? []), [prep]);
+
   // copy the list now: the input is cleared right after, which empties it
   const addFiles = (list: FileList | null) => { const got = list ? Array.from(list) : []; if (got.length) setFiles((f) => [...f, ...got].slice(0, 8)); };
 
@@ -128,7 +153,7 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className={`px-4 sm:px-6 py-8 w-full mx-auto space-y-5 ${stage === "review" ? "max-w-[1500px]" : "max-w-3xl"}`}>
+      <div className={`px-4 sm:px-6 py-8 w-full mx-auto space-y-5 ${stage === "review" || stage === "draw" ? "max-w-[1500px]" : "max-w-3xl"}`}>
         <div className="relative pr-10">
           <button onClick={() => void leave()} aria-label="Close" title="Close (Esc)" className="absolute right-0 top-0 w-9 h-9 grid place-items-center text-muted hover:text-text rounded-[3px] hover:bg-panel-2">✕</button>
           <p className="eyebrow">New project</p>
@@ -171,6 +196,7 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
             {err && <p className="text-[13px] text-red">{err}</p>}
             <div className="flex gap-2">
               <button className="btn btn-primary flex-1" onClick={start}>Start</button>
+              <button className="btn" onClick={() => void drawMyself()} title="Trace the plan yourself instead of having it read">Draw it myself</button>
               <button className="btn btn-ghost" onClick={() => void leave()}>Cancel</button>
             </div>
           </section>
@@ -202,9 +228,14 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
           </section>
         )}
 
+        {stage === "draw" && (
+          <SketchEditor initial={drawFrom === "review" ? project?.sketch ?? null : null} pictures={pictures} initialBackdrops={drawFrom === "review" ? backdrops : undefined}
+            onDone={drawn} onCancel={() => setStage(drawFrom === "review" && project ? "review" : "start")} />
+        )}
+
         {stage === "review" && project && (
-          <Review project={project} built={built} furnish={furnish} setFurnish={setFurnish} onCreate={onCreate} onRestart={() => { setStage("start"); setStep(null); setProject(null); setTalk([]); setTalkQs(null); setErr(null); setFurnish(undefined); }}
-            check={<Check onFurnish={(room) => { if (built) setFurnish((f) => furnishWhere(built.plan, f, room)); }} lines={talk} busy={talking} questions={talkQs} plan={project.sketch?.questions ?? []} rooms={(project.sketch?.floors ?? []).flatMap((f) => f.rooms.map((r) => r.name))} err={err} onSend={discuss} onStop={() => ctl.current?.abort()} />} />
+          <Review project={project} onDraw={() => { setDrawFrom("review"); setStage("draw"); }} built={built} furnish={furnish} setFurnish={setFurnish} onCreate={onCreate} onRestart={() => { setStage("start"); setStep(null); setProject(null); setTalk([]); setTalkQs(null); setErr(null); setFurnish(undefined); }}
+            check={chat.current && <Check onFurnish={(room) => { if (built) setFurnish((f) => furnishWhere(built.plan, f, room)); }} lines={talk} busy={talking} questions={talkQs} plan={project.sketch?.questions ?? []} rooms={(project.sketch?.floors ?? []).flatMap((f) => f.rooms.map((r) => r.name))} err={err} onSend={discuss} onStop={() => ctl.current?.abort()} />} />
         )}
       </div>
     </div>
@@ -232,8 +263,8 @@ function Questions({ step, answers, setAnswers, onSend, onSkip, err }: { step: E
   );
 }
 
-function Review({ project, built, furnish, setFurnish, onCreate, onRestart, check }: {
-  project: IntakeProject; built: { plan: Plan } | null; furnish: Furnish | undefined; setFurnish: (f: Furnish) => void;
+function Review({ project, built, furnish, setFurnish, onCreate, onRestart, check, onDraw }: {
+  project: IntakeProject; onDraw: () => void; built: { plan: Plan } | null; furnish: Furnish | undefined; setFurnish: (f: Furnish) => void;
   onCreate: (r: NewProjectResult) => void; onRestart: () => void; check: ReactNode;
 }) {
   const [job, setJob] = useState({
@@ -263,6 +294,10 @@ function Review({ project, built, furnish, setFurnish, onCreate, onRestart, chec
         <p className="eyebrow">Here&apos;s what I made</p>
         <p className="text-[15px] leading-relaxed">{project.summary}</p>
         {plan && <p className="text-[13px] text-muted">{units > 1 ? `${units} homes, ` : ""}{plan.floors.length} floor{plan.floors.length === 1 ? "" : "s"}, {rooms} rooms. You can fix anything later in the job.</p>}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <button className="btn btn-sm" onClick={onDraw}>{plan ? "Fix it by drawing" : "Draw the plan"}</button>
+          <span className="text-[12.5px] text-muted">{plan ? "Wrong rooms or walls? Trace over the drawing yourself." : "Trace the rooms over your drawing."}</span>
+        </div>
       </section>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px] items-start">
         {plan ? (

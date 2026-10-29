@@ -63,6 +63,11 @@ const WET = new Set<RoomType>(["bathroom", "wc", "laundry"]);
 
 /** Bottom and top of a door or window above its floor: the drawing's own numbers when it has them. */
 export function openingSpan(o: Opening, floor: Floor | null): [number, number] {
+  const [bot, top] = ruleSpan(o, floor);
+  const b = o.sill_mm ?? bot;
+  return [b, o.height_mm ? b + o.height_mm : Math.max(b + 300, top)];
+}
+function ruleSpan(o: Opening, floor: Floor | null): [number, number] {
   if (o.kind === "window") {
     const types = floor ? o.room_ids.map((id) => floor.rooms.find((r) => r.id === id)?.type) : [];
     const sill = types.some((t) => t && WET.has(t)) ? RULES.sillWet : types.includes("kitchen") ? RULES.sillKitchen : RULES.sill;
