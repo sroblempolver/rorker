@@ -7,7 +7,7 @@ import { topOf } from "./catalog";
 import type { Mark } from "./pointing";
 import type { PlaceTag } from "./tags";
 
-export { cleanPlaces, withTags, type PlaceTag } from "./tags";
+export { cleanPlaces, spokenTags, withTags, type PlaceTag } from "./tags";
 
 const clean = (s: string) => s.replace(/\s*\((likely|probably|maybe)\)\s*$/i, "").trim() || "Item";
 

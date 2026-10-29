@@ -2,10 +2,12 @@
 // One thread between the contractor and the job's client: messages, info and photos, both ways. The
 // contractor sees it in the job's Client tab; the client on their own link. "paper" is the client's
 // light page, "app" the contractor's dark one. Type @ to tag a room or an object in a room ("@Bedroom 1 ›
-// Bed needs replacing"); a tag in a message is a button that shows that spot on the map.
+// Bed needs replacing"), or hold the mic and say it: rooms and objects named out loud become tags too.
+// A tag in a message is a button that shows that spot on the map.
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { JobMessage } from "@/lib/data/types";
-import { withTags, type PlaceTag } from "@/lib/plan/places";
+import { spokenTags, withTags, type PlaceTag } from "@/lib/plan/places";
+import { useDictation } from "@/components/voice/speech";
 
 export interface ThreadApi {
   list(): Promise<JobMessage[]>;
@@ -45,6 +47,14 @@ export function ClientThread({ api, initial, side, tone, other, color = "#ff6a1f
   const paper = tone === "paper";
   const seen = useRef(onSeen);
   seen.current = onSeen;
+  // what's said goes into the box with its rooms and objects tagged, to check before sending
+  const dict = useDictation((words) => {
+    const said = spokenTags(words.trim(), places);
+    const line = said.text.charAt(0).toUpperCase() + said.text.slice(1);
+    setText((s) => `${s}${s && !/\s$/.test(s) ? " " : ""}${line}`);
+    setTags((old) => [...old, ...said.tags.filter((t) => !old.some((o) => o.id === t.id))]);
+    box.current?.focus();
+  });
 
   // new messages from the other side show up while the thread is open
   useEffect(() => {
@@ -86,7 +96,7 @@ export function ClientThread({ api, initial, side, tone, other, color = "#ff6a1f
     <div className="flex flex-col min-h-0 h-full">
       <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5 p-1">
         {list === null ? <p className={`text-[13.5px] ${muted}`}>Loading…</p>
-          : !list.length ? <p className={`text-[13.5px] ${muted}`}>No messages yet. Anything you send here goes to {other}, with photos if you like.{places.length ? " Type @ to point at a room or something in it." : ""}</p>
+          : !list.length ? <p className={`text-[13.5px] ${muted}`}>No messages yet. Anything you send here goes to {other}, with photos if you like.{places.length ? " Type @, or hold the mic and say it, to point at a room or something in it." : ""}</p>
           : list.map((m) => {
             const mine = m.from === side;
             return (
@@ -127,6 +137,8 @@ export function ClientThread({ api, initial, side, tone, other, color = "#ff6a1f
             ))}
           </div>
         )}
+        {dict.listening && <p className={`text-[12.5px] ${paper ? "text-neutral-600" : "text-muted"}`}>Listening, let go when you're done{places.length ? ". Say a room or what's in it and it gets tagged" : ""}… {dict.interim && <span className={paper ? "text-neutral-900" : "text-text"}>“{dict.interim}”</span>}</p>}
+        {dict.error && !dict.listening && <p className={`text-[12.5px] ${paper ? "text-amber-700" : "text-amber"}`}>{dict.error}</p>}
         {photo && <p className={`text-[12.5px] ${paper ? "text-neutral-600" : "text-muted"}`}>Photo: {photo.name} <button className="underline" onClick={() => setPhoto(null)}>remove</button></p>}
         <div className="flex gap-1.5 items-end">
           <button type="button" onClick={() => file.current?.click()} aria-label="Add a photo" title="Add a photo"
@@ -136,6 +148,12 @@ export function ClientThread({ api, initial, side, tone, other, color = "#ff6a1f
           {places.length > 0 && (
             <button type="button" onClick={() => { setText((s) => `${s}${s && !/\s$/.test(s) ? " " : ""}@`); box.current?.focus(); }} aria-label="Tag a room or object" title="Tag a room or object"
               className={`h-10 w-10 shrink-0 grid place-items-center rounded-[4px] border font-semibold text-[17px] ${paper ? "border-neutral-300 bg-white text-neutral-700" : "border-line bg-panel-2 text-muted hover:text-text"}`}>@</button>
+          )}
+          {dict.supported && !dict.blocked && (
+            <button type="button" {...dict.hold()} aria-pressed={dict.listening} aria-label="Hold to talk" title={places.length ? "Hold and speak. Rooms and things you name get tagged." : "Hold and speak"}
+              className={`h-10 w-10 shrink-0 grid place-items-center rounded-[4px] border ${dict.listening ? "bg-red-600 border-red-600 text-white animate-pulse" : paper ? "border-neutral-300 bg-white text-neutral-700" : "border-line bg-panel-2 text-muted hover:text-text"}`}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3" fill={dict.listening ? "currentColor" : "none"} /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+            </button>
           )}
           <input ref={file} type="file" accept="image/*" className="hidden" onChange={(e) => { setPhoto(e.target.files?.[0] ?? null); e.target.value = ""; }} />
           <textarea ref={box} value={text} onChange={(e) => { setText(e.target.value); setPick(0); }} rows={1} placeholder={`Message ${other}`}
