@@ -658,7 +658,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
     <div className="h-full flex flex-col">
       <header className="h-14 shrink-0 border-b border-line bg-panel flex items-center gap-2 sm:gap-4 px-3 sm:px-4">
         <button onClick={() => setPage("jobs")} aria-label="All jobs"><Logo size={20} /></button>
-        <nav className="hidden sm:flex items-center gap-1 sm:ml-2 min-w-0 overflow-x-auto">{tab("jobs", "Jobs")}{tab("photos", "Photos")}{tab("money", "Money")}{tab("shop", "Shopping")}{tab("team", "Team")}</nav>
+        <nav className="hidden sm:flex items-center gap-1 sm:ml-2 min-w-0 overflow-x-auto">{tab("jobs", "Jobs")}{tab("money", "Money")}{tab("shop", "Shopping")}{tab("photos", "Photos")}{tab("team", "Team")}</nav>
         <GoToButton className="ml-auto" />
         <button onClick={() => setPage("new")} className={`btn btn-sm ${page === "new" ? "btn-ghost" : "btn-primary"}`}>+<span className="hidden sm:inline"> New project</span></button>
         {signedIn ? <AccountChip c={signedIn} state={saveState} /> : (
@@ -668,7 +668,7 @@ function App({ initial, signedIn }: { initial: WorkspaceData[]; signedIn?: Cloud
       <GoToHost />
       {/* on a phone the main places sit at the bottom, under the thumb */}
       <nav className="mobile-nav sm:hidden fixed bottom-0 inset-x-0 z-30 h-14 pb-[env(safe-area-inset-bottom)] box-content bg-panel border-t border-line grid grid-cols-5" aria-label="Main">
-        {([["jobs", "Jobs", "M3 21V9l9-6 9 6v12M9 21v-7h6v7"], ["photos", "Photos", "M4 8h3l2-3h6l2 3h3v11H4zM12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"], ["money", "Money", "M3 6h18v12H3zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"], ["shop", "Shopping", "M5 7h14l-1.5 12h-11zM9 7a3 3 0 0 1 6 0"], ["team", "Team", "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14a6.5 6.5 0 0 1 3.5 6"]] as const).map(([p, label, d]) => {
+        {([["jobs", "Jobs", "M3 21V9l9-6 9 6v12M9 21v-7h6v7"], ["money", "Money", "M3 6h18v12H3zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"], ["shop", "Shopping", "M5 7h14l-1.5 12h-11zM9 7a3 3 0 0 1 6 0"], ["photos", "Photos", "M4 8h3l2-3h6l2 3h3v11H4zM12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"], ["team", "Team", "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14a6.5 6.5 0 0 1 3.5 6"]] as const).map(([p, label, d]) => {
           const on = page === p || (p === "jobs" && page === "job") || (p === "money" && page === "jobmoney");
           return (
             <button key={p} onClick={() => { setPage(p); }} aria-current={on ? "page" : undefined}

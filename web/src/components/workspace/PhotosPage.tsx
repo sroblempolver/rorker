@@ -1,6 +1,6 @@
 "use client";
 // Photos: every photo on every job in one place, newest first, grouped by day. It sits in the top bar
-// next to Jobs, Money, Shopping and Team. Each photo says which job and room it's in (and the thing in
+// between Shopping and Team. Each photo says which job and room it's in (and the thing in
 // the room), the stage, who added it and when, and whether the client sees it. Filter by job, then by
 // room, stage, person or where it came from (added here, on a pin, in the client thread). Tap one to see
 // it big; "Show on the map" opens its job at its spot.
