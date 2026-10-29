@@ -1,81 +1,39 @@
 "use client";
-// The Cabinets tool's side panel (kept simple, like KCD): pick a cabinet by its code and click near a
-// wall, or fill a whole wall in one click. Below it the cabinet list for the floor (codes, counts, trim
+// The Cabinets tool's side panel (kept simple, like KCD): fill a whole wall in one click, or jump to the
+// catalogue for one cabinet at a time. Below it the cabinet list for the floor (codes, counts, trim
 // and countertop). CabinetEdit is the panel for a picked cabinet: code, family, fronts, hinge, its exact
 // width, height and depth in feet and inches, and trim. Sizes start at the company's standards.
-import { useState } from "react";
 import type { SketchFixture, SketchFloor } from "@/lib/plan/sketch";
 import { FAMILIES, FRONTS, bottomFor, cabCode, cabinetList, defaultConfig, defaults, famOf, frontsOf, isStock, newSpec, snapWidth, type CabFamily } from "@/lib/plan/cabinets";
-import { PANEL_GROUPS, plainOf, resized, type CabPick } from "@/lib/plan/cabinetLayout";
+import { resized, type CabPick } from "@/lib/plan/cabinetLayout";
 import { INCH, fmtLen, parseLength, roundLen, type Units } from "@/lib/plan/units";
 import { std, useStandards } from "@/lib/plan/standards";
 
 const two = (n: number) => `${n < 10 ? "0" : ""}${n}`.replace(".75", "¾");
 const chip = (on: boolean) => `chip !h-7 ${on ? "!text-accent !border-accent" : ""}`;
 
-export function CabinetPanel({ pick, onPick, floor, units }: { pick: CabPick; onPick: (p: CabPick) => void; floor: SketchFloor; units: Units }) {
+export function CabinetPanel({ pick, onPick, floor, units, onCatalog }: { pick: CabPick; onPick: (p: CabPick) => void; floor: SketchFloor; units: Units; onCatalog: (at: string) => void }) {
   useStandards();
-  const [group, setGroup] = useState(() => PANEL_GROUPS.find((g) => g.items.some((i) => i.id === pick.item))?.group ?? "Base");
-  const g = PANEL_GROUPS.find((x) => x.group === group) ?? PANEL_GROUPS[0];
-  const plain = plainOf(pick.item);
-  const F = plain ? null : famOf(pick.item);
-  const set = (ch: Partial<CabPick>) => onPick({ ...pick, ...ch });
-  const choose = (id: string) => onPick({ ...pick, item: id, w: undefined, h: undefined, config: undefined, mode: "place" });
-  const def = F ? defaults(F.id) : null;
-  const w = pick.w ?? (plain ? plain.size().w : def!.w), h = pick.h ?? def?.h ?? 0;
-  const spec = F ? { ...newSpec(F.id, w), config: pick.config ?? defaultConfig(F.id, w) } : null;
-  const single = spec && F && frontsOf({ ...spec, hinge: "L" }, w, h).filter((x) => x.t === "door" || x.t === "glass" || x.t === "mirror" || x.t === "blind").length === 1;
+  const set = (ch: Partial<CabPick>) => onPick({ ...pick, ...ch, mode: "fill" });
   const list = cabinetList(floor.fixtures ?? []);
   return (
     <div className="space-y-3">
-      <div className="flex gap-1.5">
-        <button className={`btn btn-sm flex-1 ${pick.mode === "place" ? "btn-primary" : "btn-ghost"}`} onClick={() => set({ mode: "place" })}>Put one in</button>
-        <button className={`btn btn-sm flex-1 ${pick.mode === "fill" ? "btn-primary" : "btn-ghost"}`} onClick={() => set({ mode: "fill" })}>Fill a wall</button>
+      <div className="space-y-2">
+        <p className="eyebrow">Fill a wall</p>
+        <p className="leading-snug">Click near a wall of the kitchen. It fills the wall from corner to corner with stock cabinets, leaves doors, windows and appliances clear, puts a sink base under the window and fillers at the walls.</p>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={pick.fillBase} onChange={(e) => set({ fillBase: e.target.checked })} /> Base cabinets</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={pick.fillWall} onChange={(e) => set({ fillWall: e.target.checked })} /> Wall cabinets above (none over a window or the range)</label>
+        <p className="text-muted text-[12.5px] leading-snug">Put the range, dishwasher and fridge in first, and the fill works around them. Filling again replaces that wall&apos;s base and wall cabinets.</p>
       </div>
-      {pick.mode === "fill" ? (
-        <div className="space-y-2">
-          <p className="leading-snug">Click near a wall of the kitchen. It fills the wall from corner to corner with stock cabinets, leaves doors, windows and appliances clear, puts a sink base under the window and fillers at the walls.</p>
-          <label className="flex items-center gap-2"><input type="checkbox" checked={pick.fillBase} onChange={(e) => set({ fillBase: e.target.checked })} /> Base cabinets</label>
-          <label className="flex items-center gap-2"><input type="checkbox" checked={pick.fillWall} onChange={(e) => set({ fillWall: e.target.checked })} /> Wall cabinets above (none over a window or the range)</label>
-          <p className="text-muted text-[12.5px] leading-snug">Put the range, dishwasher and fridge in first (Appliances), and the fill works around them. Filling again replaces that wall&apos;s base and wall cabinets.</p>
+      <div className="space-y-1.5 pt-2 border-t border-line">
+        <p className="eyebrow pt-1">One at a time</p>
+        <p className="text-muted text-[12.5px] leading-snug">Every stock cabinet, appliance and filler is in Furniture, by its code. Pick one and click near a wall.</p>
+        <div className="flex flex-wrap gap-1">
+          {([["kitchen/base", "Base"], ["kitchen/wall", "Wall"], ["kitchen/tall", "Tall"], ["kitchen/appliances", "Appliances"], ["kitchen/trim", "Fillers and trim"], ["bath/vanities", "Vanities"]] as const).map(([at, label]) => (
+            <button key={at} className="chip !h-7" onClick={() => onCatalog(at)}>{label}</button>
+          ))}
         </div>
-      ) : (
-        <div className="space-y-2">
-          <div className="flex flex-wrap gap-1">{PANEL_GROUPS.map((x) => <button key={x.group} className={chip(group === x.group)} onClick={() => { setGroup(x.group); choose(x.items[0].id); }}>{x.group}</button>)}</div>
-          <div className="flex flex-wrap gap-1">{g.items.map((it) => <button key={it.id} className={chip(pick.item === it.id)} onClick={() => choose(it.id)}>{it.label}</button>)}</div>
-          {F && F.widths.length > 1 && (
-            <div>
-              <p className="label !mb-1">Width</p>
-              <div className="flex flex-wrap gap-1">{F.widths.map((x) => {
-                const mm = x * INCH;
-                return <button key={x} className={`${chip(Math.abs(mm - w) < 2)} font-mono`} onClick={() => set({ w: mm, config: undefined })}>{cabCode({ ...spec!, config: pick.config ?? defaultConfig(F.id, mm) }, mm, def!.d, h)}</button>;
-              })}</div>
-            </div>
-          )}
-          {F?.heights && F.heights.length > 1 && (
-            <div>
-              <p className="label !mb-1">Height</p>
-              <div className="flex flex-wrap gap-1">{F.heights.map((x) => <button key={x} className={chip(Math.abs(x * INCH - h) < 2)} onClick={() => set({ h: x * INCH })}>{x}&quot;</button>)}</div>
-            </div>
-          )}
-          {plain && plain.widths.length > 1 && (
-            <div className="flex flex-wrap gap-1">{plain.widths.map((x) => <button key={x} className={chip(Math.abs(x * INCH - w) < 2)} onClick={() => set({ w: x * INCH })}>{x}&quot;</button>)}</div>
-          )}
-          {F && F.configs.length > 1 && (
-            <select className="input !h-9" aria-label="Doors and drawers" value={spec!.config} onChange={(e) => set({ config: e.target.value })}>
-              {F.configs.map((c) => <option key={c} value={c}>{FRONTS[c]}</option>)}
-            </select>
-          )}
-          {single && (
-            <div className="flex items-center gap-1.5"><span className="text-muted">{F!.id.includes("blind") ? "Blind side" : "Hinge"}</span>
-              {(["L", "R"] as const).map((s) => <button key={s} className={chip((pick.hinge ?? "L") === s)} onClick={() => set({ hinge: s })}>{s === "L" ? "Left" : "Right"}</button>)}</div>
-          )}
-          <p className="text-muted text-[12.5px] leading-snug">
-            {F ? `${fmtLen(w, units)} wide, ${fmtLen(def!.d, units)} deep, ${fmtLen(h, units)} high${F.zone === "wall" ? `, bottom ${fmtLen(bottomFor(F.id, h), units)} off the floor` : ""}. ` : `${fmtLen(w, units)} wide. `}
-            Click near a wall: it backs onto the wall and lines up with the cabinets beside it. Pick it after to type an exact size.
-          </p>
-        </div>
-      )}
+      </div>
       {list.items.length > 0 && (
         <div className="pt-2 border-t border-line space-y-1">
           <p className="eyebrow pt-1">Cabinet list</p>

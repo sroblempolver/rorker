@@ -10,11 +10,8 @@ import { CATALOG, bottomOf, topOf } from "./catalog";
 import { RULES } from "./rules";
 import { std } from "./standards";
 import { INCH, fmtLen } from "./units";
-import { addTrayGroup } from "./tray";
-import { FAMILIES, bottomFor, cabCode, defaultConfig, defaults, famOf, newSpec, wallTop, type CabFamily, type CabSpec } from "./cabinets";
+import { bottomFor, cabCode, defaultConfig, defaults, famOf, newSpec, wallTop, type CabFamily, type CabSpec } from "./cabinets";
 
-// wall thicknesses the plan is built with (sketch.ts): the room outline runs down the middle of each wall
-const EXT_T = 250, INT_T = 120;
 
 /** Things that aren't cabinets but go in a cabinet run or a bathroom, at US sizes from the standards. */
 export interface PlainItem { id: string; label: string; kind: string; group: "Appliances" | "Bath"; widths: number[]; size: () => { w: number; d: number; h: number; z: number } }
@@ -30,10 +27,10 @@ export const PLAIN: PlainItem[] = [
 ];
 export const plainOf = (id: string) => PLAIN.find((p) => p.id === id) ?? null;
 
-/** What the Cabinets tool puts down next: a cabinet family (or an appliance / bath fixture) at a width,
- *  or, in fill mode, a whole wall. */
-export interface CabPick { item: string; w?: number; h?: number; config?: string; hinge?: "L" | "R"; mode: "place" | "fill"; fillBase: boolean; fillWall: boolean }
-export const DEFAULT_PICK: CabPick = { item: "base", mode: "place", fillBase: true, fillWall: true };
+/** What a click puts down: a cabinet family (or an appliance / bath fixture) at a size picked in the
+ *  catalogue tray, or, with the Cabinets tool, a whole wall filled. */
+export interface CabPick { item: string; w?: number; d?: number; h?: number; config?: string; hinge?: "L" | "R"; mode: "place" | "fill"; fillBase: boolean; fillWall: boolean }
+export const DEFAULT_PICK: CabPick = { item: "base", mode: "fill", fillBase: true, fillWall: true };
 
 /** One wall of a room seen from inside: x runs left to right along the room outline's edge (as in the
  *  wall view), the run between the inside corners is [s0, s1], and the inside face is `t/2` in from it. */
@@ -42,10 +39,15 @@ export interface Face { ri: number; edge: number; A: Pt; u: Pt; n: Pt; L: number
 const dot = (a: Pt, b: Pt) => a[0] * b[0] + a[1] * b[1];
 const sub = (a: Pt, b: Pt): Pt => [a[0] - b[0], a[1] - b[1]];
 
-/** How thick the wall along a room's edge is: outside walls are thicker. */
+/** How thick the wall along a room's edge is, as the plan builds it (sketch.ts): a wall piece drawn on
+ *  that line sets its own thickness, else the company's inside or outside wall. The room outline runs
+ *  down the middle of each wall. */
 function thick(f: SketchFloor, ri: number, s: Seg): number {
   const mid: Pt = [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2];
-  return outsidePieces(f, ri).some((o) => sameLine(o, s) && Math.min(o[0][0], o[1][0]) - 1 <= mid[0] && mid[0] <= Math.max(o[0][0], o[1][0]) + 1 && Math.min(o[0][1], o[1][1]) - 1 <= mid[1] && mid[1] <= Math.max(o[0][1], o[1][1]) + 1) ? EXT_T : INT_T;
+  const within = (o: Seg) => Math.min(o[0][0], o[1][0]) - 1 <= mid[0] && mid[0] <= Math.max(o[0][0], o[1][0]) + 1 && Math.min(o[0][1], o[1][1]) - 1 <= mid[1] && mid[1] <= Math.max(o[0][1], o[1][1]) + 1;
+  const piece = (f.walls ?? []).find((w) => w.thickness_mm && sameLine([w.a, w.b], s) && within([w.a, w.b]));
+  if (piece) return piece.thickness_mm!;
+  return outsidePieces(f, ri).some((o) => sameLine(o, s) && within(o)) ? std("wall.exterior") : std("wall.interior");
 }
 
 /** A room's wall as seen standing in the room, with its inside corners. Null for a slanted wall. */
@@ -163,7 +165,7 @@ export function pickSize(pick: CabPick) {
   const plain = plainOf(pick.item);
   if (plain) {
     const s = plain.size();
-    return { size: { ...s, w: pick.w ?? s.w }, kind: plain.kind, name: plain.label, cab: undefined as CabSpec | undefined };
+    return { size: { ...s, w: pick.w ?? s.w, d: pick.d ?? s.d, h: pick.h ?? s.h }, kind: plain.kind, name: plain.label, cab: undefined as CabSpec | undefined };
   }
   const fam = pick.item as CabFamily, F = famOf(fam), def = defaults(fam);
   const w = pick.w ?? def.w, h = pick.h ?? def.h;
@@ -349,23 +351,3 @@ export function fillWall(f: SketchFloor, ri: number, edge: number, opt: { base: 
 }
 
 /** Families and plain items in the order the Cabinets panel shows them. */
-export const PANEL_GROUPS: { group: string; items: { id: string; label: string }[] }[] = [
-  ...(["Base", "Wall", "Tall", "Corners", "Fillers and panels"] as const).map((g) => ({ group: g, items: FAMILIES.filter((x) => x.group === g).map((x) => ({ id: x.id as string, label: x.label })) })),
-  { group: "Appliances", items: PLAIN.filter((p) => p.group === "Appliances").map((p) => ({ id: p.id, label: p.label })) },
-  { group: "Bath", items: [...FAMILIES.filter((x) => x.group === "Bath").map((x) => ({ id: x.id as string, label: x.label })), ...PLAIN.filter((p) => p.group === "Bath").map((p) => ({ id: p.id, label: p.label }))] },
-];
-
-// the tray's Cabinets tab: every stock cabinet by its code (fillers and panels are in the Cabinets tool)
-const TRAY_FAMS: CabFamily[] = ["base", "drawer", "sink", "blind", "susan", "wall", "fridge_wall", "wall_end", "wall_corner", "wall_blind", "tall", "oven", "vanity", "vanity_drawer", "linen", "medicine"];
-addTrayGroup({
-  id: "cabinets", label: "Cabinets", by: "kind",
-  items: TRAY_FAMS.flatMap((fam) => {
-    const F = famOf(fam), d = defaults(fam);
-    // wall cabinets at their usual heights, the rest at the one they come in
-    const hs = fam === "wall" ? [30, 36, 42] : fam === "fridge_wall" ? [12, 15] : [d.h / INCH];
-    return hs.flatMap((hIn) => F.widths.map((wIn) => {
-      const w = wIn * INCH, h = hIn * INCH, cab = { ...newSpec(fam, w), config: defaultConfig(fam, w) };
-      return { kind: F.kind, label: `${cabCode(cab, w, d.d, h)} ${F.label.toLowerCase()}`, w, ...(F.heights ? { h } : {}), cab };
-    }));
-  }),
-});

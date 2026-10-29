@@ -26,7 +26,7 @@ import { std, useStandards } from "@/lib/plan/standards";
 import { halfSize, moveRoom, outward, pushWall, turnRoom, turnSide } from "@/lib/plan/roomEdit";
 import { cleanOutline, cornerAt, nextCorner } from "@/lib/plan/corners";
 import { tabForRoom, type TrayItem } from "@/lib/plan/tray";
-import { CatalogTray } from "./CatalogTray";
+import { CatalogTray, openTrayAt } from "./CatalogTray";
 import { StairHole, StairPanel, StairSymbol, onStair } from "./StairPlan";
 import { ChecksPanel, NUDGE_COLOR } from "./ChecksPanel";
 import { floorBelow, floorRise, newStair, stairGeom } from "@/lib/plan/stairs";
@@ -76,7 +76,7 @@ const TOOLS: { id: Tool; label: string; key: string; help: string; menu?: boolea
   { id: "window", label: "Window", key: "w", menu: true, help: "Click an outside wall of a room to add a window there. Click again for another." },
   { id: "balcony", label: "Balcony", key: "b", menu: true, help: "Click an outside wall of a room. Upstairs that adds a balcony with a patio door onto it; on the ground floor, a patio door out to the garden." },
   { id: "thing", label: "Furniture", key: "f", help: "Cabinets, sinks, toilets, beds, appliances. Pick one in the tray under the plan, then click where it goes. Near a wall it backs onto the wall and faces the room. Shift-click to keep placing the same thing." },
-  { id: "cabinet", label: "Cabinets", key: "j", help: "Kitchen and bath cabinets at stock sizes (B18, W3030, SB36, vanities). Pick one and click near a wall, or fill a whole wall in one click." },
+  { id: "cabinet", label: "Cabinets", key: "j", help: "Fill a kitchen wall with stock cabinets in one click, and the cabinet list. Single cabinets are in Furniture, Kitchen and Bath." },
   { id: "corners", label: "Corners", key: "c", more: true, help: "Click each corner of the room in turn. Walls turn in steady steps and lock onto other rooms' corners and walls. Type a length (like 12'6) and press Enter to make the wall that long. Click the first corner or double-click to make the room; Enter or Esc leaves the walls drawn so far as walls. Backspace takes back a corner." },
   { id: "eyedrop", label: "Copy", key: "i", more: true, help: "Click a piece of furniture to pick up another one just like it, same size, then click where it goes. Or click a room to copy its kind (kitchen, bedroom), or a wall to copy its thickness and height, then click the rooms or walls that should be the same." },
   { id: "remove", label: "Remove", key: "x", more: true, help: "Click a room, wall, door, window or piece of furniture to take it out. Undo brings it back." },
@@ -822,9 +822,9 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           setNote(`Copied ${label(r.type ?? "other").toLowerCase()}. Now click the rooms that should be the same.`);
         }
       } else setNote("Click a piece of furniture or a room to copy it.");
-    } else if (tool === "thing" && thing.cab) {
-      // a stock cabinet from the tray goes in like one from the Cabinets tool: onto the wall, beside its neighbours
-      const r = cabinetClick(floor, p, { item: thing.cab.fam, w: thing.w, h: thing.h, config: thing.cab.config, hinge: thing.cab.hinge, mode: "place", fillBase: false, fillWall: false });
+    } else if (tool === "thing" && (thing.cab || thing.run)) {
+      // a stock cabinet (or a range, toilet, tub) from the tray goes onto the nearest wall, beside its neighbours
+      const r = cabinetClick(floor, p, { item: thing.cab?.fam ?? thing.run!, w: thing.w, d: thing.run ? thing.d : undefined, h: thing.h, config: thing.cab?.config, hinge: thing.cab?.hinge, mode: "place", fillBase: false, fillWall: false });
       if (r.note) setNote(r.note);
       if (r.floor) { setFloor(r.floor); setSel(r.sel != null ? { t: "thing", i: r.sel } : null); if (!e.shiftKey) setTool("select"); }
     } else if (tool === "thing") {
@@ -1133,7 +1133,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           <p className="text-muted leading-snug">{TOOLS.find((t) => t.id === tool)?.help}</p>
           {note && <p className="text-amber">{note}</p>}
 
-          {tool === "cabinet" && !fix && <CabinetPanel pick={cabPick} onPick={setCabPick} floor={floor} units={lu} />}
+          {tool === "cabinet" && !fix && <CabinetPanel pick={cabPick} onPick={setCabPick} floor={floor} units={lu} onCatalog={(at) => { openTrayAt(at); setTool("thing"); }} />}
           {tool === "thing" && (
             <p><span className="text-muted">Placing </span><span className="text-accent">{thing.label ?? CATALOG[thing.kind]?.label ?? thing.kind}</span>
               <span className="text-muted">, {fmtLen(thing.w ?? CATALOG[thing.kind]?.w ?? 600, lu)} × {fmtLen(thing.d ?? CATALOG[thing.kind]?.d ?? 600, lu)}</span></p>
