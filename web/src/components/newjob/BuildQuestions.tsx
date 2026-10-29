@@ -50,7 +50,7 @@ export function BuildQuestions({ spec, onSpec, onDone, intro }: {
         <span className="text-[12px] text-muted">{q ? `Question ${asked.length + 1} of ${all.length}` : `${asked.length} answers`}</span>
         {canSpeak() && (
           <button onClick={() => { if (aloud) stopSpeaking(); else if (q) speak(q.ask); setAloud(!aloud); }} aria-pressed={aloud} title={aloud ? "Stop reading the questions out loud" : "Read the questions out loud"}
-            className={`ml-auto h-7 px-2 rounded-[3px] border text-[12px] ${aloud ? "border-accent text-accent" : "border-line text-muted hover:text-text"}`}>{aloud ? "🔊 On" : "🔈 Read aloud"}</button>
+            className={`ml-auto h-7 px-2 rounded-[3px] border text-[12px] whitespace-nowrap ${aloud ? "border-accent text-accent" : "border-line text-muted hover:text-text"}`}>{aloud ? "🔊 On" : "🔈 Read aloud"}</button>
         )}
       </div>
       <div className="flex gap-1" aria-hidden>
@@ -71,7 +71,7 @@ export function BuildQuestions({ spec, onSpec, onDone, intro }: {
           {said && <p className="text-[13px] text-accent">{said}</p>}
           <p className="text-[16px] font-medium leading-snug">{q.ask}</p>
           <p className="text-[12.5px] text-muted">{q.why}</p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-1.5">
             {q.options.map((o) => (
               <button key={o.id} onClick={() => answer(q.id, o.id)} className="text-left px-2.5 py-2 rounded-[4px] border border-line hover:border-accent hover:bg-panel-2 flex items-start gap-2">
                 {o.surface && <Swatch s={o.surface} />}

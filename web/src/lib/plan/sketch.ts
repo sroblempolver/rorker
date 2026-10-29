@@ -416,6 +416,7 @@ export function planFromSketch(sk: Sketch, src: SketchSource): { plan: Plan; not
     floors, questions, flags: notes.map((m) => ({ code: "sketch", message: m, element_ids: [], severity: "info" })),
     source: { kind: src.kind, filename: src.filename, pipeline_version: "sketch-0.1", model: null, ai_used: true },
     stats: { mode: "assistant" },
+    sketch: sk,
   };
   return { plan, notes };
 }

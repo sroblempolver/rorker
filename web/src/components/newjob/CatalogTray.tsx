@@ -16,6 +16,8 @@ import { fmtLen, type Units } from "@/lib/plan/units";
 let last: string | null = null;
 /** Open the tray at a top or a section next time it shows: "kitchen", "kitchen/wall". */
 export function openTrayAt(path: string) { last = path; }
+/** what a card dragged out of the tray carries, so the plan and the wall view know it is one of ours */
+export const TRAY_DRAG = "application/x-rorker-item";
 
 /** Whether a thing is drawn from the front (cabinets, appliances, bath fixtures) or from above. */
 const ELEV = new Set(["range", "fridge", "dishwasher", "range_hood", "toilet", "bathtub", "shower", "kitchen_sink", "washbasin", "wall_oven", "oven", "wine_cooler", "washing_machine", "dryer"]);
@@ -92,7 +94,7 @@ function Card({ it, k, on, units, where, onPick }: { it: TrayItem; k: number; on
   const [W, H] = dims(it);
   const size = `${fmtLen(W, units)} × ${fmtLen(H, units)}`;
   return (
-    <button onClick={onPick} title={`${it.code ? `${it.code}, ` : ""}${itemLabel(it)}: ${fmtLen(W, units)} wide, ${fmtLen(it.d ?? CATALOG[it.kind]?.d ?? 600, units)} deep${it.h ? `, ${fmtLen(it.h, units)} high` : ""}`}
+    <button onClick={onPick} draggable onDragStart={(e) => { onPick(); e.dataTransfer.setData(TRAY_DRAG, "1"); e.dataTransfer.effectAllowed = "copy"; }} title={`${it.code ? `${it.code}, ` : ""}${itemLabel(it)}: ${fmtLen(W, units)} wide, ${fmtLen(it.d ?? CATALOG[it.kind]?.d ?? 600, units)} deep${it.h ? `, ${fmtLen(it.h, units)} high` : ""}`}
       className={`flex flex-col items-center gap-0.5 rounded-[3px] border px-1 pt-1.5 pb-1 text-center ${on ? "border-accent bg-panel-2 text-accent" : "border-line text-muted hover:border-muted hover:text-text"}`}>
       <Drawing it={it} k={k} bw={76} bh={52} />
       {it.code && <span className={`font-mono text-[12.5px] leading-tight ${on ? "text-accent" : "text-text"}`}>{it.code}</span>}

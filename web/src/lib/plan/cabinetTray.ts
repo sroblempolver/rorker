@@ -61,7 +61,8 @@ addTraySection("kitchen", { id: "tall", label: "Tall and pantry", note: "24\" de
 ] });
 addTraySection("kitchen", { id: "appliances", label: "Appliances", note: "These go in the run like a cabinet: back to the wall, beside their neighbours.", items: () => [
   run("range", 30, undefined, "Range", "Cooking"), run("range", 36, undefined, "Range"), run("range_hood", 30, undefined, "Range hood"), run("range_hood", 36, undefined, "Range hood"),
-  ...kinds("cooktop oven wall_oven microwave"),
+  run("cooktop_base", 30, undefined, "Cooktop"), run("cooktop_base", 36, undefined, "Cooktop"), run("oven_base", 30, undefined, "Oven under the counter"),
+  ...kinds("wall_oven microwave"),
   run("fridge", 30, undefined, "Fridge", "Cold"), run("fridge", 33, undefined, "Fridge"), run("fridge", 36, undefined, "Fridge"),
   ...kinds("wine_cooler chest_freezer"),
   run("dishwasher", 18, undefined, "Dishwasher", "Cleaning"), run("dishwasher", 24, undefined, "Dishwasher"),
