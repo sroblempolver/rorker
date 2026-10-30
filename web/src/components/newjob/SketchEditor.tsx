@@ -22,7 +22,7 @@ import { StandardsPanel } from "./StandardsPanel";
 import { CabinetEdit, CabinetPanel } from "./CabinetPanel";
 import { DEFAULT_PICK, addHood, cabinetClick, faceOf, fitOnFace, fixtureAt, placeOnFace, slideCabinet, type CabPick, type FitAsk } from "@/lib/plan/cabinetLayout";
 import { plumbingPoints } from "@/lib/plan/plumbing";
-import { cabCode, defaults } from "@/lib/plan/cabinets";
+import { cabCode, defaults, famOf, handlesLow, hasDoors, toeOf } from "@/lib/plan/cabinets";
 import { Live3D, type Walls } from "./Live3D";
 import { RoofPanel } from "./RoofPanel";
 import { std, useStandards } from "@/lib/plan/standards";
@@ -76,8 +76,8 @@ const ANGLE_OF: Record<Side, number> = { east: 0, south: 90, west: 180, north: -
 function roomOfThing(f: SketchFloor, x: { room?: string; center: Pt }) {
   return (x.room ?? f.rooms.find((r) => pointInPoly(x.center, r.polygon))?.name ?? "").toLowerCase() || null;
 }
-type Tool = "select" | "room" | "pen" | "corners" | "split" | "door" | "window" | "balcony" | "thing" | "cabinet" | "eyedrop" | "remove" | "scale" | "match" | "picture" | "stairs";
-const TOOLS: { id: Tool; label: string; key: string; help: string; menu?: boolean; picture?: boolean; more?: boolean }[] = [
+type Tool = "select" | "room" | "pen" | "corners" | "split" | "door" | "window" | "balcony" | "thing" | "cabinet" | "handles" | "eyedrop" | "remove" | "scale" | "match" | "picture" | "stairs";
+const TOOLS: { id: Tool; label: string; key: string; help: string; menu?: boolean; picture?: boolean; more?: boolean; kitchen?: boolean }[] = [
   { id: "select", label: "Select", key: "v", help: "Click a room, wall, door, window or piece of furniture to change it. Drag a room to move it with everything in it, a corner to reshape it, or an arrow on a wall to push or pull that wall (the room next door and the furniture against it follow). Right-click a room's wall to separate its walls into pieces. Q turns the picked room or thing a quarter turn (Shift+Q the other way). Click a wall of the picked room to see it from the side. Arrow keys nudge. Drag empty space to look around, scroll to zoom." },
   { id: "pen", label: "Walls", key: "e", help: "Draw walls with the mouse or your finger. Every line is a wall; draw all the way round and it's a room. Wobbly lines come out straight and nearly square corners come out square; a wall drawn on a slant keeps its slant. Wall ends snap onto other walls, and walls that close a loop make a room. Then type the exact sizes." },
   { id: "stairs", label: "Stairs", key: "t", help: "Click where the stairs start and drag the way they go up. The steps come from the floor height and your standards; pick the stairs to make them an L or a U, wider, or turn them. The floor above gets the opening." },
@@ -86,7 +86,8 @@ const TOOLS: { id: Tool; label: string; key: string; help: string; menu?: boolea
   { id: "window", label: "Window", key: "w", menu: true, help: "Click an outside wall of a room to add a window there, or a wall standing on its own. Click again for another." },
   { id: "balcony", label: "Balcony", key: "b", menu: true, help: "Click an outside wall of a room. Upstairs that adds a balcony with a patio door onto it; on the ground floor, a patio door out to the garden." },
   { id: "thing", label: "Furniture", key: "f", help: "Cabinets, sinks, toilets, beds, appliances. Pick one in the tray under the plan, then click where it goes. Near a wall it backs onto the wall and faces the room. Shift-click to keep placing the same thing." },
-  { id: "cabinet", label: "Cabinets", key: "j", help: "Fill a kitchen wall with stock cabinets in one click, and the cabinet list. Single cabinets are in Furniture, Kitchen and Bath." },
+  { id: "handles", label: "Handles", key: "h", kitchen: true, help: "Click a cabinet to move its door handles to the lower or the higher part of the door. Or set every cabinet on this floor at once." },
+  { id: "cabinet", label: "Cabinets", key: "j", kitchen: true, help: "Fill a kitchen wall with stock cabinets in one click, and the cabinet list. Single cabinets are in Furniture, Kitchen and Bath." },
   { id: "corners", label: "Corners", key: "c", more: true, help: "Click each corner of the room in turn. Walls turn in steady steps and lock onto other rooms' corners and walls. Type a length (like 12'6) and press Enter to make the wall that long. Click the first corner or double-click to make the room; Enter or Esc leaves the walls drawn so far as walls. Backspace takes back a corner." },
   { id: "eyedrop", label: "Copy", key: "i", more: true, help: "Click a piece of furniture to pick up another one just like it, same size, then click where it goes. Or click a room to copy its kind (kitchen, bedroom), or a wall to copy its thickness and height, then click the rooms or walls that should be the same." },
   { id: "remove", label: "Remove", key: "x", more: true, help: "Click a room, wall, door, window or piece of furniture to take it out. Undo brings it back." },
@@ -913,6 +914,14 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     } else if (tool === "thing") {
       // Shift-click keeps placing the same thing; a plain click puts it down and picks it to adjust
       if (placeThing(p) && !e.shiftKey) setTool("select");
+    } else if (tool === "handles") {
+      // a click on a cabinet moves its door handles to the other end of the door
+      const ti = thingAt(p), f = ti >= 0 ? floor.fixtures![ti] : null;
+      if (!f?.cab || !hasDoors(f.cab, f.width_mm ?? 600, (f.height_mm ?? defaults(f.cab.fam).h) - toeOf(f.cab))) { setNote("Click a cabinet with doors."); return; }
+      const next = handlesLow(f.cab) ? "high" : "low";
+      setFloor({ ...floor, fixtures: floor.fixtures!.map((x, i) => (i === ti ? { ...x, cab: { ...x.cab!, handles: next } } : x)) });
+      setSel({ t: "thing", i: ti });
+      setNote(`Handles on the ${next === "low" ? "lower" : "higher"} part now. Click it again to move them back.`);
     } else if (tool === "cabinet") {
       // a click on a cabinet picks it; anywhere else puts one in
       const ti = thingAt(p);
@@ -981,9 +990,18 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       )}
       {sg.banner}
       <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b border-line bg-panel">
-        {toolOrder(trade, TOOLS).filter((t) => !t.menu && !t.more).flatMap((t) => [
+        {toolOrder(trade, TOOLS).filter((t) => !t.menu && !t.more && !t.kitchen).flatMap((t) => [
           <button key={t.id} onClick={() => pickTool(t.id)} title={`${t.label} (${t.key.toUpperCase()})`}
             className={`btn btn-sm ${tool === t.id ? "btn-primary" : "btn-ghost"}`}>{t.label}</button>,
+          // the kitchen's tools in one menu, after Furniture: cabinets and their handles
+          ...(t.id === "thing" ? [
+            <select key="kitchen" aria-label="Kitchen" title="Cabinets and handles"
+              className={`btn btn-sm !pr-2 ${TOOLS.find((x) => x.id === tool)?.kitchen ? "btn-primary" : "btn-ghost"}`}
+              value={TOOLS.find((x) => x.id === tool)?.kitchen ? tool : ""} onChange={(e) => pickTool(e.target.value as Tool)}>
+              <option value="" disabled>Kitchen</option>
+              {TOOLS.filter((x) => x.kitchen).sort((a, b) => (a.id === "cabinet" ? -1 : b.id === "cabinet" ? 1 : 0)).map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+            </select>,
+          ] : []),
           // doors, windows and balconies in one menu, after Split room
           ...(t.id === "pen" ? [
             <select key="openings" aria-label="Doors and windows" title="Pick one, then click a wall"
@@ -1242,6 +1260,16 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             </div>
           )}
 
+          {tool === "handles" && !fix && (floor.fixtures ?? []).some((f) => f.cab) && (
+            <div className="space-y-1.5">
+              <p className="eyebrow">Handles on every cabinet on this floor</p>
+              <div className="flex flex-wrap gap-1.5">
+                {([["low", "low", "All on the lower part"], ["high", "high", "All on the higher part"], ["high", "low", "Base high, wall low"]] as const).map(([base, wall, label]) => (
+                  <button key={label} className="btn btn-sm" onClick={() => { setFloor({ ...floor, fixtures: floor.fixtures!.map((f) => (f.cab ? { ...f, cab: { ...f.cab, handles: famOf(f.cab.fam).zone === "wall" ? wall : base } } : f)) }); setNote("Done. Click a cabinet to change just that one."); }}>{label}</button>
+                ))}
+              </div>
+            </div>
+          )}
           {tool === "cabinet" && !fix && <CabinetPanel pick={cabPick} onPick={setCabPick} floor={floor} units={lu} onCatalog={(at) => { openTrayAt(at); setTool("thing"); }} />}
           {tool === "thing" && (
             <p><span className="text-muted">Placing </span><span className="text-accent">{thing.label ?? CATALOG[thing.kind]?.label ?? thing.kind}</span>
