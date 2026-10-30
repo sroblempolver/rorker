@@ -112,11 +112,13 @@ async function drawings(page: Page): Promise<Box[]> {
 }
 
 /** How to cut a drawing into close-ups: along a long thin one, 2 x 2 otherwise. */
-function tiles(box: Box): Box[] {
+function tiles(box: Box, max = 4): Box[] {
   const [x0, y0, x1, y1] = box, w = x1 - x0, h = y1 - y0;
   const aspect = Math.max(w, h) / Math.min(w, h);
-  const across = aspect > 1.8 ? Math.min(4, Math.ceil(aspect / 1.1)) : 2;
-  const down = aspect > 1.8 ? 1 : 2;
+  let across = aspect > 1.8 ? Math.min(4, Math.ceil(aspect / 1.1)) : 2;
+  let down = aspect > 1.8 ? 1 : 2;
+  // fewer close-ups than that still cover the whole drawing (halves), never just its top part
+  if (across * down > max) { if (max < 2) return []; across = Math.min(across, max); down = 1; }
   const [nx, ny] = w >= h ? [across, down] : [down, across];
   const ox = (w / nx) * 0.08, oy = (h / ny) * 0.08; // a little overlap so nothing is cut on a seam
   const out: Box[] = [];
@@ -232,12 +234,16 @@ export async function readPdf(buf: ArrayBuffer, name: string, budget = MAX_IMAGE
       const share = Math.round((100 * (x1 - x0) * (y1 - y0)) / (full.width * full.height));
       // the room left is shared between this drawing and the ones after it on the sheet
       const room = Math.floor((cap - (out.length - start)) / (boxes.length - k));
-      const cuts = closeUps ? tiles(box).slice(0, Math.max(0, room - 1)) : [];
+      const cuts = closeUps ? tiles(box, room - 1) : [];
       const id = boxes.length > 1 ? `drawing ${k + 1} of the ${boxes.length} on ${where}` : `the drawing on ${where}`;
+      // a sheet with no words to sort its drawings by may hold elevations and sections beside the plans
+      const which = boxes.length > 1 && !text.items.length && k === 0
+        ? `This sheet has ${boxes.length} drawings and no text to tell them apart: look at each one first. A floor plan is seen from above (rooms, walls, doors); an elevation or section is the house seen from the side (roof, ground line, floor heights) and makes no floor, but gives heights. Say in each floor's frame which drawing it came from. `
+        : "";
       const frame = boxes.length > 1 ? `D${n}.${k + 1}` : `D${n}`;
       out.push({
         name: `${name} p${n}${boxes.length > 1 ? ` d${k + 1}` : ""}`, url: picture(view),
-        note: `Overview of ${id} (frame ${frame}): cut out of the sheet (it covers about ${share}% of the sheet) and drawn sharp, ${view.width} x ${view.height} px. `
+        note: `${which}Overview of ${id} (frame ${frame}): cut out of the sheet (it covers about ${share}% of the sheet) and drawn sharp, ${view.width} x ${view.height} px. `
           + `Its pixels are frame ${frame}: x right, y down, top-left is (0, 0).${cuts.length ? ` ${cuts.length} close-ups of it follow; read the details (walls, doors, fixtures, small text) from them.` : ""} `
           + (labels.length ? `Text in the PDF, with where it sits in ${frame} pixels: ${labels.join("; ")}.` : "The PDF has no text here (its words are drawn as lines), so read the words off the pictures."),
       });
@@ -259,8 +265,8 @@ export async function readPdf(buf: ArrayBuffer, name: string, budget = MAX_IMAGE
   for (const [i, p] of planPages.entries()) {
     if (left <= 0) break;
     const later = planPages.length - i - 1;
-    // one plan sheet (often two floors on it) may use most of the room; in a set, five each
-    const cap = Math.max(1, Math.min(planPages.length === 1 ? 12 : 5, left - later));
+    // one plan sheet (often two floors on it, or plans beside elevations) may use all the room; in a set, five each
+    const cap = Math.max(1, Math.min(planPages.length === 1 ? max : 5, left - later));
     const before = out.length;
     await shoot(p.n, cap > 1, cap);
     left -= out.length - before;

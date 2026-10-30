@@ -139,7 +139,17 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
     }
     setStage("review");
   };
-  const pictures = useMemo(() => picturesFrom(prep?.parts ?? []), [prep]);
+  // each floor's picture under it in the drawing tool: the overview the reader says it read that floor
+  // from (a sheet can hold the facade and a section before the plans), in floor order
+  const pictures = useMemo(() => {
+    const all = picturesFrom(prep?.parts ?? []);
+    const frames = (project?.sketch?.floors ?? []).map((f) => (f as { frame?: string }).frame);
+    const noteOf = (name: string) => { const q = prep?.parts.find((x) => x.name === name); return q?.kind === "image" ? q.note ?? "" : ""; };
+    const pick = frames.map((fr) => (fr ? all.find((p) => noteOf(p.name).includes(`(frame ${fr})`)) : undefined));
+    if (!pick.some(Boolean)) return all;
+    const first = pick.map((p, i) => p ?? all[i] ?? all[all.length - 1]);
+    return [...first, ...all.filter((p) => !first.includes(p))];
+  }, [prep, project]);
 
   // copy the list now: the input is cleared right after, which empties it
   const addFiles = (list: FileList | null) => { const got = list ? Array.from(list) : []; if (got.length) setFiles((f) => [...f, ...got].slice(0, 8)); };
