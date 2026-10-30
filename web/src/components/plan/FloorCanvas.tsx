@@ -398,12 +398,12 @@ export function FloorCanvas(props: Props) {
                 </>
               ) : (
                 <>
-                  <path d={pathD(o.polygon)} fill={tint ?? (o.kind === "opening" ? "transparent" : "#3a2c20")} fillOpacity={tint ? 0.7 : o.kind === "opening" ? 0 : 0.55} />
+                  <path d={pathD(o.polygon)} fill={tint ?? (o.kind === "opening" ? "transparent" : "#1a1612")} fillOpacity={tint ? 0.7 : o.kind === "opening" ? 0 : 1} />
                   {o.kind === "opening" && <path d={`M${o.a[0]} ${o.a[1]}L${o.b[0]} ${o.b[1]}`} stroke="#f0ece3" strokeOpacity={0.4} strokeWidth={lw} strokeDasharray={`${5 * lw} ${4 * lw}`} />}
                   {o.kind === "garage_door" && <path d={`M${o.a[0]} ${o.a[1]}L${o.b[0]} ${o.b[1]}`} stroke="#f0ece3" strokeWidth={4 * lw} strokeDasharray={`${12 * lw} ${4 * lw}`} />}
                   {look === "finished" && leafPaths(o).map((p, i) => (
                     <g key={i} pointerEvents="none">
-                      <path d={p.arc} fill="none" stroke={tint ?? "#f0ece3"} strokeOpacity={0.45} strokeWidth={lw} strokeDasharray={`${3 * lw} ${3 * lw}`} />
+                      <path d={p.arc} fill="none" stroke={tint ?? "#f0ece3"} strokeOpacity={0.75} strokeWidth={1.3 * lw} strokeDasharray={`${3 * lw} ${3 * lw}`} />
                       <path d={p.leaf} stroke={tint ?? "#c99a62"} strokeWidth={4 * lw} strokeLinecap="round" />
                     </g>
                   ))}

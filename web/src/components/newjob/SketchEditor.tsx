@@ -1097,7 +1097,13 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
                 <path d={`M0 ${-4 * px} C ${2.6 * px} ${-0.6 * px} ${3 * px} ${1 * px} ${3 * px} ${1.6 * px} A ${3 * px} ${3 * px} 0 0 1 ${-3 * px} ${1.6 * px} C ${-3 * px} ${1 * px} ${-2.6 * px} ${-0.6 * px} 0 ${-4 * px} Z`} fill="#fff" />
               </g>
             ))}
-            {doorSpots.map((s, i) => s && <line key={`d${i}`} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "door" && sel.i === i ? "#fff" : "#ff6a1f"} strokeWidth={7 * px} strokeLinecap="butt" />)}
+            {/* doors: a dark gap right through the wall, with an orange line down the middle (white when picked) */}
+            {doorSpots.map((s, i) => s && (
+              <g key={`d${i}`} style={{ pointerEvents: "none" }}>
+                <line x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke="#1a1612" strokeWidth={Math.max(std("wall.exterior") + 40, 12 * px)} strokeLinecap="butt" />
+                <line x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "door" && sel.i === i ? "#fff" : "#ff6a1f"} strokeWidth={3 * px} strokeLinecap="butt" />
+              </g>
+            ))}
             {winSpots.map((list, i) => list.map((s, k) => <line key={`w${i}-${k}`} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "window" && sel.i === i ? "#fff" : "#8fd3f0"} strokeWidth={6 * px} />))}
             {room && !room.loose && room.polygon.map((q, k) => <rect key={k} x={q[0] - 5 * px} y={q[1] - 5 * px} width={10 * px} height={10 * px} fill="#ff6a1f" stroke="#fff" strokeWidth={px} />)}
             {/* push and pull: an arrow out of the room on each straight wall */}
