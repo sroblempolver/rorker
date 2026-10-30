@@ -21,7 +21,7 @@ export function WallPieces({ floor, on, px, fontMm, units, hot }: { floor: Sketc
         const L = wallLen(w) || 1, u = [(w.b[0] - w.a[0]) / L, (w.b[1] - w.a[1]) / L], t = wallThickness(w, isOutside(floor.rooms, w));
         const seg = (at: number, wd: number) => { const c = L * at, h = Math.min(wd, L) / 2; return [w.a[0] + u[0] * (c - h), w.a[1] + u[1] * (c - h), w.a[0] + u[0] * (c + h), w.a[1] + u[1] * (c + h)]; };
         return [
-          ...(w.doors ?? []).map((d, k) => { const [x1, y1, x2, y2] = seg(d.at, d.width_mm ?? 813); return <g key={`d${i}-${k}`}><line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#2a2723" strokeWidth={t + 2 * px} /><line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#ff6a1f" strokeWidth={2 * px} strokeDasharray={`${6 * px} ${4 * px}`} /></g>; }),
+          ...(w.doors ?? []).map((d, k) => { const [x1, y1, x2, y2] = seg(d.at, d.width_mm ?? 813); return <g key={`d${i}-${k}`}><line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#1a1612" strokeWidth={t + 40} /><line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#ff6a1f" strokeWidth={2 * px} strokeDasharray={`${6 * px} ${4 * px}`} /></g>; }),
           ...(w.windows ?? []).map((d, k) => { const [x1, y1, x2, y2] = seg(d.at, d.width_mm ?? 914); return <line key={`w${i}-${k}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#7cc4ff" strokeWidth={Math.max(t * 0.45, 2 * px)} />; }),
         ];
       })}
