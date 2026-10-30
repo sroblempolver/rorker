@@ -61,27 +61,27 @@ const CAM = [
 const EVENTS = [
   // the Team page: a new sub in a few seconds
   [0.15, "move", T.name, 0.45], [0.62, "click"], [0.7, "type", "Luis Ortega", 0.6],
-  [1.35, "move", T.trade, 0.3], [1.7, "click"], [1.76, "type", "Drywall", 0.35],
+  [1.35, "move", T.trade, 0.3], [1.7, "click"], [1.76, "type", "Plumbing", 0.35],
   [2.1, "move", T.sub, 0.22], [2.34, "click"], [2.38, "move", T.add, 0.2], [2.6, "click"],
-  // cut: the drywall task on the job, and tag them on it
+  // cut: the toilet upstairs on the job, and tag them on it
   [2.76, "cut", async () => {
     await page.evaluate(() => { location.hash = "#/job/hadley"; }); await settle(3000);
-    await page.getByText("Hang drywall, living room").first().click(); await settle(1500);
+    await page.getByText("Set the upstairs toilet").first().click(); await settle(1500);
   }],
   [2.8, "move", T.change, 0.3], [3.12, "click"], [3.16, "move", T.luisChip, 0.25], [3.43, "click"],
   [3.47, "move", T.tagDone, 0.22], [3.71, "click"], [3.75, "move", T.copy, 0.3], [4.07, "click"],
   [4.15, "move", T.seeIt, 0.25], [4.42, "click"],
   // cut: what the sub sees on their link
   [4.56, "cut", async () => { await settle(3500); }],
-  // a look around their 3D: the plan is theirs to see
-  [5.4, "move", [470, 380], 0.6], [6.1, "down"], [6.12, "move", [330, 420], 1.4], [7.6, "up"],
+  // their bathroom in 3D, tipped down to a side view so they see exactly where it is
+  [5.4, "move", [430, 560], 0.6], [6.1, "down"], [6.12, "move", [480, 430], 1.4], [7.6, "up"],
   [8.3, "move", T.addPhoto, 0.6], [9.0, "click"], [9.08, "photo"], [9.4, "move", T.markDone, 0.35], [9.85, "click"],
   // cut: back on your side, the task is done with their photo in it
   [10.36, "cut", async () => {
     await page.getByText("Back to the app").first().click(); await settle(3000);
     await page.locator("button").filter({ hasText: /^Pins/i }).first().click(); await settle(600);
     await page.locator("button").filter({ hasText: /^All$/ }).first().click(); await settle(600);
-    await page.getByText("Hang drywall, living room").first().click(); await settle(1500);
+    await page.getByText("Set the upstairs toilet").first().click(); await settle(1500);
   }],
 ];
 const END = 12.9;
