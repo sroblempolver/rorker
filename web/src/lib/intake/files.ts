@@ -14,7 +14,8 @@ const MAX_PX = 1600, DXF_PX = 2000, MAX_PDF = 9 * 1024 * 1024, MAX_TOTAL = 12 * 
 /** a PDF read here (drawn into pictures) can be a whole drawing set; only one sent as it is must be small */
 const MAX_PDF_READ = 80 * 1024 * 1024;
 /** pictures in one upload, all files together (the assistant reads them sharpest up to 20) */
-const MAX_PICTURES = 20;
+// the assistant has about two and a half minutes to answer; more pictures than this and it runs out of time
+const MAX_PICTURES = 14;
 
 const b64 = (buf: ArrayBuffer) => {
   const bytes = new Uint8Array(buf);

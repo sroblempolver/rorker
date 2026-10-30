@@ -18,7 +18,7 @@ export interface PdfImage { name: string; url: string; note: string; closeUp?: b
 const EDGE = 2400;     // long side of every picture sent (the model reads up to about 2576 px and 3.75 MP)
 const AREA = 3.6e6;
 const SCAN = 1600;     // long side of the quick render used to find the drawing on the page
-const MAX_PAGES = 80, MAX_IMAGES = 20;
+const MAX_PAGES = 80, MAX_IMAGES = 14;
 /** what the assistant reads a note at most (the function cuts each note there) */
 const NOTE_MAX = 19000;
 
