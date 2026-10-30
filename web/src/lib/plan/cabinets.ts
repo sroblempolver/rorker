@@ -73,7 +73,16 @@ export interface CabSpec {
   hinge?: "L" | "R";
   /** countertop on a base cabinet, crown molding and light rail on a wall or tall one */
   counter?: boolean; crown?: boolean; rail?: boolean;
+  /** where the pulls sit on its doors: on the lower part (the usual) or up high */
+  handles?: "high" | "low";
 }
+
+/** Whether a cabinet has doors with pulls on them (so where its handles go matters). */
+export function hasDoors(c: CabSpec, w: number, h: number) {
+  return !c.fam.startsWith("filler") && !c.fam.startsWith("panel") && c.fam !== "valance" && frontsOf(c, w, h).some((f) => f.t === "door" || f.t === "glass");
+}
+/** Whether a cabinet's door pulls sit on the lower part of the door (the usual, unless set high). */
+export function handlesLow(c: CabSpec) { return c.handles !== "high"; }
 
 export interface FamilyDef {
   id: CabFamily; label: string; zone: Zone; group: CabGroup;
@@ -340,8 +349,7 @@ export function cabinetParts(c: CabSpec, w: number, d: number, h: number): Part[
     if (f.t === "drawer") b(x, y + f.h - Math.min(70, f.h / 3), zf + 20, Math.min(160, f.w * 0.4), 20, 12, C3.handle);
     else if (f.t === "door" || f.t === "glass") {
       const hx = f.hinge === "R" ? x - f.w / 2 + 40 : x + f.w / 2 - 40;
-      const up = F.zone === "wall";
-      b(hx, up ? y + 40 : y + f.h - 200, zf + 20, 12, 20, 140, C3.handle);
+      b(hx, handlesLow(c) ? y + 40 : y + f.h - 200, zf + 20, 12, 20, 140, C3.handle);
     }
   }
   if (c.counter) {
