@@ -69,6 +69,7 @@ const TOOLS: Anthropic.Tool[] = [
         }, required: ["name"] } },
         floors: { type: "array", items: { type: "object", properties: {
           name: { type: "string" }, level: { type: "integer", description: "0 ground, 1 first floor up, -1 basement" },
+          frame: { type: "string", description: "For a PDF: the frame of the overview this floor was read from (\"D1.3\"), never an elevation or section" },
           rooms: { type: "array", items: { type: "object", properties: {
             name: { type: "string" },
             type: { type: "string", enum: ["kitchen", "bathroom", "wc", "bedroom", "living", "dining", "family", "study", "office", "hallway", "foyer", "stair_hall", "laundry", "utility", "closet", "garage", "storage", "balcony", "porch", "terrace", "other"] },
@@ -77,11 +78,17 @@ const TOOLS: Anthropic.Tool[] = [
           }, required: ["name", "type", "polygon"] } },
           doors: { type: "array", items: { type: "object", properties: {
             rooms: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 2, description: "The two room names it joins; \"outside\" for an outside door" },
-            kind: { type: "string", enum: ["door", "double_door", "sliding_door", "garage_door", "opening"] }, width_mm: { type: "number" },
+            kind: { type: "string", enum: ["door", "double_door", "sliding_door", "garage_door", "opening"] }, width_mm: { type: "number" }, height_mm: { type: "number", description: "When an elevation or section shows it" },
+            style: { type: "string", description: "What it looks like on the facade, in a few words (\"double front door with arched transom and sidelights\", \"six-panel\")" },
             at: { type: "number", description: "Where along the shared wall, 0 to 1 (0.5 middle)" },
             side: { ...SIDE, description: "For an outside door: which side of the house it's on" },
           }, required: ["rooms"] } },
-          windows: { type: "array", items: { type: "object", properties: { room: { type: "string" }, side: SIDE, width_mm: { type: "number" }, count: { type: "integer" } }, required: ["room", "side"] } },
+          windows: { type: "array", items: { type: "object", properties: {
+            room: { type: "string" }, side: SIDE, width_mm: { type: "number" }, count: { type: "integer" },
+            height_mm: { type: "number", description: "Glass-and-frame height, from an elevation or section" },
+            sill_mm: { type: "number", description: "Bottom of the window above this floor, from an elevation or section" },
+            style: { type: "string", description: "What it looks like on the facade, in a few words (\"double-hung with grilles\", \"arched top\", \"bay\", \"picture\")" },
+          }, required: ["room", "side"] } },
           fixtures: { type: "array", items: { type: "object", properties: {
             kind: { type: "string", enum: FIXTURE_KINDS }, name: { type: "string" }, room: { type: "string" }, center: PT,
             width_mm: { type: "number" }, depth_mm: { type: "number" }, facing: { ...SIDE, description: "The way its front faces (towards the room)" },
@@ -103,10 +110,15 @@ The sketch (only when there's a drawing, plan, sketch or photo of a layout):
 - Coordinates are millimetres, x to the right, y down, north up the page unless the drawing says otherwise. For a DXF picture, use the scale and frame given with it and the text labels' positions. For other pictures, see Scale below.
 - Rooms are polygons on the wall centre lines, almost always rectangles or L-shapes with straight walls at right angles. Neighbouring rooms must share their edges exactly (same coordinates), and together the rooms should cover the whole floor, hallways and stair halls included. Use the room names written on the drawing, cleaned up ("DINING ROM" -> "Dining room").
 - Each floor is its own entry, even when several floors are drawn side by side in one picture; give each floor's coordinates in its own place in the picture (the app lines floors up).
-- PDFs come as an overview picture of each drawing on the sheet (frame D1, or D1.1 and D1.2 when one sheet holds several plans, such as a ground and a first floor) plus close-ups, each saying where it sits in its overview. Read the details from the close-ups, measure in the overview's pixels, then turn that into mm. Ignore stray lines that shoot off across the sheet (a broken export).
+- PDFs come as an overview picture of each drawing on the sheet (frame D1, or D1.1 and D1.2 when one sheet holds several plans, such as a ground and a first floor) plus close-ups, each saying where it sits in its overview. Read the details from the close-ups, measure in the overview's pixels, then turn that into mm. Ignore stray lines that shoot off across the sheet (a broken export). Give each floor the frame it came from.
+- A PDF can mix floor plans with elevations (the facade), sections and site plans, often on one sheet with titles drawn as lines. Look at every drawing before you start and sort them: only floor plans (seen from above: rooms, walls, door swings) make floors. Use elevations and sections for heights (floor to floor, ceilings, sill and head heights, roof shape) and for which windows are on which side. Match the floors to each other by the grid lines and column marks they share (1-6, A-J), so the upper floor sits right over the lower one.
+- Read every label on each plan (room names, areas such as "36.23" in square metres, dimensions) from the close-ups. When a plan writes room areas, make each room's area match it, and check the whole floor against the grid spacing.
+- Rooms that are drawn touching must touch: a room's edge sits on its neighbour's edge, with no gaps or overlaps. Curved or angled bits (a bay window, a round porch) can be a few straight edges.
+- A garage gets one car (1800 x 4500 mm) per bay, side by side; never one stretched car.
 - Scale: first look for written dimensions, then a scale bar or ratio, then the grid. If there are none, measure from things of known size: US door leaves 30 to 36 in (760 to 915 mm), a straight stair about 36 to 42 in (915 to 1070 mm) wide with 11 in (280 mm) treads, a dining table for 6 about 72 x 36 in (1830 x 915), a queen bed 60 x 80 in (1524 x 2032), a car 1800 x 4500 mm, a toilet about 20 x 28 in (510 x 710). Written dimensions are usually feet and inches (12'-6" is 3810 mm). Use several of them, settle on one mm-per-pixel, and say how in scale. When the scale is a guess, ask in the sketch's questions to confirm one main size (a unit's width or the house's length).
 - Several homes in one drawing (a terrace of townhouses, semi-detached houses, a duplex, flats): count the homes before anything else. A home is a separate dwelling (its own household or tenant): look across the whole drawing for unit labels ("Unit A", "Lot 3", "Apt 2", "Townhouse 1"), party or demising walls (thick walls running the full depth with no door through them), separate front entrances, a kitchen in each, separate meters or services, and the same layout repeated or mirrored. Rooms joined by an internal door are one home; a second kitchen behind the same front door is still one home unless the drawing calls it a unit. List each one in units and make every one of them; never squeeze them into one house. Start each room's name with its unit ("Unit 2 living room") so names stay unique, and set its unit. Doors between a unit and outside are outside doors. Neighbouring units share the party wall line exactly. Draw the first unit in full; a unit that is the same or the mirror image of one already drawn is a copy_of entry (mirror for handed pairs, offset_mm from that unit's left edge to its own). Draw a unit in full when it differs (end units with an extra window, a different layout). Say how many units you found in the summary. Name the building after the drawing ("Townhouses 1-6") when it has no name.
 - Doors: every door between two rooms and every outside door, by the two room names (and the side of the house for an outside door). Windows: by room and the side of the house they're on. Open passages are kind "opening".
+- Facades and elevations: match each window and outside door you see on them to the room behind it on the plan (by the grid marks, or by counting along the wall), and use the elevation for its width, height, sill height, and how many there are on that wall. Write what each looks like in style (double-hung with grilles, arched top, bay, double front door with transom). Windows drawn on the plan but not the facade, or the other way round: trust the plan for the room and the facade for the size.
 - Fixtures: the main things drawn (kitchen run as base cabinets with the sink, range and fridge; toilets, basins, tubs, showers; beds, sofas, dining table; a car in a garage). Centre in mm, real size, and which way the front faces.
 - Object kinds, with their usual size (width x depth x height, mm) and where they go: ${catalogBrief()}. Use the kind that matches; for anything else use kind "other" with its real name. Leave out width and depth to get the usual size. Something that sits on something (a TV on its unit, a computer or monitor on the desk, a microwave on the counter, a table lamp on a nightstand) goes with its centre on what it sits on, and the app stands it on top; wall things (wall cabinets, mirrors, pictures, shelves) go against the wall and the app hangs them at their usual height.
 - Put the things you weren't sure about in the sketch's questions (at most 5, each with quick answers when there are obvious ones). The contractor sees them next to the design.
@@ -202,7 +214,9 @@ Deno.serve(async (req) => {
         // round pays for them at the cheap cached rate
         const params = {
           // Sonnet 5.5 thinks at "high" unless told; "medium" keeps a read inside the function's time limit
-          model: MODEL, max_tokens: 64000, thinking: { type: "adaptive" }, output_config: { effort: "medium" },
+          // the first read of a big upload (a drawing set) thinks less, so it finishes inside the function's
+          // 150 s limit; the pictures and the instructions carry the accuracy
+          model: MODEL, max_tokens: 64000, thinking: { type: "adaptive" }, output_config: { effort: !history.length && parts.length > 6 ? "low" : "medium" },
           system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }], tools: TOOLS, messages,
           cache_control: { type: "ephemeral" },
         };

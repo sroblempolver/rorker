@@ -2,6 +2,7 @@
 // questions or the finished project. The conversation is kept here, in the page.
 import type { Sketch } from "@/lib/plan/sketch";
 import type { IntakePart } from "./files";
+import { tidySketch } from "./tidy";
 
 export interface IntakeQuestion { id: string; text: string; options?: string[] }
 export interface IntakeProject {
@@ -60,7 +61,9 @@ export class IntakeChat {
       const inp = tool.input as { message?: string; questions?: IntakeQuestion[] };
       step = { kind: "questions", message: inp.message || text || undefined, questions: (inp.questions ?? []).slice(0, 4), toolId: tool.id! };
     } else if (tool?.name === "create_project") {
-      step = { kind: "project", project: tool.input as IntakeProject, toolId: tool.id! };
+      const project = tool.input as IntakeProject;
+      if (project.sketch?.floors?.length) project.sketch = tidySketch(project.sketch);
+      step = { kind: "project", project, toolId: tool.id! };
     } else step = { kind: "message", text: text || "Tell me a bit more about the job." };
     this.pending = step;
     return step;
