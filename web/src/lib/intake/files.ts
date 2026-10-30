@@ -11,6 +11,10 @@ export type IntakePart =
 export interface Prepared { parts: IntakePart[]; notes: string[]; previews: { name: string; url: string }[]; source: { kind: string; filename: string } }
 
 const MAX_PX = 1600, DXF_PX = 2000, MAX_PDF = 9 * 1024 * 1024, MAX_TOTAL = 12 * 1024 * 1024;
+/** a PDF read here (drawn into pictures) can be a whole drawing set; only one sent as it is must be small */
+const MAX_PDF_READ = 80 * 1024 * 1024;
+/** pictures in one upload, all files together (the assistant reads them sharpest up to 20) */
+const MAX_PICTURES = 20;
 
 const b64 = (buf: ArrayBuffer) => {
   const bytes = new Uint8Array(buf);
@@ -74,13 +78,18 @@ export async function prepareFiles(files: File[]): Promise<Prepared> {
         part = { kind: "image", name: f.name, media_type: "image/png", data: fromDataUrl(url), note };
         previews.push({ name: f.name, url });
       } else if (ext === "pdf" || f.type === "application/pdf") {
-        if (f.size > MAX_PDF) { notes.push(`${f.name} is too big for the preview (over 9 MB). Try a smaller export or photos of the pages.`); continue; }
+        if (f.size > MAX_PDF_READ) { notes.push(`${f.name} is too big to read here (over 80 MB). Split the set, or export it at a lower resolution.`); continue; }
         const buf = await f.arrayBuffer();
-        // drawn here when pdf.js can; sent as it is when it can't (the assistant then sees whole pages)
-        const pics = await readPdf(buf.slice(0), f.name).catch((e) => { console.warn("pdf", e); return []; });
+        // drawn here when pdf.js can (every page of a set, see pdf.ts); sent as it is when it can't
+        const room = MAX_PICTURES - parts.filter((p) => p.kind === "image").length;
+        const pics = room > 0 ? await readPdf(buf.slice(0), f.name, room).catch((e) => { console.warn("pdf", e); return []; }) : [];
         if (pics.length) {
-          const add = pics.map((p): IntakePart => ({ kind: "image", name: p.name, media_type: p.url.startsWith("data:image/png") ? "image/png" : "image/jpeg", data: fromDataUrl(p.url), note: p.note }));
-          const size = add.reduce((n, p) => n + p.data.length, 0);
+          let add = pics.map((p): IntakePart & { closeUp?: boolean } => ({ kind: "image", name: p.name, media_type: p.url.startsWith("data:image/png") ? "image/png" : "image/jpeg", data: fromDataUrl(p.url), note: p.note, closeUp: p.closeUp }));
+          const sizeOf = (a: typeof add) => a.reduce((n, p) => n + p.data.length + (p.kind === "image" ? (p.note?.length ?? 0) : 0), 0);
+          // too much to send at once: drop close-ups from the last plans first, the overviews stay
+          for (let i = add.length - 1; i >= 0 && total + sizeOf(add) > MAX_TOTAL; i--) if (add[i].closeUp) add = add.filter((_, j) => j !== i);
+          add = add.map(({ closeUp: _, ...p }) => p as IntakePart); // eslint-disable-line @typescript-eslint/no-unused-vars
+          const size = sizeOf(add);
           if (total + size <= MAX_TOTAL) {
             total += size;
             parts.push(...add);
@@ -89,6 +98,7 @@ export async function prepareFiles(files: File[]): Promise<Prepared> {
             continue;
           }
         }
+        if (f.size > MAX_PDF) { notes.push(`${f.name} couldn't be read here and is too big to send as it is (over 9 MB). Try a smaller export or photos of the pages.`); continue; }
         part = { kind: "pdf", name: f.name, data: b64(buf) };
       } else if (f.type.startsWith("image/") || ["png", "jpg", "jpeg", "webp", "gif", "bmp"].includes(ext)) {
         const url = await shrink(f);

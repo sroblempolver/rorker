@@ -5,15 +5,22 @@
 // long and thin or big, each tile saying where it sits in the overview. Several plans on one sheet (a
 // ground and a first floor) are found and cut out one by one. Text the PDF still has as text
 // goes along as labels with their positions, since a picture can't be searched.
+//
+// A full drawing set (cover, floor plans, elevations, sections, schedules, notes; often 10 to 60 pages)
+// is read whole: every page's title text says what it is, floor plans get the sharp treatment first,
+// elevations and sections one picture each (for heights), and schedules and notes go as their text
+// (door and window sizes, ceiling heights), which is exact and costs no pictures.
 type PdfJs = typeof import("pdfjs-dist");
 type Page = Awaited<ReturnType<Awaited<ReturnType<PdfJs["getDocument"]>["promise"]>["getPage"]>>;
 
-export interface PdfImage { name: string; url: string; note: string }
+export interface PdfImage { name: string; url: string; note: string; closeUp?: boolean }
 
 const EDGE = 2400;     // long side of every picture sent (the model reads up to about 2576 px and 3.75 MP)
 const AREA = 3.6e6;
 const SCAN = 1600;     // long side of the quick render used to find the drawing on the page
-const MAX_PAGES = 4, MAX_IMAGES = 12;
+const MAX_PAGES = 80, MAX_IMAGES = 20;
+/** what the assistant reads a note at most (the function cuts each note there) */
+const NOTE_MAX = 19000;
 
 let lib: Promise<PdfJs> | null = null;
 /** pdf.js, loaded only when a PDF is added. Its worker runs on the page (a PDF or two is quick enough). */
@@ -118,22 +125,100 @@ function tiles(box: Box): Box[] {
   return out;
 }
 
-/** Draws a PDF's pages as sharp pictures of just the drawing, with notes that tie them together. */
-export async function readPdf(buf: ArrayBuffer, name: string): Promise<PdfImage[]> {
+export type SheetKind = "plan" | "elevation" | "section" | "site" | "roof" | "schedule" | "notes" | "cover" | "detail" | "unknown";
+const KIND_WORDS: [SheetKind, RegExp][] = [
+  ["schedule", /\b(DOOR|WINDOW|FINISH|ROOM|FIXTURE|LIGHTING)S?\s+SCHEDULE|SCHEDULE OF/],
+  ["site", /\b(SITE|PLOT)\s+PLAN\b/],
+  ["roof", /\bROOF\s+(FRAMING\s+)?PLAN\b/],
+  ["plan", /\b(FLOOR|GROUND|FIRST|SECOND|THIRD|MAIN|UPPER|LOWER|BASEMENT|LOFT|ATTIC|DIMENSION|FURNITURE|LAYOUT|PROPOSED|EXISTING)\s+(FLOOR\s+)?PLAN|\bLEVEL\s+\d+\s+PLAN|\bFLOOR\s+LAYOUT|\bPLAN\s+VIEW/],
+  ["elevation", /\bELEVATIONS?\b/],
+  ["section", /\b(BUILDING|WALL|CROSS|LONGITUDINAL)?\s*SECTIONS?\b/],
+  ["detail", /\bDETAILS?\b/],
+  ["notes", /\b(GENERAL|STRUCTURAL|CONSTRUCTION)\s+NOTES|SPECIFICATIONS?\b|\bLEGEND\b/],
+  ["cover", /\b(COVER\s+SHEET|SHEET\s+INDEX|DRAWING\s+(LIST|INDEX)|TITLE\s+SHEET)\b/],
+];
+const KIND_NAME: Record<SheetKind, string> = {
+  plan: "floor plan", elevation: "elevations", section: "sections", site: "site plan", roof: "roof plan",
+  schedule: "schedules", notes: "notes and specifications", cover: "cover / sheet index", detail: "details", unknown: "drawing",
+};
+
+/** What a sheet is, from the words on it: the kinds it mentions, most likely first (a floor plan wins ties). */
+export function sheetKinds(text: string): SheetKind[] {
+  const t = text.toUpperCase().replace(/\s+/g, " ");
+  const hits = KIND_WORDS.map(([k, re]) => ({ k, n: (t.match(new RegExp(re.source, "g")) ?? []).length })).filter((h) => h.n > 0);
+  const rank: SheetKind[] = ["plan", "elevation", "section", "schedule", "site", "roof", "notes", "detail", "cover"];
+  hits.sort((a, b) => b.n - a.n || rank.indexOf(a.k) - rank.indexOf(b.k));
+  const ks = hits.map((h) => h.k);
+  // a cover's sheet index names every other kind of sheet: it's still the cover
+  if (ks.includes("cover")) return ["cover", ...ks.filter((k) => k !== "cover")];
+  // a floor plan sheet often also says "section" (section marks) or "details": still a floor plan
+  if (ks.includes("plan")) return ["plan", ...ks.filter((k) => k !== "plan")];
+  return ks.length ? ks : ["unknown"];
+}
+
+/** A page's text as lines, top to bottom, with the cells of a row (a schedule's columns) joined by " | ". */
+function pageLines(items: { str: string; x: number; y: number; h: number }[]): string {
+  const rows: { y: number; h: number; cells: { x: number; s: string }[] }[] = [];
+  for (const it of [...items].sort((a, b) => a.y - b.y)) {
+    const r = rows.find((q) => Math.abs(q.y - it.y) < Math.max(2, Math.min(q.h, it.h) * 0.5));
+    if (r) r.cells.push({ x: it.x, s: it.str }); else rows.push({ y: it.y, h: it.h, cells: [{ x: it.x, s: it.str }] });
+  }
+  return rows.map((r) => r.cells.sort((a, b) => a.x - b.x).map((c) => c.s).join(" | ")).join("\n");
+}
+
+/**
+ * Reads a PDF: a whole drawing set or a single sheet. Floor plans come back as sharp pictures of just the
+ * drawing (with close-ups when big), elevations and sections as one picture each, schedules and notes as
+ * their text in the notes. `budget` is how many pictures this file may use.
+ */
+export async function readPdf(buf: ArrayBuffer, name: string, budget = MAX_IMAGES): Promise<PdfImage[]> {
   const { getDocument } = await pdfjs();
   const doc = await getDocument({ data: new Uint8Array(buf), isEvalSupported: false }).promise;
+  const total = doc.numPages, pages = Math.min(total, MAX_PAGES);
+  const max = Math.min(budget, MAX_IMAGES);
+  // 1. what every page is, from its words (quick: no drawing yet)
+  const sheets: { n: number; kinds: SheetKind[]; lines: string; words: number }[] = [];
+  for (let n = 1; n <= pages; n++) {
+    const page = await doc.getPage(n);
+    const vp = page.getViewport({ scale: 1 });
+    const items = (await page.getTextContent()).items.flatMap((it) => {
+      if (!("str" in it) || !it.str.trim()) return [];
+      const [x, y] = vp.convertToViewportPoint(it.transform[4], it.transform[5]);
+      return [{ str: it.str.trim(), x, y, h: Math.abs(it.transform[3]) || 8 }];
+    });
+    const lines = pageLines(items);
+    sheets.push({ n, kinds: sheetKinds(lines), lines, words: items.length });
+    page.cleanup();
+  }
+  // 2. which pages get pictures: floor plans first (sharp, with close-ups), then one each for elevations,
+  // sections and the site; a page with no words (drawn as lines, or a scan) could be anything, so it's
+  // looked at like a plan
+  const pictured = (k: SheetKind) => k === "plan" || k === "unknown";
+  const onePic = (k: SheetKind) => k === "elevation" || k === "section" || k === "site" || k === "roof";
+  const planPages = sheets.filter((p) => pictured(p.kinds[0]));
+  const extra = sheets.filter((p) => onePic(p.kinds[0]));
+  // keep room for the elevations (heights) and a section; plans get the rest
+  const reserve = Math.min(extra.length, planPages.length ? Math.max(1, Math.min(4, max - planPages.length * 2)) : max);
+  let left = max - reserve;
   const out: PdfImage[] = [];
-  const pages = Math.min(doc.numPages, MAX_PAGES);
-  for (let n = 1; n <= pages && out.length < MAX_IMAGES; n++) {
+  const used = new Map<number, string>();
+  const shoot = async (n: number, closeUps: boolean, cap: number) => {
     const page = await doc.getPage(n);
     const full = page.getViewport({ scale: 1 });
     const text = await page.getTextContent();
-    const boxes = await drawings(page);
-    const where = pages > 1 ? `page ${n} of ${doc.numPages} of ${name}` : name;
+    const kind = KIND_NAME[sheets[n - 1].kinds[0]];
+    const where = total > 1 ? `page ${n} of ${total} of ${name} (${kind})` : name;
+    // a one-picture sheet (elevations, a section) is sent whole: all its drawings in one picture
+    const found = await drawings(page);
+    const boxes: [number, number, number, number][] = closeUps ? found.slice(0, 6) : found.length ? [[
+      Math.min(...found.map((b) => b[0])), Math.min(...found.map((b) => b[1])), Math.max(...found.map((b) => b[2])), Math.max(...found.map((b) => b[3])),
+    ]] : [];
+    const start = out.length;
     for (const [k, box] of boxes.entries()) {
-      if (out.length >= MAX_IMAGES) break;
+      if (out.length - start >= cap) break;
       const [x0, y0, x1, y1] = box;
-      const s = EDGE / Math.max(x1 - x0, y1 - y0);
+      const edge = closeUps ? EDGE : 2000;
+      const s = edge / Math.max(x1 - x0, y1 - y0);
       const view = await draw(page, s, box);
       const px = (x: number, y: number) => [Math.round((x - x0) * s), Math.round((y - y0) * s)];
       // text the PDF still has as text, placed in this drawing's pixels
@@ -143,9 +228,11 @@ export async function readPdf(buf: ArrayBuffer, name: string): Promise<PdfImage[
         if (x < x0 || x > x1 || y < y0 || y > y1) return [];
         const [a, b] = px(x, y);
         return [`"${it.str.trim().slice(0, 60)}" at (${a}, ${b})`];
-      }).slice(0, 400);
+      }).slice(0, 300);
       const share = Math.round((100 * (x1 - x0) * (y1 - y0)) / (full.width * full.height));
-      const cuts = tiles(box).slice(0, Math.max(0, MAX_IMAGES - out.length - 1));
+      // the room left is shared between this drawing and the ones after it on the sheet
+      const room = Math.floor((cap - (out.length - start)) / (boxes.length - k));
+      const cuts = closeUps ? tiles(box).slice(0, Math.max(0, room - 1)) : [];
       const id = boxes.length > 1 ? `drawing ${k + 1} of the ${boxes.length} on ${where}` : `the drawing on ${where}`;
       const frame = boxes.length > 1 ? `D${n}.${k + 1}` : `D${n}`;
       out.push({
@@ -159,12 +246,53 @@ export async function readPdf(buf: ArrayBuffer, name: string): Promise<PdfImage[
         const [a, b] = px(t[0], t[1]), [c, d] = px(t[2], t[3]);
         out.push({
           name: `${name} p${n}${boxes.length > 1 ? ` d${k + 1}` : ""} close-up ${i + 1}`, url: picture(await draw(page, ts, t)),
+          closeUp: true,
           note: `Close-up ${i + 1} of ${cuts.length} of frame ${frame}: covers ${frame} pixels x ${a} to ${c}, y ${b} to ${d}, drawn ${z.toFixed(2)}x bigger. Close-up pixel (tx, ty) is ${frame} pixel (${a} + tx / ${z.toFixed(3)}, ${b} + ty / ${z.toFixed(3)}).`,
         });
       }
     }
     page.cleanup();
+    const got = out.length - start;
+    if (got) used.set(n, got === 1 ? `picture ${start + 1}` : `pictures ${start + 1} to ${out.length}`);
+  };
+  // the plans: each one an overview and close-ups while there's room, the rest an overview only
+  for (const [i, p] of planPages.entries()) {
+    if (left <= 0) break;
+    const later = planPages.length - i - 1;
+    // one plan sheet (often two floors on it) may use most of the room; in a set, five each
+    const cap = Math.max(1, Math.min(planPages.length === 1 ? 12 : 5, left - later));
+    const before = out.length;
+    await shoot(p.n, cap > 1, cap);
+    left -= out.length - before;
+  }
+  // the one-picture pages get the reserve and whatever the plans didn't use
+  left = max - out.length;
+  for (const p of extra) {
+    if (left <= 0) break;
+    const before = out.length;
+    await shoot(p.n, false, 1);
+    left -= out.length - before;
   }
   await doc.destroy();
+  if (!out.length) return out;
+  // 3. the set's index, and the words of the pages that aren't pictures (schedules, notes, cover)
+  if (total > 1) {
+    const index = sheets.map((p) => `p${p.n} ${KIND_NAME[p.kinds[0]]}${p.kinds.length > 1 ? ` (also ${p.kinds.slice(1, 3).map((k) => KIND_NAME[k]).join(", ")})` : ""}: ${used.get(p.n) ?? (p.words ? "its text is below" : "not sent (no text, and the pictures went to the plans)")}`);
+    const more = total > pages ? ` Only the first ${pages} of ${total} pages were read.` : "";
+    const head = `${name} is a drawing set of ${total} pages.${more} What each page is (from its title text) and where it went: ${index.join("; ")}. `
+      + "Build the rooms from the floor plans. Take heights (ceilings, floor to floor, window sills and heads) from the elevations and sections, "
+      + "and door and window sizes from the schedules, when they're there; they beat the usual sizes.";
+    out[0].note = `${head}\n\n${out[0].note}`;
+    const texts = sheets.filter((p) => !used.has(p.n) && p.words).map((p) => `Text of page ${p.n} (${KIND_NAME[p.kinds[0]]}):\n${p.lines.slice(0, 8000)}`);
+    // spread over the overviews' notes (close-ups can be dropped when the upload is too big); each note
+    // is read up to NOTE_MAX characters
+    const hosts = out.filter((o) => !o.closeUp);
+    let i = 0;
+    for (const t of texts) {
+      while (i < hosts.length && hosts[i].note.length + t.length + 2 > NOTE_MAX) i++;
+      if (i >= hosts.length) break;
+      hosts[i].note += `\n\n${t}`;
+    }
+  }
   return out;
 }
