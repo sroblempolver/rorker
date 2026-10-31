@@ -1,4 +1,4 @@
-// Credits on the build site. Signed in, the `build` edge function keeps the account's balance and
+// Credits on the build site. Signed in, the `credits` edge function keeps the account's balance and
 // history and says yes or no to each spend; on sample data the same rules run in this page, nothing saved.
 // gate() is what the screens call before an action that costs credits or has a tier limit: it answers
 // straight away when the action is free and fits, and otherwise asks the server, and when the answer is
@@ -22,11 +22,11 @@ const ref = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);
 
 /** The signed-in account's credits, through the `build` function. */
 export const cloudCredits = (): CreditsApi => ({
-  load: () => call<CreditState>("credits"),
-  spend: (what, o) => call<Spent>("spend", { what, count: o.count, size: o.size, newPlan: o.newPlan, note: o.note, ref: ref() }),
-  buy: (pack) => call<CreditState>("buy", { pack }),
-  setTier: (tier) => call<CreditState>("tier", { tier }),
-  setKind: (kind) => call<CreditState>("kind", { kind }),
+  load: () => call<CreditState>("credits", {}, "credits"),
+  spend: (what, o) => call<Spent>("spend", { what, count: o.count, size: o.size, newPlan: o.newPlan, note: o.note, ref: ref() }, "credits"),
+  buy: (pack) => call<CreditState>("buy", { pack }, "credits"),
+  setTier: (tier) => call<CreditState>("tier", { tier }, "credits"),
+  setKind: (kind) => call<CreditState>("kind", { kind }, "credits"),
 });
 
 /** Sample data: a Pro contractor partway through the month, kept in this page. */

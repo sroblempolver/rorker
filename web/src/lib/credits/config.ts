@@ -1,7 +1,7 @@
 // Credits and plans: every number in one place.
 //
 // PLACEHOLDER NUMBERS. Nothing here is a decided price (open questions #55 to #60 in the project
-// notes). Change a number here, then run `node preview/build-links.mjs` so the `build` edge function
+// notes). Change a number here, then run `node preview/build-links.mjs` so the `credits` edge function
 // (which keeps the balance and enforces the limits) uses the same numbers, and redeploy it.
 //
 // Who pays what (decided 2026-10-29):

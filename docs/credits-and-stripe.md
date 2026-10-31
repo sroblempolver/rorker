@@ -7,13 +7,13 @@ How credits work on the build site, and what Stripe needs before real payments.
 - **One config:** `web/src/lib/credits/config.ts` holds every number (tier prices, monthly credits,
   plan, floor and square-foot limits, pack prices, what each action costs, welcome and referral
   bonuses). All of them are placeholders. After changing one, run `node web/preview/build-links.mjs`
-  and redeploy the `build` edge function so the server uses the same numbers.
+  and redeploy the `credits` edge function so the server uses the same numbers.
 - **Rules:** `web/src/lib/credits/rules.ts` (costs, limit checks with the smallest tier that fits,
   monthly credits, unused monthly credits running out). The page and the edge function run the same code.
 - **Database** (`supabase/build/20261029000003_credits.sql`): `credit_plans` (account kind and tier) and
   `credit_ledger` (every change, the balance is the sum). Members can read their own; only the edge
   function writes, through `credit_add`, which locks the account so two spends can't use the same credits.
-- **Edge function** (`supabase/functions/build`): `credits`, `spend`, `buy`, `tier`, `kind`. Spending
+- **Edge function** (`supabase/functions/credits`, its own function so `build` is untouched): `credits`, `spend`, `buy`, `tier`, `kind`. Spending
   checks the tier limits first, then the balance. `buy` and `tier` only work while `testPayments` is on.
 - **Page:** a credit chip in the header, the Credits and plan page (`#/credits`), and a prompt when an
   action needs more credits or a bigger plan. Charged now: a new plan (New project, or a job's first
@@ -22,7 +22,7 @@ How credits work on the build site, and what Stripe needs before real payments.
 - **Account kind:** from sign-up (a company name means a business; left blank, a homeowner). It can be
   switched at the bottom of the Credits page.
 - **Referral bonus:** when a contractor takes on a homeowner's project and is on (or later starts) a paid
-  plan, the homeowner gets the bonus once per contractor.
+  plan, the homeowner gets the bonus once per contractor (paid when the contractor's credits load or they change tier).
 
 ## Known gaps
 
