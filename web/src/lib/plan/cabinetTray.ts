@@ -86,7 +86,6 @@ addTraySection("kitchen", { id: "trim", label: "Fillers, panels and trim", note:
   ...[84, 90, 96].map((h) => cab("panel_tall", 0.75, h)),
   ...widths("valance", [30, 36, 48, 60], undefined, "Valance over a window"),
 ] });
-addTraySection("kitchen", { id: "kitchen_more", label: "Islands, stools and bins", items: () => kinds("island bar_stool kitchen_cart trash_can recycling_bin") });
 
 // ----- Bath -----
 

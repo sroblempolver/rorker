@@ -1,9 +1,12 @@
-// The catalogue in the drawing tool, as a two-step menu: four big choices (Kitchen, Bath, Rooms, Other),
-// each opening a list of sections (Base cabinets, Wall cabinets, Vanities, Bedroom...), each a grid of
-// things to put in. Search looks through every section. Sections are added with addTraySection, so
-// another part of the app brings its own (lib/plan/cabinetTray.ts adds every stock cabinet by its code).
-// Anything in CATALOG that no section names lands in Other, Everything else.
+// The catalogue in the drawing tool ("Home items": everything that goes in a house, not only furniture),
+// as a two-step menu: a big choice per room (Kitchen, Bath, Bedroom, Living room, Dining, Office, Kids,
+// Laundry and utility, Outdoor, Garage, Gym and games, Lights and decor), each opening a list of sections
+// (Base cabinets, Beds, Sofas and sectionals...), each a grid of things to put in. Search looks through
+// every section. Sections are added with addTraySection, so another part of the app brings its own
+// (lib/plan/cabinetTray.ts adds every stock cabinet by its code); the rest come from HOME_SECTIONS in
+// lib/plan/catalog-home.ts. Anything in CATALOG that no section names lands in the last top, Everything else.
 import { CATALOG } from "./catalog";
+import { HOME_SECTIONS } from "./catalog-home";
 import type { CabSpec } from "./cabinets";
 
 /** One thing in the tray: a catalogue kind, optionally at its own size and with its own name. */
@@ -19,45 +22,39 @@ export interface TrayItem {
   /** a small heading inside the section it starts (30" high, Pantries) */
   sub?: string;
 }
-export type TopId = "kitchen" | "bath" | "rooms" | "other";
+export type TopId = "kitchen" | "bath" | "bedroom" | "living" | "dining" | "office" | "kids" | "laundry" | "outdoor" | "garage" | "gym" | "decor";
 /** One section of a top: its items (a function so they follow the company's standards). */
 export interface TraySection { id: string; label: string; items: TrayItem[] | (() => TrayItem[]); note?: string }
 export interface TrayTop { id: TopId; label: string; blurb: string; sections: TraySection[] }
 
 const its = (s: string): TrayItem[] => s.split(/\s+/).filter(Boolean).map((kind) => ({ kind }));
 
+/** What the whole menu is called: everything in a house, not only furniture (a toilet isn't furniture). */
+export const TRAY_NAME = "Home items";
+
 const TOPS: { id: TopId; label: string; blurb: string }[] = [
-  { id: "kitchen", label: "Kitchen", blurb: "Cabinets at every stock size, appliances, sinks, fillers and trim" },
-  { id: "bath", label: "Bath", blurb: "Vanities, toilets, tubs and showers, storage" },
-  { id: "rooms", label: "Rooms", blurb: "Bedroom, living, dining and office furniture" },
-  { id: "other", label: "Other", blurb: "Laundry, outside, garage and lighting" },
+  { id: "kitchen", label: "Kitchen", blurb: "Cabinets at every stock size, appliances, dishes and cookware" },
+  { id: "bath", label: "Bath", blurb: "Vanities, toilets, tubs and showers, towels" },
+  { id: "bedroom", label: "Bedroom", blurb: "Beds at every size, dressers, nightstands, closets" },
+  { id: "living", label: "Living room", blurb: "Sofas, chairs, tables, fireplaces, TVs and stereos" },
+  { id: "dining", label: "Dining", blurb: "Tables, chairs, benches, buffets and hutches" },
+  { id: "office", label: "Office", blurb: "Desks, office chairs, files, computers" },
+  { id: "kids", label: "Kids and nursery", blurb: "Cribs, kids' beds, toys and play" },
+  { id: "laundry", label: "Laundry and utility", blurb: "Washers, vacuums, heating, water and power" },
+  { id: "outdoor", label: "Outdoor and garden", blurb: "Patio sets, grills, fire, sheds, pools, yard" },
+  { id: "garage", label: "Garage and vehicles", blurb: "Cars, trucks, motorcycles, bikes, mowers, tools" },
+  { id: "gym", label: "Gym, games and pets", blurb: "Fitness, boxing, game tables, hobbies, pets" },
+  { id: "decor", label: "Lights and decor", blurb: "Ceiling lights, lamps, art, plants, rugs" },
 ];
 
-/** The built-in sections. Kitchen and Bath get theirs from cabinetTray.ts; these are the fallbacks. */
-const BUILT: Record<TopId, TraySection[]> = {
-  kitchen: [
-    { id: "appliances", label: "Appliances", items: its("fridge range cooktop oven wall_oven range_hood dishwasher microwave wine_cooler chest_freezer coffee_machine kettle toaster blender stand_mixer air_fryer water_dispenser") },
-    { id: "kitchen_more", label: "Islands, stools and bins", items: its("base_cabinet wall_cabinet tall_cabinet kitchen_sink island bar_stool kitchen_cart trash_can recycling_bin") },
-  ],
-  bath: [
-    { id: "toilets", label: "Toilets", items: its("toilet bidet urinal") },
-    { id: "tubs", label: "Tubs and showers", items: its("bathtub shower") },
-    { id: "storage", label: "Storage", items: its("vanity washbasin medicine_cabinet mirror towel_bar towel_radiator toilet_roll_holder laundry_hamper") },
-  ],
-  rooms: [
-    { id: "bedroom", label: "Bedroom", items: its("bed bunk_bed sofa_bed crib nightstand wardrobe dresser dressing_table blanket_chest floor_mirror clothes_rack bench changing_table table_lamp") },
-    { id: "living", label: "Living", items: its("sofa sectional_sofa loveseat armchair recliner chaise_longue ottoman bean_bag coffee_table side_table console_table sideboard tv soundbar floor_speaker game_console bookshelf wall_shelf picture rug fireplace piano plant aquarium grandfather_clock wall_clock coat_rack umbrella_stand bar_cart room_divider") },
-    { id: "dining", label: "Dining", items: its("dining_table round_dining_table table chair high_chair china_cabinet sideboard") },
-    { id: "office", label: "Office", items: its("desk standing_desk corner_desk office_chair computer monitor laptop printer filing_cabinet shredder whiteboard pinboard router server_rack projector projector_screen safe conference_table") },
-  ],
-  other: [
-    { id: "laundry", label: "Laundry", items: its("washing_machine dryer utility_sink ironing_board drying_rack laundry_hamper vacuum_cleaner water_heater water_softener furnace boiler ac_unit electrical_panel dehumidifier space_heater radiator") },
-    { id: "outside", label: "Outside", items: its("patio_table patio_chair outdoor_sofa sun_lounger garden_bench patio_umbrella bbq_grill fire_pit hot_tub planter ac_condenser") },
-    { id: "garage", label: "Garage", items: its("car motorcycle bicycle lawn_mower workbench tool_chest metal_shelving ladder treadmill exercise_bike rowing_machine weight_bench dumbbell_rack punching_bag yoga_mat") },
-    { id: "lighting", label: "Lighting", items: its("lamp table_lamp pendant_light ceiling_fan floor_fan") },
-    { id: "hobbies", label: "Kids and hobbies", items: its("kids_table rocking_chair dog_bed cat_tree pool_table ping_pong_table dartboard guitar drum_kit humidifier") },
-  ],
-};
+/** The built-in sections. Kitchen and Bath get their cabinets and fixtures from cabinetTray.ts. */
+const BUILT: Record<TopId, TraySection[]> = Object.fromEntries(TOPS.map((t) => [t.id, [] as TraySection[]])) as Record<TopId, TraySection[]>;
+BUILT.bath.push(
+  { id: "toilets", label: "Toilets", items: its("toilet bidet urinal") },
+  { id: "tubs", label: "Tubs and showers", items: its("bathtub shower") },
+  { id: "storage", label: "Storage", items: its("vanity washbasin medicine_cabinet mirror towel_bar towel_radiator toilet_roll_holder laundry_hamper") },
+);
+for (const [top, id, label, kinds] of HOME_SECTIONS) BUILT[top as TopId]?.push({ id, label, items: its(kinds) });
 
 const added: { top: TopId; s: TraySection }[] = [];
 /**
@@ -75,7 +72,7 @@ export function sectionItems(s: TraySection): TrayItem[] {
   return (typeof s.items === "function" ? s.items() : s.items).filter((it) => it.cab || it.run || CATALOG[it.kind]);
 }
 
-/** The four tops with their sections, and Everything else in Other for whatever no section names. */
+/** The tops with their sections, and Everything else in the last one for whatever no section names. */
 export function trayTops(): TrayTop[] {
   const tops = TOPS.map((t) => {
     const mine = added.filter((a) => a.top === t.id).map((a) => a.s);
@@ -83,13 +80,13 @@ export function trayTops(): TrayTop[] {
   });
   const named = new Set(tops.flatMap((t) => t.sections.flatMap((s) => sectionItems(s).map((it) => it.kind))));
   const rest = Object.keys(CATALOG).filter((k) => !named.has(k)).map((kind) => ({ kind }));
-  if (rest.length) tops[3].sections = [...tops[3].sections, { id: "everything_else", label: "Everything else", items: rest }];
+  if (rest.length) tops[tops.length - 1].sections = [...tops[tops.length - 1].sections, { id: "everything_else", label: "Everything else", items: rest }];
   return tops;
 }
 
-/** Where the tray opens for a room type: a kitchen on Kitchen, a bedroom on Rooms, Bedroom. */
+/** Where the tray opens for a room type: a kitchen on Kitchen, a bedroom on Bedroom, Beds. */
 export const tabForRoom = (type?: string): string | null =>
-  ({ kitchen: "kitchen", bathroom: "bath", wc: "bath", bedroom: "rooms/bedroom", living: "rooms/living", family: "rooms/living", dining: "rooms/dining", study: "rooms/office", office: "rooms/office", laundry: "other/laundry", utility: "other/laundry", garage: "other/garage", balcony: "other/outside", porch: "other/outside", terrace: "other/outside" } as Record<string, string>)[type ?? ""] ?? null;
+  ({ kitchen: "kitchen", bathroom: "bath", wc: "bath", bedroom: "bedroom/beds", nursery: "kids", kids: "kids", living: "living/sofas", family: "living/sofas", dining: "dining/dining_tables", study: "office/desks", office: "office/desks", laundry: "laundry/laundry_machines", utility: "laundry", garage: "garage", gym: "gym", balcony: "outdoor/patio", porch: "outdoor/patio", terrace: "outdoor/patio", patio: "outdoor/patio", deck: "outdoor/patio", yard: "outdoor", garden: "outdoor/garden" } as Record<string, string>)[type ?? ""] ?? null;
 
 export const itemLabel = (it: TrayItem) => it.label ?? CATALOG[it.kind]?.label ?? it.kind.replace(/_/g, " ");
 const itemKey = (it: TrayItem) => `${it.kind}|${it.code ?? ""}|${it.label ?? ""}|${it.w ?? ""}|${it.d ?? ""}|${it.h ?? ""}|${it.cab?.fam ?? ""}|${it.cab?.config ?? ""}`;

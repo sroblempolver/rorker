@@ -72,7 +72,7 @@ export function PlanPage({ jobs, jobId, onPick, onSave, onBuild, onOpenJob, onNe
             <p className="eyebrow">Plan</p>
             <h1 className="font-display text-[34px] font-extrabold uppercase leading-none tracking-[0.01em] truncate">{job.name}</h1>
             <p className="text-muted text-sm">
-              {job.plan ? "Change anything: walls, doors and windows, stairs, furniture and cabinets. Save to update the job." : "This job has no plan yet. Draw it here, or start a New project from its drawings."}
+              {job.plan ? "Change anything: walls, doors and windows, stairs, cabinets and everything in the house. Save to update the job." : "This job has no plan yet. Draw it here, or start a New project from its drawings."}
               {saved && <span className="text-green"> Saved at {saved}.</span>}
             </p>
             {err && <p className="text-[13px] text-red">{err}</p>}

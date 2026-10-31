@@ -39,7 +39,7 @@ export function JobCards({ jobs, onEditPlan }: { jobs: JobCard[]; /** open a job
             </div>
             {onEditPlan && (
               <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEditPlan(j.id); }}
-                className="btn btn-sm mt-3 !h-8" title="Change the walls, doors and windows, stairs, furniture and cabinets">
+                className="btn btn-sm mt-3 !h-8" title="Change the walls, doors and windows, stairs, cabinets and everything in the house">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3zM3 12h9M12 3v13M16 12h5" /></svg>
                 {noPlan ? "Draw the plan" : "Edit plan"}
               </button>

@@ -4,6 +4,7 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import type { Part } from "@/lib/plan/catalog";
+import { LOOK_OF } from "@/lib/plan/catalog-home";
 import { skyEnv, stone, weave, woodGrain } from "./looks3d";
 
 export const C = {
@@ -18,6 +19,20 @@ const hsl = { h: 0, s: 0, l: 0 };
 /** What a colour most likely is when nobody says: wood, steel, glass, enamel or plain paint. */
 function guess(color: string): Look {
   const c = color.toLowerCase();
+  // the home catalogue's colours say what they are (brass, glass, a lit bulb, leather, a toy's plastic)
+  switch (LOOK_OF[c]) {
+    case "metal": return { metal: 0.85, rough: 0.25, env: 1.1 };
+    case "glass": return { metal: 0.3, rough: 0.04, opacity: 0.35, env: 1.3 };
+    case "mirror": return { metal: 0.95, rough: 0.03, env: 1.6 };
+    case "fabric": return { map: "weave", rough: 0.95 };
+    case "leather": return { rough: 0.45, env: 0.35 };
+    case "glow": return { emissive: color, rough: 0.6 };
+    case "flame": return { emissive: color, rough: 0.8 };
+    case "screen": return { emissive: "#1d3550", rough: 0.08, env: 0.6 };
+    case "water": return { rough: 0.05, opacity: 0.75, env: 1.2 };
+    case "rubber": return { rough: 0.9 };
+    case "plain": return { rough: 0.45, env: 0.2 };
+  }
   if (c === C.steel || c === "#b9bec4" || c === "#9da3aa" || c === C.nickel) return { metal: 0.7, rough: 0.3, env: 1 };
   if (["#8fd3f0", "#cfe6ee", "#8fb8c9"].includes(c)) return { metal: 0.5, rough: 0.05, env: 1.2 };
   if (c === "#4a4844" || c === "#e8e4dc" || c === C.stone) return { map: "stone", rough: 0.35, env: 0.35 };

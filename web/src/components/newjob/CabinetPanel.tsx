@@ -35,7 +35,7 @@ export function CabinetPanel({ pick, onPick, floor, units, onCatalog }: { pick: 
       </div>
       <div className="space-y-1.5 pt-2 border-t border-line">
         <p className="eyebrow pt-1">One at a time</p>
-        <p className="text-muted text-[12.5px] leading-snug">Every stock cabinet, appliance and filler is in Furniture, by its code. Pick one and click near a wall.</p>
+        <p className="text-muted text-[12.5px] leading-snug">Every stock cabinet, appliance and filler is in Home items, Kitchen, by its code. Pick one and click near a wall.</p>
         <div className="flex flex-wrap gap-1">
           {([["kitchen/base", "Base"], ["kitchen/wall", "Wall"], ["kitchen/tall", "Tall"], ["kitchen/appliances", "Appliances"], ["kitchen/trim", "Fillers and trim"], ["bath/vanities", "Vanities"]] as const).map(([at, label]) => (
             <button key={at} className="chip !h-7" onClick={() => onCatalog(at)}>{label}</button>
