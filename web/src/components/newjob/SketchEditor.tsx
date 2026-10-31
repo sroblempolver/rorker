@@ -8,13 +8,13 @@ import { nextQuestion, stagesFromSpec, type BuildSpec } from "@/lib/plan/buildSp
 import { BuildQuestions } from "./BuildQuestions";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import type { Pt } from "@/lib/plan/types";
-import type { Side, Sketch, SketchDoor, SketchFloor } from "@/lib/plan/sketch";
+import type { Side, Sketch, SketchDoor, SketchFixture, SketchFloor } from "@/lib/plan/sketch";
 import { OUTSIDE, doorSpot, hugWall, trimOverlap, outsidePieces, edgesOf, flatten, moveCorner, nearSeg, pointInPoly, roomArea, sideOf, snapTo, splitPoly, wallAt, windowSpots, type Seg } from "@/lib/plan/sketchEdit";
 import { bboxOf, centroid } from "@/lib/plan/geometry";
-import { CATALOG } from "@/lib/plan/catalog";
+import { CATALOG, bottomOf, topOf } from "@/lib/plan/catalog";
 import { MATERIAL_BASE, ROOM_MATERIAL } from "@/components/plan/style";
 import { useEscape, editable } from "@/components/ui/hotkeys";
-import { DOOR_W, WallView } from "./WallView";
+import { DOOR_W, Len, WallView } from "./WallView";
 import { tidyStroke } from "@/lib/plan/pen";
 import { INCH, fmtArea, fmtLen, parseLength, roundLen, type Units } from "@/lib/plan/units";
 import type { IntakePart } from "@/lib/intake/files";
@@ -26,7 +26,7 @@ import { cabCode, defaults, famOf, handlesLow, hasDoors, toeOf } from "@/lib/pla
 import { Live3D, type Walls } from "./Live3D";
 import { RoofPanel } from "./RoofPanel";
 import { std, useStandards } from "@/lib/plan/standards";
-import { halfSize, moveRoom, outward, pushWall, turnRoom, turnSide } from "@/lib/plan/roomEdit";
+import { halfSize, moveRoom, outward, pushWall, setWallGap, turnRoom, turnSide, wallBehind } from "@/lib/plan/roomEdit";
 import { cleanOutline, cornerAt, nextCorner } from "@/lib/plan/corners";
 import { itemLabel, tabForRoom, type TrayItem } from "@/lib/plan/tray";
 import { CatalogTray, TRAY_DRAG, openTrayAt } from "./CatalogTray";
@@ -1519,12 +1519,21 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
                 <span className="text-muted">Faces</span>
                 {SIDES.map((s) => <button key={s} onClick={() => setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? { ...f, facing: s } : f)) })} className={`chip !h-7 ${fix.facing === s ? "!text-accent !border-accent" : ""}`}>{s}</button>)}
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                {(["width_mm", "depth_mm"] as const).map((k) => (
-                  <div key={k}><label className="label !mb-1">{k === "width_mm" ? "Width mm" : "Depth mm"}</label>
-                    <input type="number" className="input !h-9" value={fix[k] ?? ""} onFocus={() => past.current.push(sk)} onChange={(e) => setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? { ...f, [k]: +e.target.value || undefined } : f)) }, false)} /></div>
-                ))}
-              </div>
+              {(() => {
+                const put = (p: Partial<SketchFixture>) => setFloor({ ...floor, fixtures: floor.fixtures!.map((f, i) => (i === sel.i ? { ...f, ...p } : f)) });
+                const s = CATALOG[fix.kind], ceil = floor.height_mm ?? std("house.ceiling");
+                const w = fix.width_mm ?? s?.w ?? 600, d = fix.depth_mm ?? s?.d ?? 600, bot = bottomOf(fix), h = topOf(fix) - bot;
+                const back = wallBehind(floor, fix);
+                return (
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 [&_input]:!w-full [&_label]:grid [&_label]:gap-0.5">
+                    <Len label="Width" mm={w} units={lu} onStart={() => {}} onSet={(v) => v >= 20 && put({ width_mm: v })} />
+                    <Len label="Depth" mm={d} units={lu} onStart={() => {}} onSet={(v) => v >= 20 && put({ depth_mm: v })} />
+                    <Len label="Height" mm={h} units={lu} onStart={() => {}} onSet={(v) => v >= 20 && put({ height_mm: Math.min(v, ceil - bot) })} />
+                    <Len label="Off the floor" mm={bot} units={lu} onStart={() => {}} onSet={(v) => put({ elevation_mm: Math.max(0, Math.min(v, ceil - h)) || undefined })} />
+                    {back && <div className="col-span-2"><Len label={`From the wall behind (${back.side})`} mm={back.gap} units={lu} onStart={() => {}} onSet={(v) => put({ center: setWallGap(fix, back, v).center })} /></div>}
+                  </div>
+                );
+              })()}
               <div className="flex gap-2">
                 <button className="btn btn-sm" onClick={() => turn(true)} title="Q, Shift+Q the other way">Turn 90°</button>
                 <button className="btn btn-sm btn-ghost text-red" onClick={deleteSel}>Delete</button>
