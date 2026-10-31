@@ -3,6 +3,7 @@
 import type { Sketch } from "@/lib/plan/sketch";
 import type { IntakePart } from "./files";
 import { tidySketch } from "./tidy";
+import { furnishSketch } from "./furnish";
 
 export interface IntakeQuestion { id: string; text: string; options?: string[] }
 export interface IntakeProject {
@@ -25,8 +26,9 @@ export class IntakeChat {
   private history: Msg[] = [];
   private pending: IntakeStep | null = null;
   private drawn: Sketch | null = null;
-  /** `plan`: the company's plan; paying plans get the best plan reader, the free plan a cheaper one. */
-  constructor(private description: string, private parts: IntakePart[], private url = INTAKE_URL, private plan: "paid" | "free" = "paid") {}
+  /** `plan`: the company's plan; paying plans get the best plan reader, the free plan a cheaper one.
+   *  `furnish`: add the usual furniture each room lacks (shown when the plan is furnished); Plan tests turn it off to score the reading alone. */
+  constructor(private description: string, private parts: IntakePart[], private url = INTAKE_URL, private plan: "paid" | "free" = "paid", private furnish = true) {}
 
   /** The contractor redrew the plan by hand: the next turn tells the assistant, so it keeps their fixes. */
   handDrawn(sketch: Sketch) { this.drawn = sketch; }
@@ -62,7 +64,8 @@ export class IntakeChat {
       step = { kind: "questions", message: inp.message || text || undefined, questions: (inp.questions ?? []).slice(0, 4), toolId: tool.id! };
     } else if (tool?.name === "create_project") {
       const project = tool.input as IntakeProject;
-      if (project.sketch?.floors?.length) project.sketch = tidySketch(project.sketch);
+      // tidied (and furnished) in place, so the assistant's next turn starts from what the contractor sees
+      if (project.sketch?.floors?.length) project.sketch = this.furnish ? furnishSketch(tidySketch(project.sketch)) : tidySketch(project.sketch);
       step = { kind: "project", project, toolId: tool.id! };
     } else step = { kind: "message", text: text || "Tell me a bit more about the job." };
     this.pending = step;

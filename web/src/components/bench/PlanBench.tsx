@@ -20,7 +20,7 @@ const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(3
 
 /** One reading of a plan, as a contractor's upload would get it: questions are skipped, so it guesses. */
 async function readOnce(c: BenchCase, url: string, signal: AbortSignal): Promise<{ sketch: Sketch | null; summary: string }> {
-  const chat = new IntakeChat(c.description ?? "", c.parts, url);
+  const chat = new IntakeChat(c.description ?? "", c.parts, url, "paid", false);
   let step = await chat.next(undefined, signal);
   for (let i = 0; i < 3 && step.kind !== "project"; i++) step = await chat.next(step.kind === "questions" ? { answers: {} } : { text: "Go ahead and make it with what you have." }, signal);
   if (step.kind !== "project") throw new Error("The reader didn't make a plan.");
