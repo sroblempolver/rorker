@@ -90,9 +90,14 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
   }, [floor, wall]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [sel, setSel] = useState<Item | null>(null);
+  // several picked at once: a box dragged across the wall, or Ctrl-click
+  const [group, setGroup] = useState<Item[]>([]);
+  const [box, setBox] = useState<{ x0: number; u0: number; x1: number; u1: number } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const svg = useRef<SVGSVGElement>(null);
   const drag = useRef<{ item: Item; from: number; fromY: number; c0: number; b0: number | null; moved: boolean } | null>(null);
+  // the group being moved: where each one started, on the floor as it was
+  const gdrag = useRef<{ of: SketchFloor; from: number; fromY: number; items: { it: Item; c0: number; b0: number | null }[]; lo: number; hi: number; dn: number; up: number; moved: boolean; hit: Item } | null>(null);
   const pad = 400, H = height + 1200, W = Math.max(L + pad * 2, H * 4);
   // the picture keeps its shape: work out the drawn width from the box's height
   const scale = () => { const b = svg.current!.getBoundingClientRect(); return Math.max(W / b.width, H / b.height); };
@@ -104,35 +109,84 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
   // what can go up and down the wall: furniture, and windows (their sill)
   const bottomAt = (it: Item) => (it.t === "thing" ? bottomOf(floor.fixtures![it.i]) : it.t === "window" ? floor.windows![it.i].sill_mm ?? WIN.sill : null);
   const tallOf = (it: Item) => (it.t === "thing" ? topOf(floor.fixtures![it.i]) - bottomOf(floor.fixtures![it.i]) : it.t === "window" ? floor.windows![it.i].height_mm ?? WIN.height : 0);
-  // move an item so its centre sits `c` mm from the left end (and its bottom `bottom` mm off the floor)
-  const moveTo = (it: Item, c: number, history: boolean, bottom?: number) => {
+  // floor f with an item moved so its centre sits `c` mm from the left end (and its bottom `bottom` mm off the floor)
+  const movedIn = (f: SketchFloor, it: Item, c: number, bottom?: number): SketchFloor => {
     const P = at(Math.max(0, Math.min(L, c)));
     if (it.t === "thing") {
-      const f = floor.fixtures![it.i], off = offOf(f.center);
+      const x0 = f.fixtures![it.i], off = offOf(x0.center);
       const q: Pt = [Math.round(P[0] + inward[0] * off), Math.round(P[1] + inward[1] * off)];
       const up = bottom == null ? {} : { elevation_mm: bottom || undefined };
-      onChange({ ...floor, fixtures: floor.fixtures!.map((x, i) => (i === it.i ? { ...x, center: q, ...up } : x)) }, history);
+      return { ...f, fixtures: f.fixtures!.map((x, i) => (i === it.i ? { ...x, center: q, ...up } : x)) };
     } else if (it.t === "door") {
-      const d = floor.doors![it.i], ref = doorWall(floor, d);
-      if (!ref) return;
+      const d = f.doors![it.i], ref = doorWall(f, d);
+      if (!ref) return f;
       const t = Math.round(Math.max(0, Math.min(1, param(P, ref))) * 1000) / 1000;
-      onChange({ ...floor, doors: floor.doors!.map((x, i) => (i === it.i ? { ...x, at: t } : x)) }, history);
-    } else if (it.t === "window") {
-      const w = floor.windows![it.i], ref = windowWall(floor, w);
-      if (!ref) return;
-      const n = Math.max(1, Math.min(4, w.count ?? 1));
-      const list = Array.from({ length: n }, (_, k) => w.at?.[k] ?? (k + 1) / (n + 1));
-      list[it.k] = Math.round(Math.max(0, Math.min(1, param(P, ref))) * 1000) / 1000;
-      onChange({ ...floor, windows: floor.windows!.map((x, i) => (i === it.i ? { ...x, at: list, ...(bottom == null ? {} : { sill_mm: bottom }) } : x)) }, history);
+      return { ...f, doors: f.doors!.map((x, i) => (i === it.i ? { ...x, at: t } : x)) };
     }
+    const w = f.windows![it.i], ref = windowWall(f, w);
+    if (!ref) return f;
+    const n = Math.max(1, Math.min(4, w.count ?? 1));
+    const list = Array.from({ length: n }, (_, k) => w.at?.[k] ?? (k + 1) / (n + 1));
+    list[(it as Extract<Item, { t: "window" }>).k] = Math.round(Math.max(0, Math.min(1, param(P, ref))) * 1000) / 1000;
+    return { ...f, windows: f.windows!.map((x, i) => (i === it.i ? { ...x, at: list, ...(bottom == null ? {} : { sill_mm: bottom }) } : x)) };
   };
+  const moveTo = (it: Item, c: number, history: boolean, bottom?: number) => onChange(movedIn(floor, it, c, bottom), history);
+  // how high an item reaches on the wall: [bottom, top] off the floor
+  const spanOf = (it: Item): [number, number] => {
+    if (it.t === "thing") { const f = floor.fixtures![it.i]; return [bottomOf(f), topOf(f)]; }
+    if (it.t === "door") return [0, doorH(floor.doors![it.i])];
+    const w = floor.windows![it.i], sill = w.sill_mm ?? WIN.sill;
+    return [sill, sill + (w.height_mm ?? WIN.height)];
+  };
+  /** whether it goes up and down with the group: furniture (not base cabinets) and windows */
+  const liftable = (it: Item) => it.t === "window" || (it.t === "thing" && !(floor.fixtures![it.i].cab && famOf(floor.fixtures![it.i].cab!.fam).zone !== "wall"));
   const down = (e: RPointerEvent<SVGElement>, it: Item) => {
     e.stopPropagation();
     (e.target as Element).setPointerCapture?.(e.pointerId);
+    // Ctrl (Cmd on a Mac): add it to the picked ones, or take it off
+    if (e.ctrlKey || e.metaKey) {
+      const cur = [...group, ...(sel ? [sel] : [])], next = cur.some((x) => same(x, it)) ? cur.filter((x) => !same(x, it)) : [...cur, it];
+      if (next.length === 1) { setSel(next[0]); setGroup([]); } else { setSel(null); setGroup(next); }
+      return;
+    }
+    // one of the group: they all move together
+    if (group.some((x) => same(x, it))) {
+      const live = group.map((g) => [...items, ...things].find((x) => same(x, g))).filter((x): x is Item => !!x);
+      const lift = live.filter(liftable);
+      gdrag.current = { of: floor, from: toX(e), fromY: e.clientY, items: live.map((x) => ({ it: x, c0: (x.x0 + x.x1) / 2, b0: liftable(x) ? spanOf(x)[0] : null })), moved: false, hit: it,
+        // (something already past an end or the ceiling isn't shoved back by picking it up)
+        lo: Math.min(0, -Math.min(...live.map((x) => x.x0))), hi: Math.max(0, L - Math.max(...live.map((x) => x.x1))),
+        dn: lift.length ? Math.min(0, -Math.min(...lift.map((x) => spanOf(x)[0]))) : 0, up: lift.length ? Math.max(0, Math.min(...lift.map((x) => height - spanOf(x)[1]))) : 0 };
+      return;
+    }
+    setGroup([]);
     setSel(it);
     drag.current = { item: it, from: toX(e), fromY: e.clientY, c0: (it.x0 + it.x1) / 2, b0: bottomAt(it), moved: false };
   };
   const move = (e: RPointerEvent<SVGSVGElement>) => {
+    if (box) { setBox({ ...box, x1: toX(e), u1: toUp(e) }); return; }
+    const g = gdrag.current;
+    if (g) {
+      let dx = toX(e) - g.from, dy = (g.fromY - e.clientY) * scale();
+      if (!g.moved && Math.hypot(dx, dy) < 30) return;
+      if (!g.moved) { g.moved = true; onChange(g.of, true); } // keep the start for undo
+      // the whole group stays on the wall, between the floor and the ceiling
+      dx = Math.max(g.lo, Math.min(g.hi, roundLen(dx, units)));
+      dy = Math.max(g.dn, Math.min(g.up, roundLen(dy, units)));
+      // cabinets and appliances in the group never go through the ones left behind
+      const run = (it: Item) => it.t === "thing" && (!!floor.fixtures![it.i].cab || RUN.has(floor.fixtures![it.i].kind));
+      const still = things.filter((x) => run(x) && !g.items.some((y) => same(x, y.it)));
+      const hit = g.items.find((y) => {
+        if (!run(y.it)) return false;
+        const lift = y.b0 == null ? 0 : dy, [lo, hi] = spanOf(y.it), b0 = y.b0 ?? lo, b1 = b0 + (hi - lo) + lift;
+        const x0 = y.c0 - (y.it.x1 - y.it.x0) / 2 + dx, x1 = x0 + (y.it.x1 - y.it.x0);
+        return still.some((s) => { const [slo, shi] = spanOf(s); return s.x0 < x1 - 1 && s.x1 > x0 + 1 && slo < b1 - 1 && shi > b0 + lift + 1; });
+      });
+      if (hit) { setNote("No room for them there: they'd run into a cabinet."); return; }
+      setNote(null);
+      onChange(g.items.reduce((f, x) => movedIn(f, x.it, x.c0 + dx, x.b0 == null ? undefined : x.b0 + dy), g.of), false);
+      return;
+    }
     const d = drag.current;
     if (!d) return;
     const dx = toX(e) - d.from, dy = (d.fromY - e.clientY) * scale();
@@ -160,7 +214,35 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
     }
     moveTo(d.item, c, false, bottom);
   };
-  const up = () => { drag.current = null; };
+  const up = () => {
+    drag.current = null;
+    const g = gdrag.current;
+    gdrag.current = null;
+    // a plain click on one of the group picks just that one
+    if (g && !g.moved) { setGroup([]); setSel(g.hit); }
+    if (box) {
+      const b = box;
+      setBox(null);
+      const [x0, x1] = [Math.min(b.x0, b.x1), Math.max(b.x0, b.x1)], [u0, u1] = [Math.min(b.u0, b.u1), Math.max(b.u0, b.u1)];
+      if (x1 - x0 < 60 && u1 - u0 < 60) return;
+      // everything the box touches
+      const got = [...things, ...items].filter((it) => { const [lo, hi] = spanOf(it); return it.x0 <= x1 && it.x1 >= x0 && lo <= u1 && hi >= u0; });
+      if (got.length === 1) { setGroup([]); setSel(got[0]); } else { setSel(null); setGroup(got); }
+    }
+  };
+  // take out every item in the group in one go
+  const removeGroup = () => {
+    const ids = (t: Item["t"]) => new Set(group.filter((x) => x.t === t).map((x) => x.i));
+    const fx = ids("thing"), ds = ids("door");
+    const windows = (floor.windows ?? []).flatMap((w, i) => {
+      const ks = new Set(group.filter((x) => x.t === "window" && x.i === i).map((x) => (x as { k: number }).k));
+      if (!ks.size) return [w];
+      const n = Math.max(1, Math.min(4, w.count ?? 1)), spots = Array.from({ length: n }, (_, k) => w.at?.[k] ?? (k + 1) / (n + 1)).filter((_, k) => !ks.has(k));
+      return spots.length ? [{ ...w, count: spots.length, at: spots }] : [];
+    });
+    onChange({ ...floor, fixtures: (floor.fixtures ?? []).filter((_, i) => !fx.has(i)), doors: (floor.doors ?? []).filter((_, i) => !ds.has(i)), windows });
+    setGroup([]);
+  };
 
   // the middle of the widest stretch of wall with nothing on it, within [lo, hi]
   const freeAt = (lo: number, hi: number) => {
@@ -271,14 +353,21 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
         </span>
       </div>
       <svg ref={svg} viewBox={`${L / 2 - W / 2} ${-H + 350} ${W} ${H}`} className={`w-full h-[220px] touch-none select-none bg-ink ${armed ? "cursor-copy" : ""}`} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
-        onPointerDown={(e) => { setSel(null); if (armed) dropIn(e); }}
+        onPointerDown={(e) => {
+          if (armed) { setSel(null); dropIn(e); return; }
+          // from empty wall: drag a box to pick several (Ctrl keeps what's picked)
+          if (!(e.ctrlKey || e.metaKey)) { setSel(null); setGroup([]); }
+          (e.target as Element).setPointerCapture?.(e.pointerId);
+          const x = toX(e), u = toUp(e);
+          setBox({ x0: x, u0: u, x1: x, u1: u });
+        }}
         onDragOver={(e) => { if (e.dataTransfer.types.includes(TRAY_DRAG)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
         onDrop={(e) => { if (!e.dataTransfer.types.includes(TRAY_DRAG)) return; e.preventDefault(); dropIn(e); }}>
         <rect x={0} y={-height} width={L} height={height} fill="#e3d9c6" stroke="#0a0a0b" strokeWidth={20} />
         {outside.map(([a, b], k) => <rect key={k} x={a} y={-height} width={b - a} height={height} fill="#d6c9b0" />)}
         <line x1={-pad} y1={0} x2={L + pad} y2={0} stroke="#9c978d" strokeWidth={20} />
         {things.map((it) => {
-          const f = floor.fixtures![it.i], b = bottomOf(f), t = topOf(f), on = !!sel && same(it, sel), label = `${nums?.has(f) ? `#${nums.get(f)} ` : ""}${f.name || CATALOG[f.kind]?.label || f.kind}`;
+          const f = floor.fixtures![it.i], b = bottomOf(f), t = topOf(f), on = (!!sel && same(it, sel)) || group.some((x) => same(x, it)), label = `${nums?.has(f) ? `#${nums.get(f)} ` : ""}${f.name || CATALOG[f.kind]?.label || f.kind}`;
           return (
             <g key={`f${it.i}`} onPointerDown={(e) => down(e, it)} style={{ cursor: "move" }}>
               {f.cab ? <CabinetFront f={f} x0={it.x0} x1={it.x1} on={on} fs={fs} /> : <>
@@ -289,7 +378,7 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
           );
         })}
         {items.map((it, k) => {
-          const on = !!sel && same(it, sel);
+          const on = (!!sel && same(it, sel)) || group.some((x) => same(x, it));
           const w = it.x1 - it.x0;
           return it.t === "door" ? (
             <g key={k} onPointerDown={(e) => down(e, it)} style={{ cursor: "ew-resize" }}>
@@ -329,12 +418,24 @@ export function WallView({ floor, room, edge, height = RULES.ceiling as number, 
             {L - cur.x1 > fs * 3.5 && <text x={(cur.x1 + L) / 2} y={-height - 80} textAnchor="middle">{m(L - cur.x1)}</text>}
           </g>
         )}
+        {box && (() => {
+          const x0 = Math.min(box.x0, box.x1), x1 = Math.max(box.x0, box.x1), u0 = Math.min(box.u0, box.u1), u1 = Math.max(box.u0, box.u1);
+          return <rect x={x0} y={-u1} width={x1 - x0} height={u1 - u0} fill="#55b2ff" fillOpacity={0.12} stroke="#55b2ff" strokeWidth={14} strokeDasharray="60 36" style={{ pointerEvents: "none" }} />;
+        })()}
         {!items.length && !things.length && <text x={L / 2} y={-height / 2} fontSize={fs} textAnchor="middle" fill="#6e6a62">Nothing on this wall yet</text>}
       </svg>
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px] min-h-[44px]">
         {note && <span className="text-amber">{note}</span>}
         {armed && !sel && !note && <span className="text-accent">Drag {armed} from the furniture list onto this wall, or click the wall where it goes. Then drag it along the wall, and up or down.</span>}
-        {!armed && !sel && !note && <span className="text-muted">Drag a door, window or piece of furniture along the wall (windows and furniture up and down too). Pick one to change its size or remove it.</span>}
+        {!armed && !sel && !group.length && !note && <span className="text-muted">Drag a door, window or piece of furniture along the wall (windows and furniture up and down too). Pick one to change its size or remove it. Drag a box across the wall to pick several and move them together.</span>}
+        {group.length > 0 && (
+          <>
+            <span className="font-medium">{group.length} picked</span>
+            <span className="text-muted">Drag any of them to move them all together. Ctrl-click adds or takes one off.</span>
+            <button className="btn btn-sm btn-ghost ml-auto" onClick={() => setGroup([])}>Clear</button>
+            <button className="btn btn-sm btn-ghost text-red" onClick={removeGroup}>Remove all {group.length}</button>
+          </>
+        )}
         {selThing && (
           <>
             <span className="font-medium">{nums?.has(selThing) ? `#${nums.get(selThing)} ` : ""}{selThing.name || CATALOG[selThing.kind]?.label || selThing.kind}</span>
