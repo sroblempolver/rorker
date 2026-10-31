@@ -12,7 +12,8 @@ export interface ScoreLine { key: string; label: string; got: string; points: nu
 export interface Score { total: number; lines: ScoreLine[]; misses: string[] }
 
 const OUTSIDE = /^(outside|exterior|out|garden|yard|street)$/i;
-const WEIGHTS = { floors: 5, homes: 10, rooms: 30, types: 10, scale: 10, doors: 15, windows: 5, things: 15 };
+// out of 100; stairs, window counts and room sizes joined on 2026-10-31, so older scores aren't comparable one to one
+const WEIGHTS = { floors: 5, homes: 5, rooms: 25, types: 10, sizes: 10, scale: 10, doors: 10, windows: 5, wincount: 5, stairs: 5, things: 10 };
 const CELL = 200;
 /** the things every plan should show; loose furniture (chairs, lamps) isn't scored */
 export const MAIN_THINGS = new Set(["kitchen_sink", "range", "cooktop", "oven", "fridge", "dishwasher", "island", "toilet", "washbasin", "vanity", "bathtub", "shower", "bed", "sofa", "dining_table", "car", "washing_machine", "fireplace"]);
@@ -45,6 +46,7 @@ function lineUp(read: SketchFloor, ans: SketchFloor) {
 }
 
 const sideKey = (s?: Side) => s ?? "";
+const area = (p: Pt[]) => Math.abs(p.reduce((n, a, i) => { const b = p[(i + 1) % p.length]; return n + a[0] * b[1] - b[0] * a[1]; }, 0)) / 2;
 
 export function scoreSketch(read: Sketch | null | undefined, answer: Sketch): Score {
   const misses: string[] = [];
@@ -61,6 +63,8 @@ export function scoreSketch(read: Sketch | null | undefined, answer: Sketch): Sc
 
   let roomHit = 0, roomWant = 0, roomGot = 0, typeHit = 0, scaleErr = 0, scaled = 0;
   let doorHit = 0, doorWant = 0, doorGot = 0, winHit = 0, winWant = 0, winGot = 0, thingHit = 0, thingWant = 0, thingGot = 0;
+  let sizeHit = 0, sized = 0, countWant = 0, countOff = 0, stairWant = 0, stairGot = 0, stairHit = 0;
+  const keyHasStairs = A.some((f) => (f.stairs ?? []).length);
   A.forEach((af, fi) => {
     roomWant += af.rooms.length;
     doorWant += af.doors?.length ?? 0;
@@ -87,6 +91,11 @@ export function scoreSketch(read: Sketch | null | undefined, answer: Sketch): Sc
       const ta = roomType(af.rooms[a].type, af.rooms[a].name), tr = roomType(rf.rooms[r].type, rf.rooms[r].name);
       if (ta === tr) typeHit++;
       else misses.push(`${af.rooms[a].name} read as a ${tr.replace(/_/g, " ")} ("${rf.rooms[r].name}").`);
+      // size: the read room at the answer's scale, within 15% of the drawn area
+      const want = area(af.rooms[a].polygon), got = area(rf.rooms[r].polygon.map(map));
+      sized++;
+      if (Math.abs(got - want) <= 0.15 * want) sizeHit++;
+      else misses.push(`${af.rooms[a].name} is ${got > want ? "too big" : "too small"}: ${Math.round(got / 92903)} ft² read, ${Math.round(want / 92903)} ft² drawn.`);
     }
     af.rooms.forEach((r, a) => { if (!usedA.has(a)) misses.push(`Missed or misshaped: ${r.name} (${af.name ?? `level ${af.level}`}).`); });
     rf.rooms.forEach((r, i) => { if (!toAns.has(i)) misses.push(`Extra or misshaped room read: "${r.name}".`); });
@@ -108,6 +117,29 @@ export function scoreSketch(read: Sketch | null | undefined, answer: Sketch): Sc
     const wantW = new Set((af.windows ?? []).map((w) => `${w.room.toLowerCase().trim()}|${sideKey(w.side)}`));
     const gotW = new Set((rf.windows ?? []).map((w) => { const n = ansName(w.room); return n ? `${n}|${sideKey(w.side)}` : null; }).filter(Boolean) as string[]);
     for (const x of gotW) if (wantW.has(x)) winHit++;
+    // how many windows, room by room and side by side
+    const tally = (list: { room: string; side: Side; count?: number }[], name: (n: string) => string | null) => {
+      const m = new Map<string, number>();
+      for (const w of list) { const n = name(w.room); if (n) m.set(`${n}|${sideKey(w.side)}`, (m.get(`${n}|${sideKey(w.side)}`) ?? 0) + (w.count ?? 1)); }
+      return m;
+    };
+    const cw = tally(af.windows ?? [], (n) => n.toLowerCase().trim()), cg = tally(rf.windows ?? [], ansName);
+    for (const [k, n] of cw) {
+      countWant += n;
+      const g = cg.get(k) ?? 0;
+      countOff += Math.abs(g - n);
+      if (g !== n) misses.push(`Windows in ${k.replace("|", ", ")} side: ${g} read, ${n} drawn.`);
+    }
+    // stairs: each one in the answer, read within 1.5 m of its bottom step
+    if (keyHasStairs) {
+      const sa = af.stairs ?? [], sr = (rf.stairs ?? []).map((st) => ({ ...st, at: map(st.at) }));
+      stairWant += sa.length; stairGot += sr.length;
+      const used = new Set<number>();
+      for (const st of sa) {
+        const i = sr.findIndex((x, j) => !used.has(j) && Math.hypot(x.at[0] - st.at[0], x.at[1] - st.at[1]) < 1500);
+        if (i >= 0) { used.add(i); stairHit++; } else misses.push(`Missed a ${st.shape} stair on ${af.name ?? `level ${af.level}`}.`);
+      }
+    }
     // things: the same kind within a metre of where it should be
     const free = main(af).map((x) => ({ ...x, used: false }));
     for (const x of main(rf)) {
@@ -122,11 +154,14 @@ export function scoreSketch(read: Sketch | null | undefined, answer: Sketch): Sc
 
   add("rooms", "Rooms found (shape and place)", `${roomHit} of ${roomWant}, ${roomGot} read`, f1(roomHit, roomWant, roomGot));
   add("types", "Rooms named right", `${typeHit} of ${roomHit}`, roomHit ? typeHit / roomHit : 0);
+  add("sizes", "Room sizes (within 15%)", `${sizeHit} of ${sized}`, sized ? sizeHit / sized : 0);
   const se = scaled ? scaleErr / scaled : 1;
   add("scale", "Scale", scaled ? `off by ${pct(se)}` : "no plan", 1 - se * 4);
   if (scaled && se > 0.05) misses.push(`Sizes are off by about ${pct(se)}.`);
   add("doors", "Doors", `${doorHit} of ${doorWant}, ${doorGot} read`, f1(doorHit, doorWant, doorGot));
   add("windows", "Windows (room and side)", `${winHit} of ${winWant}, ${winGot} read`, f1(winHit, winWant, winGot));
+  add("wincount", "Window counts", countWant ? `off by ${countOff} of ${countWant}` : "none drawn", countWant ? 1 - countOff / countWant : 1);
+  add("stairs", "Stairs", keyHasStairs ? `${stairHit} of ${stairWant}, ${stairGot} read` : "not in the answer", keyHasStairs ? f1(stairHit, stairWant, stairGot) : 1);
   add("things", "Main fixtures (kitchen, bath, beds, sofas, cars)", `${thingHit} of ${thingWant}, ${thingGot} read`, f1(thingHit, thingWant, thingGot));
   const total = Math.round(lines.reduce((n, l) => n + l.points, 0));
   return { total, lines, misses };
