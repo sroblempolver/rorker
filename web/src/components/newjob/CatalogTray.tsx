@@ -135,7 +135,9 @@ const ICONS: Record<TopId, ReactNode> = {
   decor: <><path d="M24 4v8M14 22l4-10h12l4 10z" /><path d="M24 22v10M16 36h16" /></>,
 };
 
-export function CatalogTray({ armed, onPick, startRoom, units = "ft" }: { armed: TrayItem | null; onPick: (it: TrayItem) => void; startRoom?: string | null; units?: Units }) {
+export function CatalogTray({ armed, onPick, startRoom, units = "ft", onTool }: { armed: TrayItem | null; onPick: (it: TrayItem) => void; startRoom?: string | null; units?: Units;
+  /** the kitchen's own tools, offered on the Kitchen page: fill a wall with cabinets, move cabinet handles */
+  onTool?: (t: "cabinet" | "handles") => void }) {
   const stdv = useStandards();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const tops = useMemo(() => trayTops(), [stdv]);
@@ -182,6 +184,13 @@ export function CatalogTray({ armed, onPick, startRoom, units = "ft" }: { armed:
     );
   } else if (top) {
     body = (
+      <>
+      {top.id === "kitchen" && onTool && (
+        <div className="flex flex-wrap gap-1.5 mb-1.5">
+          <button className="btn btn-sm btn-ghost" onClick={() => onTool("cabinet")} title="Fill a kitchen wall with stock cabinets in one click (J)">Cabinets: fill a wall</button>
+          <button className="btn btn-sm btn-ghost" onClick={() => onTool("handles")} title="Move door handles to the lower or higher part of the door (H)">Cabinet handles</button>
+        </div>
+      )}
       <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-1.5">
         {top.sections.map((s) => {
           const items = sectionItems(s), first = items.find((it) => it.cab) ?? items.find(looks) ?? items[0];
@@ -197,6 +206,7 @@ export function CatalogTray({ armed, onPick, startRoom, units = "ft" }: { armed:
           );
         })}
       </div>
+      </>
     );
   } else {
     body = (
