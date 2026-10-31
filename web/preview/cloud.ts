@@ -14,13 +14,13 @@ export const BUCKET = "build-files";
 export const sb = createClient(URL_, KEY, { auth: { persistSession: true, storageKey: "rorker-build-auth" } });
 
 /** The `build` function: sign-up and everything a no-sign-in link does. */
-export async function call<T>(action: string, body: Record<string, unknown> = {}): Promise<T> {
+export async function call<T>(action: string, body: Record<string, unknown> = {}, fn = "build"): Promise<T> {
   let r: Response;
   try {
     // signed in (on this site's accounts page): the function knows who, to keep links in their account
     const { data } = await sb.auth.getSession();
     const auth: Record<string, string> = data.session ? { authorization: `Bearer ${data.session.access_token}` } : {};
-    r = await fetch(`${URL_}/functions/v1/build`, { method: "POST", headers: { "content-type": "application/json", apikey: KEY, ...auth }, body: JSON.stringify({ action, ...body }) });
+    r = await fetch(`${URL_}/functions/v1/${fn}`, { method: "POST", headers: { "content-type": "application/json", apikey: KEY, ...auth }, body: JSON.stringify({ action, ...body }) });
   } catch { throw new Error("Can't reach Rorker. Check your connection and try again."); }
   const j = await r.json().catch(() => null);
   if (!r.ok) throw new Error(j?.error ?? "Something went wrong. Try again.");

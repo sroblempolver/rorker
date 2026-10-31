@@ -13,14 +13,21 @@ export { clientBuys, clientNote, clientPhotos, clientPinIds, clientView, company
 export { clientBilling, forClient } from "@/lib/billing/clientGuard";
 export { linkLive } from "@/lib/share";
 export { cleanPlaces } from "@/lib/plan/tags";
-export { teamFor } from "@/lib/cloud/team";
-export { CREDITS } from "@/lib/credits/config";
-export { balanceOf, checkSpend, dueGrants, isPaid, tierOf } from "@/lib/credits/rules";`,
+export { teamFor } from "@/lib/cloud/team";`,
     resolveDir: root, loader: "ts",
   },
   bundle: true, format: "esm", target: "es2022", platform: "neutral",
   outfile: path.join(root, "../supabase/functions/build/core.js"),
   alias: { "@": path.join(root, "src") },
-  banner: { js: "// Generated from web/src/lib (cloud/, share.ts, billing/clientGuard.ts, credits/) by web/preview/build-links.mjs. Do not edit." },
+  banner: { js: "// Generated from web/src/lib (cloud/, share.ts, billing/clientGuard.ts) by web/preview/build-links.mjs. Do not edit." },
 });
 console.log("supabase/functions/build/core.js");
+// and the credit rules and prices into the `credits` edge function
+await esbuild.build({
+  stdin: { contents: `export { CREDITS } from "@/lib/credits/config";\nexport { balanceOf, checkSpend, dueGrants, isPaid, tierOf } from "@/lib/credits/rules";`, resolveDir: root, loader: "ts" },
+  bundle: true, format: "esm", target: "es2022", platform: "neutral",
+  outfile: path.join(root, "../supabase/functions/credits/core.js"),
+  alias: { "@": path.join(root, "src") },
+  banner: { js: "// Generated from web/src/lib/credits/ by web/preview/build-links.mjs. Do not edit." },
+});
+console.log("supabase/functions/credits/core.js");

@@ -1,6 +1,6 @@
 // The credit rules: what an action costs, whether a plan fits the account's tier, and which credits are
 // due (a homeowner's welcome credits, a plan's monthly credits, unused monthly credits running out).
-// The page uses these to show prices and prompts; the `build` edge function runs the very same code
+// The page uses these to show prices and prompts; the `credits` edge function runs the very same code
 // (copied in by web/preview/build-links.mjs) and is the one that keeps the balance.
 import type { Plan } from "@/lib/plan/types";
 import { CREDITS, type AccountKind, type ActionId, type Tier, type TierId } from "./config";

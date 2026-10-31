@@ -5,7 +5,7 @@
 --     square feet;
 --   * an account's credits are its history: every change is one line in `credit_ledger` (bought, used,
 --     the plan's monthly credits, welcome and referral bonuses), and the balance is the sum;
---   * people read their own account's plan and history. Nobody writes them from the page: the `build`
+--   * people read their own account's plan and history. Nobody writes them from the page: the `credits`
 --     edge function does, with the same rules and prices the page shows (web/src/lib/credits/), and
 --     `credit_add` takes a lock so two spends at once can't both pass on the same credits.
 
