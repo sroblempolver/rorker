@@ -1,0 +1,63 @@
+// Renders a reel page to MP4, frame by frame, with the page's clock stepped by hand so every frame is exact:
+//   node site/reel-render.mjs [page.html] [out.mp4] [workers]
+// page defaults to reel.html; its length comes from window.REEL_LENGTH (15 s when unset). Several workers
+// each play the whole page and shoot their own share of the frames, so the camera's glide stays the same.
+// Needs the built site (npm run site), Playwright and ffmpeg.
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+// Playwright may be installed globally rather than in this package
+const { chromium } = createRequire(import.meta.url)("playwright");
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const dist = path.join(here, "dist");
+const pageName = process.argv[2] || "reel.html";
+const out = path.resolve(process.argv[3] || path.join(dist, pageName.replace(/\.html$/, ".mp4")));
+const workers = Math.max(1, Number(process.argv[4]) || 1);
+const FPS = 30;
+// REEL_FRAMES=<dir> picks up an interrupted render: frames already in the folder are kept
+const frames = process.env.REEL_FRAMES || fs.mkdtempSync(path.join(os.tmpdir(), "reel-"));
+fs.mkdirSync(frames, { recursive: true });
+
+const server = http.createServer((req, res) => {
+  const f = path.join(dist, decodeURIComponent(req.url.split("?")[0]).replace(/^\/+/, "") || pageName);
+  if (!f.startsWith(dist) || !fs.existsSync(f)) { res.statusCode = 404; return res.end(); }
+  res.setHeader("content-type", f.endsWith(".html") ? "text/html" : "application/octet-stream");
+  fs.createReadStream(f).pipe(res);
+}).listen(0);
+const port = server.address().port;
+
+async function shoot(worker) {
+  const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
+  const page = await browser.newPage({ viewport: { width: 540, height: 960 }, deviceScaleFactor: 2 });
+  await page.clock.install({ time: 0 });
+  // hold the clock still, so time only moves when a frame is stepped (slow software rendering must not leak in)
+  await page.clock.pauseAt(1000);
+  await page.goto(`http://localhost:${port}/${pageName}`, { waitUntil: "load" });
+  await page.evaluate(() => document.fonts.ready);
+  await page.clock.runFor(50);
+  const length = await page.evaluate(() => window.REEL_LENGTH || 15000);
+  const total = Math.round((length / 1000) * FPS);
+  const share = Math.ceil(total / workers);
+  const from = worker * share, to = Math.min(total, from + share);
+  for (let i = 0; i < to; i++) {
+    await page.clock.runFor(1000 / FPS);
+    const file = path.join(frames, `f${String(i).padStart(5, "0")}.png`);
+    if (i < from || fs.existsSync(file)) continue;
+    // software rendering can be slow when the machine is busy: never give up on a frame
+    await page.screenshot({ path: file, timeout: 0 });
+    if (i % 60 === 0) console.log(`worker ${worker}: frame ${i}/${total}`);
+  }
+  await browser.close();
+}
+
+await Promise.all(Array.from({ length: workers }, (_, w) => shoot(w)));
+server.close();
+execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-framerate", String(FPS), "-i", path.join(frames, "f%05d.png"),
+  "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-preset", "slow", "-movflags", "+faststart", out], { stdio: "inherit" });
+fs.rmSync(frames, { recursive: true, force: true });
+console.log(out);
