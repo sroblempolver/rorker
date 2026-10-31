@@ -38,9 +38,12 @@ export interface SketchFixture { kind: string; /** its number in its room (lib/p
  * their height and the run come from the floor-to-floor height and the standards unless set here.
  */
 export interface SketchStair {
-  at: Pt; rotation: number; shape: "straight" | "L" | "U"; width_mm?: number;
-  /** which way an L or U turns going up; treads before the landing; steps (risers), tread and landing depth when set by hand */
+  at: Pt; rotation: number; shape: "straight" | "L" | "U" | "curved" | "spiral"; width_mm?: number;
+  /** which way an L, U or round stair turns going up; treads before the landing; steps (risers), tread and landing depth when set by hand.
+   *  On a round stair (curved or spiral) the tread is measured on the walking line, 12" in from the narrow end. */
   turn?: "left" | "right"; split?: number; risers?: number; tread_mm?: number; landing_mm?: number;
+  /** a round stair's inner radius: the open well of a curved stair, the centre pole of a spiral */
+  inner_mm?: number;
 }
 export interface SketchFloor {
   name?: string; level: number; /** finished floor to ceiling (the company's ceiling height when left out) */ height_mm?: number; rooms: SketchRoom[]; doors?: SketchDoor[]; windows?: SketchWindow[]; fixtures?: SketchFixture[];
@@ -359,7 +362,7 @@ function stairOf(st: SketchStair, id: string, rise: number, rooms: Room[]): Stai
   const g = stairGeom(st, rise);
   const c: Pt = [g.footprint.reduce((a, q) => a + q[0], 0) / g.footprint.length, g.footprint.reduce((a, q) => a + q[1], 0) / g.footprint.length];
   const room = rooms.find((r) => { const b = bboxOf(r.polygon); return c[0] >= b[0] && c[0] <= b[2] && c[1] >= b[1] && c[1] <= b[3]; });
-  return { id, polygon: g.footprint, room_id: room?.id ?? null, outline: g.steps.map((s) => [...s.polygon, s.polygon[0]]), steps: g.steps.map((s) => ({ polygon: s.polygon, top_mm: Math.round(s.top) })) };
+  return { id, polygon: g.footprint, room_id: room?.id ?? null, outline: g.steps.map((s) => [...s.polygon, s.polygon[0]]), steps: g.steps.map((s) => ({ polygon: s.polygon, top_mm: Math.round(s.top), ...(s.bottom != null ? { bottom_mm: Math.round(s.bottom) } : {}) })), ...(g.round?.pole ? { pole: { at: g.round.centre, r: g.round.inner } } : {}) };
 }
 // centre lines of the walls of the floor being built (doors and windows sit on them)
 const wallLines = new Map<string, Seg>();

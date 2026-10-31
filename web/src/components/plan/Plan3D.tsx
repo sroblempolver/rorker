@@ -516,9 +516,28 @@ function buildScene(p: Plan3DProps, mt: Materials): Built {
       const sg = new THREE.Group();
       // a drawn stair knows each step: a block up to each tread's (or the landing's) top
       for (const s of st.steps ?? []) {
-        const step = new THREE.Mesh(extrude(s.polygon, 0, s.top_mm), mt.get("#8a6a48"));
+        const step = new THREE.Mesh(extrude(s.polygon, s.bottom_mm ?? 0, s.top_mm), mt.get("#8a6a48"));
         step.castShadow = step.receiveShadow = true;
         sg.add(step);
+      }
+      // a spiral: the centre pole up to the top tread, a baluster at each tread's outer corner, and the handrail
+      if (st.pole && st.steps?.length) {
+        const top = st.steps[st.steps.length - 1].top_mm + 900, metal = mt.get("#3a3d42");
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(st.pole.r * S, st.pole.r * S, top * S, 16), metal);
+        pole.position.set(st.pole.at[0] * S, (top / 2) * S, st.pole.at[1] * S);
+        pole.castShadow = true;
+        sg.add(pole);
+        const rail: THREE.Vector3[] = [];
+        for (const s of st.steps) {
+          const p = s.polygon[0];
+          const b = new THREE.Mesh(new THREE.CylinderGeometry(9 * S, 9 * S, 900 * S, 6), metal);
+          b.position.set(p[0] * S, (s.top_mm + 450) * S, p[1] * S);
+          sg.add(b);
+          rail.push(new THREE.Vector3(p[0] * S, (s.top_mm + 900) * S, p[1] * S));
+        }
+        const last = st.steps[st.steps.length - 1], e = last.polygon[last.polygon.length / 2 - 1];
+        if (e) rail.push(new THREE.Vector3(e[0] * S, (last.top_mm + 900) * S, e[1] * S));
+        if (rail.length > 1) sg.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rail), rail.length * 6, 22 * S, 8, false), metal));
       }
       const n = st.steps?.length ? 0 : Math.max(6, Math.round(H / 185));
       const alongX = b[2] - b[0] > b[3] - b[1];
