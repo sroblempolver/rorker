@@ -177,3 +177,40 @@ export function outward(poly: Pt[], s: Seg): Pt {
   const n: Pt = [-dy / L, dx / L], mid: Pt = [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2];
   return pointInPoly([mid[0] + n[0] * 30, mid[1] + n[1] * 30], poly) ? [-n[0], -n[1]] : n;
 }
+
+const STEP: Record<Side, Pt> = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] };
+const BACK: Record<Side, Side> = { north: "south", south: "north", east: "west", west: "east" };
+
+/** The clear gap from a thing's side toward `s` to the nearest wall that way (mm), or null when no wall is there.
+ *  Room outlines are the walls' inside faces; a wall standing on its own counts from its face, not its middle. */
+function gapToward(fl: SketchFloor, x: SketchFixture, s: Side): number | null {
+  const [hw, hd] = halfSize(x), v = STEP[s], k = v[0] ? 0 : 1, o = 1 - k;
+  const face = x.center[k] + v[k] * (k === 0 ? hw : hd), half = k === 0 ? hd : hw;
+  const lo = x.center[o] - half, hi = x.center[o] + half;
+  const segs: [Seg, number][] = [
+    ...fl.rooms.flatMap((r) => edgesOf(r.polygon).map((e) => [e, 0] as [Seg, number])),
+    ...(fl.walls ?? []).map((w) => [[w.a, w.b], (w.thickness_mm ?? std("wall.interior")) / 2] as [Seg, number]),
+  ];
+  let best = Infinity;
+  for (const [[a, b], t] of segs) {
+    if (Math.abs(a[k] - b[k]) > E) continue;
+    if (Math.min(hi, Math.max(a[o], b[o])) - Math.max(lo, Math.min(a[o], b[o])) <= E) continue;
+    const d = (a[k] - face) * v[k] - t;
+    if (d >= -5 && d < best) best = d;
+  }
+  return best < Infinity ? Math.max(0, Math.round(best)) : null;
+}
+
+/** The wall behind a thing (the one its back faces; the nearest one when it faces no way) and the clear gap to it. */
+export function wallBehind(fl: SketchFloor, x: SketchFixture): { side: Side; gap: number } | null {
+  const sides: Side[] = x.facing ? [BACK[x.facing]] : ["north", "east", "south", "west"];
+  let best: { side: Side; gap: number } | null = null;
+  for (const s of sides) { const g = gapToward(fl, x, s); if (g != null && (!best || g < best.gap)) best = { side: s, gap: g }; }
+  return best;
+}
+
+/** Slide a thing straight toward or away from the wall behind it so the clear gap becomes `want` mm. */
+export function setWallGap(x: SketchFixture, at: { side: Side; gap: number }, want: number): SketchFixture {
+  const v = STEP[at.side], by = at.gap - Math.max(0, want);
+  return { ...x, center: [Math.round(x.center[0] + v[0] * by), Math.round(x.center[1] + v[1] * by)] };
+}
