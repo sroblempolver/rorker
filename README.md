@@ -130,6 +130,9 @@ sample jobs to start from; every change is saved a moment later and loads on any
 - The link rules are the page's own code, copied into the function by `node preview/build-links.mjs`
   (run it after changing `src/lib/share.ts`, `src/lib/cloud/` or the client guard, then redeploy).
 - "Look around on sample data" on the sign-in screen runs the old in-memory preview.
+- **Credits and plans** (`#/credits`): homeowners pay only in credits; businesses have a monthly tier with
+  credits and limits on plans, floors and square feet. Every number is a placeholder in
+  `web/src/lib/credits/config.ts`. No payment provider yet; see `docs/credits-and-stripe.md`.
 
 ## Preview build
 

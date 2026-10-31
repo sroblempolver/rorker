@@ -15,7 +15,8 @@ export interface PlanPageJob { id: string; name: string; address: string | null;
 export function PlanPage({ jobs, jobId, onPick, onSave, onBuild, onOpenJob, onNew }: {
   jobs: PlanPageJob[]; jobId: string | null; onPick: (id: string) => void;
   /** the new plan for the job, built from the drawing */
-  onSave: (id: string, plan: Plan) => void;
+  /** false: not saved (out of credits, or past the account's plan limits; it says why itself) */
+  onSave: (id: string, plan: Plan) => void | Promise<boolean | void>;
   /** how it's built (the build questions), and the job's new stages when the contractor says to replace them */
   onBuild?: (id: string, spec: BuildSpec, stages?: SpecStage[]) => void;
   onOpenJob: (id: string) => void; onNew: () => void;
@@ -46,7 +47,7 @@ export function PlanPage({ jobs, jobId, onPick, onSave, onBuild, onOpenJob, onNe
   const build = spec?.id === job.id ? spec.s : job.build ?? {};
   const answer = (s: BuildSpec) => { setSpec({ id: job.id, s, changed: true }); onBuild?.(job.id, s); };
 
-  const save = (sk: Sketch) => {
+  const save = async (sk: Sketch) => {
     if (spec?.id === job.id && spec.changed) {
       const stages = stagesFromSpec(spec.s);
       if (stages.length && confirm("Make this job's stages from how it's built? This replaces its current stages.")) onBuild?.(job.id, spec.s, stages);
@@ -54,7 +55,7 @@ export function PlanPage({ jobs, jobId, onPick, onSave, onBuild, onOpenJob, onNe
     }
     try {
       const { plan } = planFromSketch(sk, job.plan?.source ?? { kind: "sketch", filename: "Drawn by hand" });
-      onSave(job.id, plan);
+      if ((await onSave(job.id, plan)) === false) { setErr("Not saved yet. See the note about your credits or plan, then save again."); return; }
       setErr(null);
       setSaved(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
       setRound((n) => n + 1);
