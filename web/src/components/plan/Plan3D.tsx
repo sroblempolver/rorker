@@ -12,7 +12,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { JobItem, Pin, PinAnchor, PinInput } from "@/lib/data/types";
 import { edgeDistance, floorBBox, frontView, labelPoint, pointInPoly, roomSides, sidePoint, unionBBox, type WallSide } from "@/lib/plan/geometry";
-import type { ElementStatus, Floor, Plan, Pt, Room } from "@/lib/plan/types";
+import type { ElementStatus, Floor, Opening, Plan, Pt, Room } from "@/lib/plan/types";
 import type { ColorMode } from "./FloorCanvas";
 import { hitTest } from "./FloorCanvas";
 import { HIDDEN_KINDS, TOP_FILL, isWallMounted } from "./fixtures";
@@ -87,6 +87,40 @@ function extrude(poly: Pt[], y0: number, y1: number, holes: Pt[][] = []): THREE.
   geo.rotateX(-Math.PI / 2);
   geo.translate(0, y0 * S, 0);
   return geo;
+}
+
+/** A wall's outline with its doors and windows taken out: the pieces either side of and between them.
+ *  Plans drawn or saved in the plan editor keep each wall whole through its openings. Drawn whole, the
+ *  wall and the header and sill of each opening fill the same space, so their faces flicker against each
+ *  other as the camera moves, and the glass and the door sit buried inside the wall. Only a plain
+ *  rectangular wall is cut; any other outline stays as drawn. */
+export function wallPieces(poly: Pt[], openings: Opening[]): Pt[][] {
+  if (poly.length !== 4 || !openings.length) return [poly];
+  const r = runOf(poly);
+  if (!r || r.length < 1 || r.thickness < 1) return [poly];
+  let area = 0;
+  for (let i = 0; i < 4; i++) { const p = poly[i], q = poly[(i + 1) % 4]; area += p[0] * q[1] - q[0] * p[1]; }
+  if (Math.abs(Math.abs(area / 2) - r.length * r.thickness) > 0.02 * r.length * r.thickness) return [poly];
+  const along = (p: Pt) => (p[0] - r.a[0]) * r.u[0] + (p[1] - r.a[1]) * r.u[1];
+  const across = (p: Pt) => (p[0] - r.a[0]) * r.n[0] + (p[1] - r.a[1]) * r.n[1];
+  const cuts: [number, number][] = [];
+  for (const o of openings) {
+    const q = runOf(o.polygon);
+    if (!q || Math.abs(q.u[0] * r.u[0] + q.u[1] * r.u[1]) < 0.995) continue;
+    const mid: Pt = [(q.a[0] + q.b[0]) / 2, (q.a[1] + q.b[1]) / 2];
+    if (Math.abs(across(mid)) > r.thickness / 2) continue;
+    const lo = Math.max(0, Math.min(along(q.a), along(q.b))), hi = Math.min(r.length, Math.max(along(q.a), along(q.b)));
+    if (hi - lo > 1) cuts.push([lo, hi]);
+  }
+  if (!cuts.length) return [poly];
+  cuts.sort((x, y) => x[0] - y[0]);
+  const h = r.thickness / 2;
+  const at = (s: number, t: number): Pt => [r.a[0] + r.u[0] * s + r.n[0] * t, r.a[1] + r.u[1] * s + r.n[1] * t];
+  const out: Pt[][] = [];
+  let s0 = 0;
+  for (const [lo, hi] of cuts) { if (lo - s0 > 5) out.push([at(s0, -h), at(lo, -h), at(lo, h), at(s0, h)]); s0 = Math.max(s0, hi); }
+  if (r.length - s0 > 5) out.push([at(s0, -h), at(r.length, -h), at(r.length, h), at(s0, h)]);
+  return out;
 }
 
 // stair openings: a hole goes in a floor shape only when it sits wholly inside it
@@ -349,36 +383,45 @@ function buildScene(p: Plan3DProps, mt: Materials): Built {
       const role = ex.walls.get(w.id);
       if (role && role.height <= 0) continue;
       const wh = role ? Math.min(role.height, wallH) : Math.min(wallH, w.height_mm ?? wallH);
+      // the wall with its doors and windows cut out (a post or a column stays whole)
+      const pieces = role ? [w.polygon] : wallPieces(w.polygon, fl.openings);
       if (layer && w.exterior && !role) {
         const lm = surfaceMaterial(layer);
-        const mesh = new THREE.Mesh(extrude(w.polygon, 0, wh), lm);
-        mesh.castShadow = mesh.receiveShadow = true;
-        g.add(mesh);
-        pick(mesh, { type: "wall", id: w.id, floorId: fl.id });
+        for (const pc of pieces) {
+          const mesh = new THREE.Mesh(extrude(pc, 0, wh), lm);
+          mesh.castShadow = mesh.receiveShadow = true;
+          g.add(mesh);
+          pick(mesh, { type: "wall", id: w.id, floorId: fl.id });
+        }
         const c = w.polygon.reduce((a, q) => [a[0] + q[0] / w.polygon.length, a[1] + q[1] / w.polygon.length], [0, 0]);
         fades.push({ mats: [lm], centre: new THREE.Vector3(c[0] * S, (base + H / 2) * S, c[1] * S), floorIndex: fi, role: "wall" });
         continue;
       }
-      const run = look === "framing" && !role ? runOf(w.polygon) : null;
-      if (run) {
-        // studs, a bottom plate and a double top plate; an invisible wall keeps it clickable
-        const d = Math.min(run.thickness, w.exterior ? FRAMING.depthExt : FRAMING.depth);
-        const sh = wh - 3 * FRAMING.plate;
-        for (const at of studsAlong(run.length, FRAMING.stud, FRAMING.spacing)) frame.push({ s: run.a, u: run.u, along: at, up: FRAMING.plate + sh / 2, w: FRAMING.stud, h: sh, d });
-        frame.push({ s: run.a, u: run.u, along: run.length / 2, up: FRAMING.plate / 2, w: run.length, h: FRAMING.plate, d, plate: true });
-        frame.push({ s: run.a, u: run.u, along: run.length / 2, up: wh - FRAMING.plate, w: run.length, h: 2 * FRAMING.plate, d, plate: true });
-        const ghost = new THREE.Mesh(extrude(w.polygon, 0, wh), new THREE.MeshBasicMaterial({ visible: false }));
-        g.add(ghost);
-        pick(ghost, { type: "wall", id: w.id, floorId: fl.id });
+      if (look === "framing" && !role && runOf(w.polygon)) {
+        // studs, a bottom plate and a double top plate on each piece; an invisible wall keeps it clickable
+        for (const pc of pieces) {
+          const run = runOf(pc);
+          if (!run) continue;
+          const d = Math.min(run.thickness, w.exterior ? FRAMING.depthExt : FRAMING.depth);
+          const sh = wh - 3 * FRAMING.plate;
+          for (const at of studsAlong(run.length, FRAMING.stud, FRAMING.spacing)) frame.push({ s: run.a, u: run.u, along: at, up: FRAMING.plate + sh / 2, w: FRAMING.stud, h: sh, d });
+          frame.push({ s: run.a, u: run.u, along: run.length / 2, up: FRAMING.plate / 2, w: run.length, h: FRAMING.plate, d, plate: true });
+          frame.push({ s: run.a, u: run.u, along: run.length / 2, up: wh - FRAMING.plate, w: run.length, h: 2 * FRAMING.plate, d, plate: true });
+          const ghost = new THREE.Mesh(extrude(pc, 0, wh), new THREE.MeshBasicMaterial({ visible: false }));
+          g.add(ghost);
+          pick(ghost, { type: "wall", id: w.id, floorId: fl.id });
+        }
         continue;
       }
       const boarded = look === "drywall" && !role;
       const color = statusTint(w.id, boarded ? DRYWALL : role?.kind === "column" ? FINISH.trim : role?.kind === "post" ? FINISH.rail : w.exterior && finish ? sidingColor : "#efe8da");
       const m = w.exterior && finish && !role && !prog && !boarded ? (p.outside?.siding ? surfaceMaterial(p.outside.siding) : sidingMaterial(color)) : wallMaterial(color);
-      const mesh = new THREE.Mesh(extrude(w.polygon, 0, wh), m);
-      mesh.castShadow = mesh.receiveShadow = true;
-      g.add(mesh);
-      pick(mesh, { type: "wall", id: w.id, floorId: fl.id });
+      for (const pc of pieces) {
+        const mesh = new THREE.Mesh(extrude(pc, 0, wh), m);
+        mesh.castShadow = mesh.receiveShadow = true;
+        g.add(mesh);
+        pick(mesh, { type: "wall", id: w.id, floorId: fl.id });
+      }
       const c = w.polygon.reduce((a, q) => [a[0] + q[0] / w.polygon.length, a[1] + q[1] / w.polygon.length], [0, 0]);
       fades.push({ mats: [m], centre: new THREE.Vector3(c[0] * S, (base + H / 2) * S, c[1] * S), floorIndex: fi, role: "wall" });
     }
@@ -473,9 +516,28 @@ function buildScene(p: Plan3DProps, mt: Materials): Built {
       const sg = new THREE.Group();
       // a drawn stair knows each step: a block up to each tread's (or the landing's) top
       for (const s of st.steps ?? []) {
-        const step = new THREE.Mesh(extrude(s.polygon, 0, s.top_mm), mt.get("#8a6a48"));
+        const step = new THREE.Mesh(extrude(s.polygon, s.bottom_mm ?? 0, s.top_mm), mt.get("#8a6a48"));
         step.castShadow = step.receiveShadow = true;
         sg.add(step);
+      }
+      // a spiral: the centre pole up to the top tread, a baluster at each tread's outer corner, and the handrail
+      if (st.pole && st.steps?.length) {
+        const top = st.steps[st.steps.length - 1].top_mm + 900, metal = mt.get("#3a3d42");
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(st.pole.r * S, st.pole.r * S, top * S, 16), metal);
+        pole.position.set(st.pole.at[0] * S, (top / 2) * S, st.pole.at[1] * S);
+        pole.castShadow = true;
+        sg.add(pole);
+        const rail: THREE.Vector3[] = [];
+        for (const s of st.steps) {
+          const p = s.polygon[0];
+          const b = new THREE.Mesh(new THREE.CylinderGeometry(9 * S, 9 * S, 900 * S, 6), metal);
+          b.position.set(p[0] * S, (s.top_mm + 450) * S, p[1] * S);
+          sg.add(b);
+          rail.push(new THREE.Vector3(p[0] * S, (s.top_mm + 900) * S, p[1] * S));
+        }
+        const last = st.steps[st.steps.length - 1], e = last.polygon[last.polygon.length / 2 - 1];
+        if (e) rail.push(new THREE.Vector3(e[0] * S, (last.top_mm + 900) * S, e[1] * S));
+        if (rail.length > 1) sg.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rail), rail.length * 6, 22 * S, 8, false), metal));
       }
       const n = st.steps?.length ? 0 : Math.max(6, Math.round(H / 185));
       const alongX = b[2] - b[0] > b[3] - b[1];
@@ -730,6 +792,7 @@ export function Plan3D(p: Plan3DProps) {
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.bias = -0.0005;
+    sun.shadow.normalBias = 0.02; // no speckled self-shadow on the walls as you turn around
     scene.add(sun, sun.target);
     const ground = new THREE.Mesh(new THREE.CircleGeometry(120, 48), new THREE.MeshStandardMaterial({ color: "#1d1f1b", roughness: 1 }));
     ground.name = "ground";
