@@ -53,7 +53,9 @@ export interface Fixture {
 export interface Stair {
   id: string; polygon: Pt[]; room_id: string | null; outline: Pt[][];
   /** each tread and landing with the height of its top above the floor, when the stair's shape is known */
-  steps?: { polygon: Pt[]; top_mm: number }[];
+  steps?: { polygon: Pt[]; top_mm: number; /** a spiral's treads are slabs: the underside, when not on the floor */ bottom_mm?: number }[];
+  /** a spiral stair's centre pole */
+  pole?: { at: Pt; r: number };
 }
 export interface Floor {
   id: string; name: string; level: number; elevation_mm: number; height_mm: number; footprint: Pt[][];

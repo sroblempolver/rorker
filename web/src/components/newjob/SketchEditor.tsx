@@ -22,7 +22,7 @@ import { StandardsPanel } from "./StandardsPanel";
 import { CabinetEdit, CabinetPanel } from "./CabinetPanel";
 import { DEFAULT_PICK, addHood, cabinetClick, faceOf, fitOnFace, fixtureAt, placeOnFace, slideCabinet, type CabPick, type FitAsk } from "@/lib/plan/cabinetLayout";
 import { plumbingPoints } from "@/lib/plan/plumbing";
-import { cabCode, defaults } from "@/lib/plan/cabinets";
+import { cabCode, defaults, famOf, handlesLow, hasDoors, toeOf } from "@/lib/plan/cabinets";
 import { Live3D, type Walls } from "./Live3D";
 import { RoofPanel } from "./RoofPanel";
 import { std, useStandards } from "@/lib/plan/standards";
@@ -47,6 +47,7 @@ import { HomesPanel } from "./HomesPanel";
 import { TradePanel } from "./TradePanel";
 import { checksFirst, toolOrder, tradeOf } from "@/lib/plan/trades";
 import { pieceOf, placePiece, saveToLibrary } from "@/lib/plan/library";
+import { boxOf, boxPicks, describePicks, groupBox, membersOf, moveGroup, removePicks, samePick, type Members } from "@/lib/plan/groupSelect";
 
 /** A picture of the drawing to trace over. `mmPerPx` when its scale is known (an AutoCAD drawing). */
 export interface Picture { name: string; url: string; mmPerPx?: number }
@@ -76,17 +77,18 @@ const ANGLE_OF: Record<Side, number> = { east: 0, south: 90, west: 180, north: -
 function roomOfThing(f: SketchFloor, x: { room?: string; center: Pt }) {
   return (x.room ?? f.rooms.find((r) => pointInPoly(x.center, r.polygon))?.name ?? "").toLowerCase() || null;
 }
-type Tool = "select" | "room" | "pen" | "corners" | "split" | "door" | "window" | "balcony" | "thing" | "cabinet" | "eyedrop" | "remove" | "scale" | "match" | "picture" | "stairs";
-const TOOLS: { id: Tool; label: string; key: string; help: string; menu?: boolean; picture?: boolean; more?: boolean }[] = [
-  { id: "select", label: "Select", key: "v", help: "Click a room, wall, door, window or piece of furniture to change it. Drag a room to move it with everything in it, a corner to reshape it, or an arrow on a wall to push or pull that wall (the room next door and the furniture against it follow). Right-click a room's wall to separate its walls into pieces. Q turns the picked room or thing a quarter turn (Shift+Q the other way). Click a wall of the picked room to see it from the side. Arrow keys nudge. Drag empty space to look around, scroll to zoom." },
+type Tool = "select" | "room" | "pen" | "corners" | "split" | "door" | "window" | "balcony" | "thing" | "cabinet" | "handles" | "eyedrop" | "remove" | "scale" | "match" | "picture" | "stairs";
+const TOOLS: { id: Tool; label: string; key: string; help: string; menu?: boolean; picture?: boolean; more?: boolean; kitchen?: boolean }[] = [
+  { id: "select", label: "Select", key: "v", help: "Click a room, wall, door, window or piece of furniture to change it. Drag a box from empty space (or across a room's floor) to pick several things at once, like on a computer's desktop: it picks the furniture and stairs it touches and the rooms and walls wholly inside it. Then drag any of them to move them all together; Ctrl-click adds or takes one off. Drag a picked room to move it with everything in it, a corner to reshape it, or an arrow on a wall to push or pull that wall (the room next door and the furniture against it follow). Right-click a room's wall to separate its walls into pieces. Q turns the picked room or thing a quarter turn (Shift+Q the other way). Click a wall of the picked room to see it from the side. Arrow keys nudge. To look around, drag with Space held (or Shift, or the middle button); scroll to zoom." },
   { id: "pen", label: "Walls", key: "e", help: "Draw walls with the mouse or your finger. Every line is a wall; draw all the way round and it's a room. Wobbly lines come out straight and nearly square corners come out square; a wall drawn on a slant keeps its slant. Wall ends snap onto other walls, and walls that close a loop make a room. Then type the exact sizes." },
-  { id: "stairs", label: "Stairs", key: "t", help: "Click where the stairs start and drag the way they go up. The steps come from the floor height and your standards; pick the stairs to make them an L or a U, wider, or turn them. The floor above gets the opening." },
+  { id: "stairs", label: "Stairs", key: "t", help: "Click where the stairs start and drag the way they go up. The steps come from the floor height and your standards; pick the stairs to make them an L, a U, curved or a spiral, wider, or turn them. The floor above gets the opening." },
   { id: "split", label: "Split room", key: "s", more: true, help: "Drag a line across a room to cut it in two (for two rooms read as one)." },
   { id: "door", label: "Door", key: "d", menu: true, help: "Click a wall between two rooms to put a door in it, or an outside wall for an outside door. A wall standing on its own takes one too." },
   { id: "window", label: "Window", key: "w", menu: true, help: "Click an outside wall of a room to add a window there, or a wall standing on its own. Click again for another." },
   { id: "balcony", label: "Balcony", key: "b", menu: true, help: "Click an outside wall of a room. Upstairs that adds a balcony with a patio door onto it; on the ground floor, a patio door out to the garden." },
   { id: "thing", label: "Furniture", key: "f", help: "Cabinets, sinks, toilets, beds, appliances. Pick one in the tray under the plan, then click where it goes. Near a wall it backs onto the wall and faces the room. Shift-click to keep placing the same thing." },
-  { id: "cabinet", label: "Cabinets", key: "j", help: "Fill a kitchen wall with stock cabinets in one click, and the cabinet list. Single cabinets are in Furniture, Kitchen and Bath." },
+  { id: "handles", label: "Handles", key: "h", kitchen: true, help: "Click a cabinet to move its door handles to the lower or the higher part of the door. Or set every cabinet on this floor at once." },
+  { id: "cabinet", label: "Cabinets", key: "j", kitchen: true, help: "Fill a kitchen wall with stock cabinets in one click, and the cabinet list. Single cabinets are in Furniture, Kitchen and Bath." },
   { id: "corners", label: "Corners", key: "c", more: true, help: "Click each corner of the room in turn. Walls turn in steady steps and lock onto other rooms' corners and walls. Type a length (like 12'6) and press Enter to make the wall that long. Click the first corner or double-click to make the room; Enter or Esc leaves the walls drawn so far as walls. Backspace takes back a corner." },
   { id: "eyedrop", label: "Copy", key: "i", more: true, help: "Click a piece of furniture to pick up another one just like it, same size, then click where it goes. Or click a room to copy its kind (kitchen, bedroom), or a wall to copy its thickness and height, then click the rooms or walls that should be the same." },
   { id: "remove", label: "Remove", key: "x", more: true, help: "Click a room, wall, door, window or piece of furniture to take it out. Undo brings it back." },
@@ -116,7 +118,12 @@ type Drag =
   | { k: "stair"; a: Pt; b: Pt }
   | { k: "stairMove"; i: number; from: Pt; orig: Pt; moved: boolean }
   // a wall piece: one end (0 a, 1 b), or the whole wall when `end` is null
-  | { k: "piece"; i: number; end: 0 | 1 | null; from: Pt; of: SketchFloor; moved: boolean; alone: boolean };
+  | { k: "piece"; i: number; end: 0 | 1 | null; from: Pt; of: SketchFloor; moved: boolean; alone: boolean }
+  // a box dragged out from empty space (or from a room's floor) picks everything it catches; `room` is the
+  // room it started in (a plain click there picks the room), `add` keeps what was picked already (Ctrl)
+  | { k: "box"; a: Pt; b: Pt; add: boolean; room: number; moved: boolean }
+  // several picked things moved together; `hit` is the one grabbed (a plain click picks just that one)
+  | { k: "group"; from: Pt; of: SketchFloor; m: Members; moved: boolean; hit: NonNullable<Sel> };
 interface View { x: number; y: number; w: number }
 
 const r10 = (v: number) => Math.round(v / 10) * 10;
@@ -141,6 +148,10 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   const [doorKind, setDoorKind] = useState<NonNullable<SketchDoor["kind"]>>("door");
   const [wallAdd, setWallAdd] = useState<"balcony" | null>(null);
   const [sel, setSel] = useState<Sel>(null);
+  // several things picked at once (a box dragged out, or Ctrl-click); `sel` is empty while there are
+  const [group, setGroup] = useState<NonNullable<Sel>[]>([]);
+  // Space held down: dragging looks around instead of picking
+  const space = useRef(false);
   const [thing, setThing] = useState<TrayItem>({ kind: "kitchen_sink" });
   /** a cabinet that didn't fit where it was put: the smaller ones on offer, applied when picked */
   const [ask, setAsk] = useState<FitAsk | null>(null);
@@ -175,6 +186,10 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
   const [showBuild, setShowBuild] = useState(() => !!onBuild && !Object.keys(build ?? {}).length);
   // picking something or another tool brings the drawing help back
   useEffect(() => { if (sel) setShowBuild(false); }, [sel]);
+  // one thing picked, or another floor: the group goes
+  useEffect(() => { if (sel) setGroup([]); }, [sel]);
+  useEffect(() => { if (group.length) setShowBuild(false); }, [group]);
+  useEffect(() => { setGroup([]); }, [fi]);
   const firstTool = useRef(tool);
   useEffect(() => { if (tool !== firstTool.current) { firstTool.current = tool; setShowBuild(false); } }, [tool]);
   const [activeNudge, setActiveNudge] = useState<string | null>(null);
@@ -281,8 +296,8 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     const next = { ...sk, floors: sk.floors.map((x, i) => (i === fi ? f : x)) };
     if (keepHistory) commit(next); else setSk(next);
   };
-  const undo = () => { if (sg.locked) return; const p = past.current.pop(); if (p) { future.current.push(sk); setSk(p); setSel(null); } };
-  const redo = () => { if (sg.locked) return; const n = future.current.pop(); if (n) { past.current.push(sk); setSk(n); setSel(null); } };
+  const undo = () => { if (sg.locked) return; const p = past.current.pop(); if (p) { future.current.push(sk); setSk(p); setSel(null); setGroup([]); } };
+  const redo = () => { if (sg.locked) return; const n = future.current.pop(); if (n) { past.current.push(sk); setSk(n); setSel(null); setGroup([]); } };
 
   // kept in this browser as you go, so a crash or a closed tab doesn't lose the drawing
   const [savedAt, setSavedAt] = useState<Date | null>(null);
@@ -489,7 +504,25 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     setSel(null);
   };
   const deleteSel = () => { if (sel) removeIt(sel); };
-  const pickTool = (t: Tool) => { setTool(t); setClicks([]); setCorners([]); setTyped(""); setPickedType(null); setPickedWall(null); if (t === "remove" || t === "eyedrop" || t === "corners") setSel(null); };
+  // the group: what is still there of it, everything in it taken out, or moved by d
+  const picked = group.filter((g) => (g.t === "room" ? floor.rooms : g.t === "wall" ? floor.walls : g.t === "thing" ? floor.fixtures : g.t === "stair" ? floor.stairs : g.t === "door" ? floor.doors : floor.windows)?.[g.i]);
+  const deleteGroup = () => {
+    const f = removePicks(floor, picked);
+    if (picked.some((g) => g.t === "wall" || (g.t === "room" && floor.rooms[g.i].loose))) setWalls(f.walls ?? [], true, f); else setFloor(f);
+    setGroup([]); setWall(null);
+  };
+  const shiftGroup = (of: SketchFloor, m: Members, d: Pt, keepHistory: boolean) => {
+    const f = moveGroup(of, m, d);
+    if (m.walls.size) setWalls(f.walls ?? [], keepHistory, f); else setFloor(f, keepHistory);
+  };
+  /** whether p lands on something in the group (a picked room anywhere on its floor) */
+  const groupHit = (p: Pt): NonNullable<Sel> | null => {
+    const h = hitAt(p);
+    if (h && picked.some((g) => samePick(g, h))) return h;
+    const ri = floor.rooms.map((r, i) => ({ r, i })).filter(({ r, i }) => pointInPoly(p, r.polygon) && picked.some((g) => g.t === "room" && g.i === i)).map(({ i }) => i)[0];
+    return ri != null ? { t: "room", i: ri } : null;
+  };
+  const pickTool = (t: Tool) => { if (t !== "select") setGroup([]); setTool(t); setClicks([]); setCorners([]); setTyped(""); setPickedType(null); setPickedWall(null); if (t === "remove" || t === "eyedrop" || t === "corners") setSel(null); };
   // what a click at p lands on: furniture first, then doors, windows, the room
   const hitAt = (p: Pt): Sel => {
     const ti = thingAt(p);
@@ -571,10 +604,17 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           return;
         }
       }
+      if ((e.key === "Delete" || e.key === "Backspace") && picked.length) { e.preventDefault(); deleteGroup(); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); return; }
       if (e.key.toLowerCase() === "q" && (sel?.t === "room" || sel?.t === "thing")) { e.preventDefault(); turn(!e.shiftKey); return; }
       // arrows nudge the picked room or thing: 100 mm, 10 mm with Shift
       const dir: Record<string, Pt> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+      if (dir[e.key] && picked.length) {
+        e.preventDefault();
+        const st = e.shiftKey ? INCH / 2 : 6 * INCH;
+        shiftGroup(floor, membersOf(floor, picked), [dir[e.key][0] * st, dir[e.key][1] * st], true);
+        return;
+      }
       if (dir[e.key] && (sel?.t === "room" || sel?.t === "thing" || sel?.t === "wall")) {
         e.preventDefault();
         const st = e.shiftKey ? INCH / 2 : 6 * INCH, [dx, dy] = [dir[e.key][0] * st, dir[e.key][1] * st];
@@ -589,6 +629,13 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   });
+  // Space held: dragging looks around
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => { if (e.code === "Space" && !(e.target instanceof Element && editable(e.target))) { if (!space.current && svg.current?.matches(":hover")) e.preventDefault(); space.current = e.type === "keydown"; } };
+    const off = () => { space.current = false; };
+    window.addEventListener("keydown", on); window.addEventListener("keyup", on); window.addEventListener("blur", off);
+    return () => { window.removeEventListener("keydown", on); window.removeEventListener("keyup", on); window.removeEventListener("blur", off); };
+  }, []);
   // a saved room from the library, put down where it was dragged to
   const dropPiece = () => {
     const at = lib.placing?.at;
@@ -601,7 +648,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     lib.stop();
     setTool("select");
   };
-  useEscape(() => { if (lib.placing) lib.stop(); else if (drag) setDrag(null); else if (typed) setTyped(""); else if (corners.length) finishChain(); else if (pickedType) setPickedType(null); else if (pickedWall) setPickedWall(null); else if (clicks.length) setClicks([]); else if (sel) setSel(null); else if (wall) setWall(null); else setTool("select"); });
+  useEscape(() => { if (lib.placing) lib.stop(); else if (drag) setDrag(null); else if (typed) setTyped(""); else if (corners.length) finishChain(); else if (pickedType) setPickedType(null); else if (pickedWall) setPickedWall(null); else if (clicks.length) setClicks([]); else if (group.length) setGroup([]); else if (sel) setSel(null); else if (wall) setWall(null); else setTool("select"); });
 
   const down = (e: RPointerEvent<SVGSVGElement>) => {
     if (e.button === 2) return;
@@ -611,8 +658,27 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     if (lib.placing) { dropPiece(); return; }
     // the client's version is only looked at, not changed
     if (sg.locked) { setSel(null); setDrag({ k: "pan", c: [e.clientX, e.clientY], v }); return; }
-    if (e.button === 1 || e.shiftKey && tool !== "room" && tool !== "thing" && tool !== "corners") { setDrag({ k: "pan", c: [e.clientX, e.clientY], v }); return; }
+    if (e.button === 1 || space.current || e.shiftKey && tool !== "room" && tool !== "thing" && tool !== "corners") { setDrag({ k: "pan", c: [e.clientX, e.clientY], v }); return; }
     if (tool === "select") {
+      // a finger still looks around from empty space and drags a room in one go; the box is for the mouse
+      const mouse = e.pointerType === "mouse";
+      // Ctrl (Cmd on a Mac): add the thing clicked to the picked ones, or take it off; or add a box's worth
+      if (mouse && (e.ctrlKey || e.metaKey)) {
+        const h = hitAt(p), cur = [...picked, ...(sel ? [sel] : [])];
+        if (h && h.t !== "door" && h.t !== "window") {
+          const next = cur.some((g) => samePick(g, h)) ? cur.filter((g) => !samePick(g, h)) : [...cur, h];
+          if (next.length === 1) setSel(next[0]); else { setSel(null); setGroup(next); }
+          return;
+        }
+        setDrag({ k: "box", a: p, b: p, add: true, room: -1, moved: false });
+        return;
+      }
+      // several picked: grab any of them to move them all
+      if (picked.length) {
+        const h = groupHit(p);
+        if (h) { setDrag({ k: "group", from: p, of: floor, m: membersOf(floor, picked), moved: false, hit: h }); return; }
+        setGroup([]);
+      }
       // the picked wall piece: an end to stretch it, or the wall to move it
       const pw = sel?.t === "wall" ? floor.walls?.[sel.i] : null;
       if (pw && sel) {
@@ -640,7 +706,9 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       const pi = pieceAt(p);
       if (pi >= 0) { setSel({ t: "wall", i: pi }); setWall(null); setDrag({ k: "piece", i: pi, end: null, from: p, of: floor, moved: false, alone: e.altKey }); return; }
       const ri = roomAt(p);
-      if (ri >= 0) { setSel({ t: "room", i: ri }); setDrag({ k: "move", i: ri, from: p, orig: floor.rooms[ri].polygon, of: floor, moved: false }); return; }
+      // the picked room moves; any other room's floor starts a box (a plain click there picks the room)
+      if (ri >= 0 && (!mouse || (sel?.t === "room" && sel.i === ri))) { setSel({ t: "room", i: ri }); setDrag({ k: "move", i: ri, from: p, orig: floor.rooms[ri].polygon, of: floor, moved: false }); return; }
+      if (mouse) { setDrag({ k: "box", a: p, b: p, add: false, room: ri, moved: false }); return; }
       setSel(null);
       setDrag({ k: "pan", c: [e.clientX, e.clientY], v });
     } else if (tool === "room") {
@@ -668,6 +736,23 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     } else if (drag.k === "newRoom") setDrag({ ...drag, b: snapPt(p) });
     else if (drag.k === "pen") { if (dist(p, drag.pts[drag.pts.length - 1]) > 3 * px) setDrag({ k: "pen", pts: [...drag.pts, p] }); }
     else if (drag.k === "split") setDrag({ ...drag, b: p });
+    else if (drag.k === "box") setDrag({ ...drag, b: p, moved: drag.moved || dist(p, drag.a) > 4 * px });
+    else if (drag.k === "group") {
+      const raw: Pt = [p[0] - drag.from[0], p[1] - drag.from[1]];
+      if (!drag.moved && Math.hypot(raw[0], raw[1]) < 4 * px) return;
+      if (!drag.moved) { past.current.push(sk); setDrag({ ...drag, moved: true }); }
+      // the group's corner nearest the pointer snaps onto the walls of what isn't moving, else the 10 mm grid
+      const b = groupBox(drag.of, drag.m);
+      let d = raw;
+      if (b) {
+        const xs: number[] = [], ys: number[] = [];
+        drag.of.rooms.forEach((r, i) => { if (!drag.m.rooms.has(i)) for (const q of r.polygon) { xs.push(q[0]); ys.push(q[1]); } });
+        (drag.of.walls ?? []).forEach((w, i) => { if (!drag.m.walls.has(i)) for (const q of [w.a, w.b]) { xs.push(q[0]); ys.push(q[1]); } });
+        const rx = Math.abs(p[0] - b[0]) < Math.abs(p[0] - b[2]) ? b[0] : b[2], ry = Math.abs(p[1] - b[1]) < Math.abs(p[1] - b[3]) ? b[1] : b[3];
+        d = [snapTo(rx + raw[0], xs, 12 * px, 10) - rx, snapTo(ry + raw[1], ys, 12 * px, 10) - ry];
+      }
+      shiftGroup(drag.of, drag.m, [Math.round(d[0]), Math.round(d[1])], false);
+    }
     else if (drag.k === "move") {
       const raw: Pt = [p[0] - drag.from[0], p[1] - drag.from[1]];
       if (!drag.moved && Math.hypot(raw[0], raw[1]) < 4 * px) return;
@@ -788,6 +873,28 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     const d = drag;
     setDrag(null);
     const p = toMm(e);
+    if (d?.k === "box") {
+      const cur = d.add ? [...picked, ...(sel ? [sel] : [])] : [];
+      if (!d.moved) {
+        // a plain click: the room it was on, or nothing
+        if (d.add) return;
+        setGroup([]);
+        setSel(d.room >= 0 ? { t: "room", i: d.room } : null);
+        if (d.room < 0) setWall(null);
+        return;
+      }
+      const got = boxPicks(floor, boxOf(d.a, d.b), stairGs.map((g) => g.footprint));
+      const all = [...cur, ...got.filter((g) => !cur.some((c) => samePick(c, g)))];
+      if (all.length === 1) { setGroup([]); setSel(all[0]); }
+      else { setSel(null); setGroup(all); if (all.length) setWall(null); }
+      if (!got.length && !d.add) setNote("Nothing wholly inside that box. It picks the furniture it touches, and rooms and walls when they're all inside it.");
+      return;
+    }
+    if (d?.k === "group") {
+      // a plain click on one of the group picks just that one
+      if (!d.moved && !(e.ctrlKey || e.metaKey)) { setGroup([]); setSel(d.hit); }
+      return;
+    }
     if (d?.k === "newRoom") {
       const [x0, x1] = [Math.min(d.a[0], d.b[0]), Math.max(d.a[0], d.b[0])], [y0, y1] = [Math.min(d.a[1], d.b[1]), Math.max(d.a[1], d.b[1])];
       if (x1 - x0 < 400 || y1 - y0 < 400) { setNote("Drag out a bigger box to make a room."); return; }
@@ -913,6 +1020,14 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
     } else if (tool === "thing") {
       // Shift-click keeps placing the same thing; a plain click puts it down and picks it to adjust
       if (placeThing(p) && !e.shiftKey) setTool("select");
+    } else if (tool === "handles") {
+      // a click on a cabinet moves its door handles to the other end of the door
+      const ti = thingAt(p), f = ti >= 0 ? floor.fixtures![ti] : null;
+      if (!f?.cab || !hasDoors(f.cab, f.width_mm ?? 600, (f.height_mm ?? defaults(f.cab.fam).h) - toeOf(f.cab))) { setNote("Click a cabinet with doors."); return; }
+      const next = handlesLow(f.cab) ? "high" : "low";
+      setFloor({ ...floor, fixtures: floor.fixtures!.map((x, i) => (i === ti ? { ...x, cab: { ...x.cab!, handles: next } } : x)) });
+      setSel({ t: "thing", i: ti });
+      setNote(`Handles on the ${next === "low" ? "lower" : "higher"} part now. Click it again to move them back.`);
     } else if (tool === "cabinet") {
       // a click on a cabinet picks it; anywhere else puts one in
       const ti = thingAt(p);
@@ -981,9 +1096,18 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
       )}
       {sg.banner}
       <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b border-line bg-panel">
-        {toolOrder(trade, TOOLS).filter((t) => !t.menu && !t.more).flatMap((t) => [
+        {toolOrder(trade, TOOLS).filter((t) => !t.menu && !t.more && !t.kitchen).flatMap((t) => [
           <button key={t.id} onClick={() => pickTool(t.id)} title={`${t.label} (${t.key.toUpperCase()})`}
             className={`btn btn-sm ${tool === t.id ? "btn-primary" : "btn-ghost"}`}>{t.label}</button>,
+          // the kitchen's tools in one menu, after Furniture: cabinets and their handles
+          ...(t.id === "thing" ? [
+            <select key="kitchen" aria-label="Kitchen" title="Cabinets and handles"
+              className={`btn btn-sm !pr-2 ${TOOLS.find((x) => x.id === tool)?.kitchen ? "btn-primary" : "btn-ghost"}`}
+              value={TOOLS.find((x) => x.id === tool)?.kitchen ? tool : ""} onChange={(e) => pickTool(e.target.value as Tool)}>
+              <option value="" disabled>Kitchen</option>
+              {TOOLS.filter((x) => x.kitchen).sort((a, b) => (a.id === "cabinet" ? -1 : b.id === "cabinet" ? 1 : 0)).map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+            </select>,
+          ] : []),
           // doors, windows and balconies in one menu, after Split room
           ...(t.id === "pen" ? [
             <select key="openings" aria-label="Doors and windows" title="Pick one, then click a wall"
@@ -1043,7 +1167,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
         <div className={show3d ? "grid xl:grid-cols-2" : ""}>
         <div className={`relative ${seen ? "h-[42vh] min-h-[300px]" : tool === "thing" ? "h-[48vh] min-h-[340px]" : "h-[62vh] min-h-[420px]"} bg-ink`}>
           <svg ref={svg} className="absolute inset-0 w-full h-full touch-none select-none" viewBox={`${v.x} ${v.y} ${v.w} ${vh}`}
-            style={{ cursor: drag?.k === "pan" ? "grabbing" : tool === "select" ? "default" : tool === "picture" ? "move" : "crosshair" }}
+            style={{ cursor: drag?.k === "pan" ? "grabbing" : drag?.k === "group" ? "move" : tool === "select" ? "default" : tool === "picture" ? "move" : "crosshair" }}
             onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrag(null)} onPointerLeave={() => setHover(null)}
             onDragOver={(e) => { if (e.dataTransfer.types.includes(TRAY_DRAG)) { e.preventDefault(); setHover(toMm(e)); } }}
             onDrop={(e) => { if (!e.dataTransfer.types.includes(TRAY_DRAG)) return; e.preventDefault(); placeThing(toMm(e)); }}
@@ -1097,7 +1221,13 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
                 <path d={`M0 ${-4 * px} C ${2.6 * px} ${-0.6 * px} ${3 * px} ${1 * px} ${3 * px} ${1.6 * px} A ${3 * px} ${3 * px} 0 0 1 ${-3 * px} ${1.6 * px} C ${-3 * px} ${1 * px} ${-2.6 * px} ${-0.6 * px} 0 ${-4 * px} Z`} fill="#fff" />
               </g>
             ))}
-            {doorSpots.map((s, i) => s && <line key={`d${i}`} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "door" && sel.i === i ? "#fff" : "#ff6a1f"} strokeWidth={7 * px} strokeLinecap="butt" />)}
+            {/* doors: a dark gap right through the wall, with an orange line down the middle (white when picked) */}
+            {doorSpots.map((s, i) => s && (
+              <g key={`d${i}`} style={{ pointerEvents: "none" }}>
+                <line x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke="#1a1612" strokeWidth={Math.max(std("wall.exterior") + 40, 12 * px)} strokeLinecap="butt" />
+                <line x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "door" && sel.i === i ? "#fff" : "#ff6a1f"} strokeWidth={3 * px} strokeLinecap="butt" />
+              </g>
+            ))}
             {winSpots.map((list, i) => list.map((s, k) => <line key={`w${i}-${k}`} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={sel?.t === "window" && sel.i === i ? "#fff" : "#8fd3f0"} strokeWidth={6 * px} />))}
             {room && !room.loose && room.polygon.map((q, k) => <rect key={k} x={q[0] - 5 * px} y={q[1] - 5 * px} width={10 * px} height={10 * px} fill="#ff6a1f" stroke="#fff" strokeWidth={px} />)}
             {/* push and pull: an arrow out of the room on each straight wall */}
@@ -1123,6 +1253,23 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
                   <text x={c[0]} y={c[1] - f * 1.5} fontSize={f * 0.75} fill="#efe8da">{by}</text>
                 </g>
               );
+            })()}
+            {/* the group: everything picked at once, lit up */}
+            {picked.length > 0 && (
+              <g style={{ pointerEvents: "none" }}>
+                {picked.map((g) => {
+                  const k = `${g.t}${g.i}`;
+                  if (g.t === "room") return <polygon key={k} points={floor.rooms[g.i].polygon.map((q) => q.join(",")).join(" ")} fill="#ff6a1f" fillOpacity={0.12} stroke="#ff6a1f" strokeWidth={3 * px} />;
+                  if (g.t === "wall") { const w = floor.walls![g.i]; return <line key={k} x1={w.a[0]} y1={w.a[1]} x2={w.b[0]} y2={w.b[1]} stroke="#ff6a1f" strokeWidth={Math.max(wallThickness(w), 6 * px)} strokeOpacity={0.55} />; }
+                  if (g.t === "thing") { const f = floor.fixtures![g.i], [hw, hd] = halfSize(f); return <rect key={k} x={f.center[0] - hw} y={f.center[1] - hd} width={2 * hw} height={2 * hd} fill="#ff6a1f" fillOpacity={0.22} stroke="#ff6a1f" strokeWidth={3 * px} />; }
+                  if (g.t === "stair" && stairGs[g.i]) return <polygon key={k} points={stairGs[g.i].footprint.map((q) => q.join(",")).join(" ")} fill="#ff6a1f" fillOpacity={0.18} stroke="#ff6a1f" strokeWidth={3 * px} />;
+                  return null;
+                })}
+              </g>
+            )}
+            {drag?.k === "box" && drag.moved && (() => {
+              const [x0, y0, x1, y1] = boxOf(drag.a, drag.b);
+              return <rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill="#55b2ff" fillOpacity={0.12} stroke="#55b2ff" strokeWidth={1.5 * px} strokeDasharray={`${5 * px} ${3 * px}`} style={{ pointerEvents: "none" }} />;
             })()}
             {drag?.k === "pen" && <polyline points={drag.pts.map((q) => q.join(",")).join(" ")} fill="none" stroke="#ff6a1f" strokeWidth={2.5 * px} strokeLinejoin="round" strokeLinecap="round" />}
             {drag?.k === "newRoom" && <rect x={Math.min(drag.a[0], drag.b[0])} y={Math.min(drag.a[1], drag.b[1])} width={Math.abs(drag.b[0] - drag.a[0])} height={Math.abs(drag.b[1] - drag.a[1])} fill="#ff6a1f" fillOpacity={0.2} stroke="#ff6a1f" strokeWidth={2 * px} />}
@@ -1236,6 +1383,16 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             </div>
           )}
 
+          {tool === "handles" && !fix && (floor.fixtures ?? []).some((f) => f.cab) && (
+            <div className="space-y-1.5">
+              <p className="eyebrow">Handles on every cabinet on this floor</p>
+              <div className="flex flex-wrap gap-1.5">
+                {([["low", "low", "All on the lower part"], ["high", "high", "All on the higher part"], ["high", "low", "Base high, wall low"]] as const).map(([base, wall, label]) => (
+                  <button key={label} className="btn btn-sm" onClick={() => { setFloor({ ...floor, fixtures: floor.fixtures!.map((f) => (f.cab ? { ...f, cab: { ...f.cab, handles: famOf(f.cab.fam).zone === "wall" ? wall : base } } : f)) }); setNote("Done. Click a cabinet to change just that one."); }}>{label}</button>
+                ))}
+              </div>
+            </div>
+          )}
           {tool === "cabinet" && !fix && <CabinetPanel pick={cabPick} onPick={setCabPick} floor={floor} units={lu} onCatalog={(at) => { openTrayAt(at); setTool("thing"); }} />}
           {tool === "thing" && (
             <p><span className="text-muted">Placing </span><span className="text-accent">{thing.label ?? CATALOG[thing.kind]?.label ?? thing.kind}</span>
@@ -1255,6 +1412,17 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
           )}
           {tool === "match" && <p className="text-[13px]">{["Click a corner on the picture.", "Now click the room corner it belongs on.", "Click a second corner on the picture, far from the first.", "And the room corner for that one."][clicks.length]}</p>}
 
+          {picked.length > 0 && (
+            <div className="space-y-2">
+              <p className="eyebrow">{picked.length} picked</p>
+              <p>{describePicks(picked)}</p>
+              <p className="text-muted leading-snug">Drag any of them to move them all together, or nudge with the arrow keys. Ctrl-click adds or takes one off. Furniture in a picked room and against a picked wall comes along.</p>
+              <div className="flex gap-2">
+                <button className="btn btn-sm btn-ghost" onClick={() => setGroup([])}>Clear</button>
+                <button className="btn btn-sm btn-ghost text-red" onClick={deleteGroup}>Delete all {picked.length}</button>
+              </div>
+            </div>
+          )}
           {room && sel && (
             <div className="space-y-2">
               <p className="eyebrow">Room</p>
@@ -1362,7 +1530,7 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
             </div>
           )}
 
-          {!sel && (
+          {!sel && !picked.length && (
             <div className="space-y-2 pt-1 border-t border-line">
               <p className="eyebrow pt-2">This floor</p>
               <input className="input !h-9" value={floor.name ?? ""} aria-label="Floor name" onFocus={() => past.current.push(sk)} onChange={(e) => setFloor({ ...floor, name: e.target.value }, false)} />
@@ -1385,17 +1553,17 @@ export function SketchEditor({ initial, pictures, initialBackdrops, onDone, onCa
               })()}
             </div>
           )}
-          {!sel && (
+          {!sel && !picked.length && (
             <div className="pt-3 border-t border-line">
               <RoofPanel sketch={sk} units={lu} onChange={(s, h) => (h === false ? setSk(s) : commit(s))} />
             </div>
           )}
-          {!sel && sg.as === "contractor" && !sg.locked && <>
+          {!sel && !picked.length && sg.as === "contractor" && !sg.locked && <>
             {trade !== "property" && <HomesPanel sk={sk} fi={fi} units={lu} lit={homeLit} onLight={setHomeLit} onChange={commit} onNote={setNote} onFloor={(i) => { setFi(i); setWall(null); }} />}
             <LibraryPanel sk={sk} floor={floor} units={lu} placingId={lib.placing?.item.id ?? null} onPlace={(it) => { setSel(null); setTool("select"); lib.start(it); }}
               onStart={(s, name) => { commit(flatten(s)); setFi(0); setSel(null); setView(null); setNote(`Started from ${name}. Undo takes you back.`); }} />
           </>}
-          {bg && !sel && (
+          {bg && !sel && !picked.length && (
             <div className="space-y-2 pt-1 border-t border-line">
               <p className="eyebrow pt-2">Picture underneath</p>
               {pictures.length > 1 && (

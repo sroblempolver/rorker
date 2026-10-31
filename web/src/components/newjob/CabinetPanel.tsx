@@ -4,7 +4,7 @@
 // and countertop). CabinetEdit is the panel for a picked cabinet: code, family, fronts, hinge, its exact
 // width, height and depth in feet and inches, and trim. Sizes start at the company's standards.
 import type { SketchFixture, SketchFloor } from "@/lib/plan/sketch";
-import { FAMILIES, FRONTS, bottomFor, cabCode, cabinetList, defaultConfig, defaults, famOf, frontsOf, isStock, newSpec, snapWidth, type CabFamily } from "@/lib/plan/cabinets";
+import { FAMILIES, FRONTS, bottomFor, hasDoors, cabCode, cabinetList, defaultConfig, defaults, famOf, frontsOf, isStock, newSpec, snapWidth, type CabFamily } from "@/lib/plan/cabinets";
 import { FILL_KINDS, plainOf, resized, type CabPick } from "@/lib/plan/cabinetLayout";
 import { plumbingFor } from "@/lib/plan/plumbing";
 import { INCH, fmtLen, parseLength, roundLen, type Units } from "@/lib/plan/units";
@@ -115,6 +115,10 @@ export function CabinetEdit({ fx, units, onChange, onDelete }: { fx: SketchFixtu
       {single && (
         <div className="flex items-center gap-1.5"><span className="text-muted">{F.id.includes("blind") ? "Blind side" : "Hinge"}</span>
           {(["L", "R"] as const).map((s) => <button key={s} className={chip((c.hinge ?? "L") === s)} onClick={() => setCab({ hinge: s })}>{s === "L" ? "Left" : "Right"}</button>)}</div>
+      )}
+      {hasDoors(c, w, h) && (
+        <div className="flex items-center gap-1.5"><span className="text-muted">Handles</span>
+          {(["low", "high"] as const).map((s) => <button key={s} className={chip((c.handles ?? "low") === s)} onClick={() => setCab({ handles: s })}>{s === "low" ? "Lower" : "Higher"}</button>)}</div>
       )}
       <div className="grid grid-cols-3 gap-2">
         <Len label="Width" mm={w} units={units} onSet={(v) => v >= 10 && setW(v)} />

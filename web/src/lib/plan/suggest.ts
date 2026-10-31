@@ -176,7 +176,7 @@ export function diffSketches(base: Sketch, mine: Sketch, u: Units = "ft"): Chang
     // stairs, nearest first
     let sn = 0;
     const stairRoom = (st: SketchStair) => A.rooms.find((r) => inPoly(st.at, r.polygon))?.name;
-    const shapeName = (st: SketchStair) => (st.shape === "straight" ? "stairs" : `${st.shape}-shaped stairs`);
+    const shapeName = (st: SketchStair) => (st.shape === "straight" ? "stairs" : st.shape === "curved" || st.shape === "spiral" ? `${st.shape} stairs` : `${st.shape}-shaped stairs`);
     matchUp(B.stairs ?? [], A.stairs ?? [], () => "stair", () => "stair", same, (b, a) => {
       const k = `stair:${lv}:${++sn}`, st = (a ?? b)!, rm = stairRoom(st), where = rm ? ` in ${rm}` : "";
       if (b && a) {
@@ -184,7 +184,7 @@ export function diffSketches(base: Sketch, mine: Sketch, u: Units = "ft"): Chang
         if (Math.hypot(a.at[0] - b.at[0], a.at[1] - b.at[1]) > 5 || a.rotation !== b.rotation) bits.push("moved");
         if (a.shape !== b.shape) bits.push(`now ${shapeName(a)}`);
         if (a.width_mm !== b.width_mm) bits.push(`${a.width_mm ? L(a.width_mm) : "standard"} wide`);
-        if (a.risers !== b.risers || a.tread_mm !== b.tread_mm || a.landing_mm !== b.landing_mm || a.turn !== b.turn || a.split !== b.split) bits.push("new steps");
+        if (a.risers !== b.risers || a.tread_mm !== b.tread_mm || a.landing_mm !== b.landing_mm || a.inner_mm !== b.inner_mm || a.turn !== b.turn || a.split !== b.split) bits.push("new steps");
         push({ kind: "stair", what: "edit", before: b, after: a, ...at, rooms: rm ? [rm] : [], text: `The stairs${where}: ${bits.join(", ") || "changed"}` }, k);
       } else if (a) push({ kind: "stair", what: "add", after: a, ...at, rooms: rm ? [rm] : [], text: `Added ${shapeName(a)}${where}` }, k);
       else if (b) push({ kind: "stair", what: "remove", before: b, ...at, rooms: [], text: "Removed the stairs" }, k);

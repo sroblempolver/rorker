@@ -139,7 +139,17 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
     }
     setStage("review");
   };
-  const pictures = useMemo(() => picturesFrom(prep?.parts ?? []), [prep]);
+  // each floor's picture under it in the drawing tool: the overview the reader says it read that floor
+  // from (a sheet can hold the facade and a section before the plans), in floor order
+  const pictures = useMemo(() => {
+    const all = picturesFrom(prep?.parts ?? []);
+    const frames = (project?.sketch?.floors ?? []).map((f) => (f as { frame?: string }).frame);
+    const noteOf = (name: string) => { const q = prep?.parts.find((x) => x.name === name); return q?.kind === "image" ? q.note ?? "" : ""; };
+    const pick = frames.map((fr) => (fr ? all.find((p) => noteOf(p.name).includes(`(frame ${fr})`)) : undefined));
+    if (!pick.some(Boolean)) return all;
+    const first = pick.map((p, i) => p ?? all[i] ?? all[all.length - 1]);
+    return [...first, ...all.filter((p) => !first.includes(p))];
+  }, [prep, project]);
 
   // copy the list now: the input is cleared right after, which empties it
   const addFiles = (list: FileList | null) => { const got = list ? Array.from(list) : []; if (got.length) setFiles((f) => [...f, ...got].slice(0, 8)); };
@@ -193,6 +203,15 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
                 ))}
               </ul>
             )}
+            <button type="button" onClick={() => void drawMyself()} title="Trace the plan yourself instead of having it read"
+              className="btn w-full !h-auto min-h-[64px] py-3 !px-5 !justify-start !gap-4 text-left border-2 hover:!border-accent !whitespace-normal">
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="w-7 h-7 shrink-0 text-accent" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21h4l11-11-4-4L3 17v4z" /><path d="M13.5 6.5l4 4" /></svg>
+              <span className="flex-1">
+                <span className="block font-display font-bold uppercase tracking-[0.08em] text-[17px] leading-tight">Draw it myself</span>
+                <span className="block font-sans font-normal normal-case tracking-normal text-[13px] text-muted mt-0.5">{files.length ? "Trace the rooms over your drawing instead of having it read." : "Draw the rooms and walls yourself, from scratch or over a drawing."}</span>
+              </span>
+              <span aria-hidden="true" className="text-muted text-[20px]">›</span>
+            </button>
             <div>
               <div className="flex items-center gap-2 mb-1.5">
                 <label htmlFor="about" className="label !mb-0">Tell me about the job</label>
@@ -206,7 +225,6 @@ export function NewProject({ onCreate, onCancel, intakeUrl }: { onCreate: (r: Ne
             {err && <p className="text-[13px] text-red">{err}</p>}
             <div className="flex gap-2">
               <button className="btn btn-primary flex-1" onClick={start}>Start</button>
-              <button className="btn" onClick={() => void drawMyself()} title="Trace the plan yourself instead of having it read">Draw it myself</button>
               <button className="btn btn-ghost" onClick={() => void leave()}>Cancel</button>
             </div>
           </section>

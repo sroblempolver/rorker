@@ -2908,8 +2908,18 @@ defineStandards([
   { key: "stair.treadMin", group: "Stairs", label: "Shallowest tread", value: 10 * IN, unit: "len", help: 'IRC R311.7.5.2: 10" minimum tread depth.' },
   { key: "stair.widthMin", group: "Stairs", label: "Narrowest stairs", value: 36 * IN, unit: "len", help: 'IRC R311.7.1: 36" minimum clear width.' },
   { key: "stair.landing", group: "Stairs", label: "Landing depth, as a share of the stair width", value: 100, unit: "pct", help: "IRC R311.7.6: a landing at least as deep as the stairs are wide." },
+  { key: "stair.curvedInner", group: "Stairs", label: "Inner radius of new curved stairs", value: 60 * IN, unit: "len", help: "The open well a curved stair sweeps round. Bigger is gentler." },
+  { key: "stair.windNarrow", group: "Stairs", label: "Narrowest end of a curved tread", value: 6 * IN, unit: "len", help: 'IRC R311.7.5.2.1: winder and curved treads at least 6" deep at the narrow end.' },
+  { key: "stair.spiralWidth", group: "Stairs", label: "Width of new spiral stairs", value: 26 * IN, unit: "len", help: 'Pole to the outside edge. IRC R311.7.10.1: 26" minimum clear width.' },
+  { key: "stair.spiralRiser", group: "Stairs", label: "Step height new spiral stairs aim for", value: 8.5 * IN, unit: "len", help: "Spirals take taller steps than straight stairs." },
+  { key: "stair.spiralRiserMax", group: "Stairs", label: "Tallest spiral step", value: 9.5 * IN, unit: "len", help: 'IRC R311.7.10.1: 9\xBD" maximum riser height on a spiral.' },
+  { key: "stair.spiralTread", group: "Stairs", label: "Tread depth of new spiral stairs", value: 7.5 * IN, unit: "len", help: 'Measured on the walking line, 12" out from the pole.' },
+  { key: "stair.spiralTreadMin", group: "Stairs", label: "Shallowest spiral tread", value: 6.75 * IN, unit: "len", help: 'IRC R311.7.10.1: 6\xBE" minimum, on the walking line 12" from the narrow end.' },
+  { key: "stair.spiralHeadroom", group: "Stairs", label: "Headroom over spiral stairs", value: 78 * IN, unit: "len", help: `IRC R311.7.10.1: 6' 6" minimum.` },
   { key: "stair.guardDrop", group: "Stairs", label: "Drop that needs a guard", value: 30 * IN, unit: "len", help: 'IRC R312.1.1: a guard on any open side more than 30" above the floor below.' }
 ]);
+var WALKLINE = 12 * IN;
+var POLE = 2.25 * IN;
 
 // src/lib/plan/walls.ts
 defineStandards([
