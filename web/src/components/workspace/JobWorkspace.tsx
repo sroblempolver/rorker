@@ -982,7 +982,7 @@ export function JobWorkspace({ data, api, onAllJobs, onEditPlan }: { data: Works
           <p className="text-[12.5px] text-muted truncate">{[job.address, job.client_name].filter(Boolean).join(" · ") || "No address yet"}</p>
         </div>
         {onEditPlan && (
-          <button onClick={onEditPlan} className="btn btn-sm btn-primary shrink-0" title="Change the walls, doors and windows, stairs, furniture and cabinets">
+          <button onClick={onEditPlan} className="btn btn-sm btn-primary shrink-0" title="Change the walls, doors and windows, stairs, cabinets and everything in the house">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3zM3 12h9M12 3v13M16 12h5" /></svg>
             {plan ? "Edit plan" : "Draw the plan"}
           </button>

@@ -3,6 +3,7 @@
 // so every view and the assistant fall back on these. Sizes are millimetres, width across the front,
 // depth front to back, height from its own bottom; weight in kilograms.
 import { EXTRA } from "./catalog-extra";
+import { HOME } from "./catalog-home";
 
 /** floor: stands on the floor. surface: sits on top of another object (a computer on a desk).
  *  wall: hangs on a wall with its bottom `at` mm up. ceiling: hangs from the ceiling. */
@@ -109,7 +110,7 @@ const BASE: Record<string, ObjectSpec> = {
   car: { label: "Car", w: 1800, d: 4500, h: 1500, kg: 1400, mount: "floor", face: "any", fill: "#55606b" },
 };
 
-export const CATALOG: Record<string, ObjectSpec> = { ...BASE, ...EXTRA };
+export const CATALOG: Record<string, ObjectSpec> = { ...BASE, ...EXTRA, ...HOME };
 
 export const OBJECT_KINDS = [...Object.keys(CATALOG), "other"];
 
